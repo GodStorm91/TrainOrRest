@@ -1,0 +1,48 @@
+name: TrainOrRest
+options:
+  bundleIdPrefix: com.khanhnguyen
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    # Set your paid Apple Developer team in Xcode (Signing & Capabilities)
+    # or export DEVELOPMENT_TEAM before running xcodegen for device installs.
+    DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
+targets:
+  TrainOrRest:
+    type: application
+    platform: iOS
+    sources: [TrainOrRest]
+    entitlements:
+      path: TrainOrRest/TrainOrRest.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.background-delivery: true
+    info:
+      path: TrainOrRest/Info.plist
+      properties:
+        NSHealthShareUsageDescription: >-
+          TrainOrRest reads your Garmin workouts and wellness data from Apple
+          Health to build and adapt your training plan.
+        UILaunchScreen: {}
+        ITSAppUsesNonExemptEncryption: false
+  TrainOrRestTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [TrainOrRestTests]
+    dependencies:
+      - target: TrainOrRest
+schemes:
+  TrainOrRest:
+    build:
+      targets:
+        TrainOrRest: all
+        TrainOrRestTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets: [TrainOrRestTests]
