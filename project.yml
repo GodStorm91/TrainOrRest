@@ -29,10 +29,16 @@ targets:
           Health to build and adapt your training plan.
         UILaunchScreen: {}
         ITSAppUsesNonExemptEncryption: false
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.khanhnguyen.TrainOrRest.refresh
   TrainOrRestTests:
     type: bundle.unit-test
     platform: iOS
     sources: [TrainOrRestTests]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - target: TrainOrRest
 schemes:

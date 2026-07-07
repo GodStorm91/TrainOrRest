@@ -16,6 +16,9 @@ final class SyncEngine: ObservableObject {
 
     @Published private(set) var isSyncing = false
     @Published private(set) var lastError: String?
+    /// Set from the scene phase; suppresses the morning notification while
+    /// the user is looking at the app.
+    var isForeground = false
 
     /// Shared with views for authorization calls — Apple recommends a single
     /// HKHealthStore per app.
@@ -60,6 +63,23 @@ final class SyncEngine: ObservableObject {
             try await syncWorkouts()
             try await syncWellness()
             try modelContext.save()
+            // Matching and readiness failures must not read as sync failures —
+            // the synced data is already saved at this point.
+            do {
+                try PlanStore.autoMatch(in: modelContext, calendar: calendar)
+            } catch {
+                logger.error("Workout auto-match failed: \(error, privacy: .public)")
+            }
+            do {
+                let readiness = try ReadinessStore.runDailyPipeline(
+                    in: modelContext, today: .now, calendar: calendar
+                )
+                if let readiness, !isForeground {
+                    await VerdictNotifier.notifyIfNeeded(for: readiness, in: modelContext)
+                }
+            } catch {
+                logger.error("Readiness pipeline failed: \(error, privacy: .public)")
+            }
             logger.info("Sync completed at \(Date.now, privacy: .public)")
         } catch {
             lastError = error.localizedDescription

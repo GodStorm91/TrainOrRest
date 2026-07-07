@@ -3,13 +3,21 @@ import SwiftUI
 
 struct DashboardView: View {
     @EnvironmentObject private var engine: SyncEngine
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \DailyWellness.date, order: .reverse) private var wellness: [DailyWellness]
     @Query(sort: \CompletedActivity.date, order: .reverse) private var activities: [CompletedActivity]
     @Query private var syncStates: [SyncState]
+    @Query(sort: \PlannedWorkout.date) private var plannedWorkouts: [PlannedWorkout]
+    @Query private var goals: [Goal]
+    @Query(sort: \DailyReadiness.date, order: .reverse) private var readinessDays: [DailyReadiness]
+    @State private var isEnteringGoal = false
+    @State private var hasPlanChanges = false
 
     var body: some View {
         NavigationStack {
             List {
+                readinessSection
+                todaySection
                 if wellness.isEmpty && activities.isEmpty {
                     waitingSection
                 } else {
@@ -19,6 +27,14 @@ struct DashboardView: View {
                 freshnessFooter
             }
             .navigationTitle("TrainOrRest")
+            .toolbar {
+                NavigationLink {
+                    PlanCalendarView()
+                } label: {
+                    Label("Plan", systemImage: "calendar")
+                }
+            }
+            .sheet(isPresented: $isEnteringGoal) { GoalEntryView() }
             .refreshable { await engine.syncAll() }
             .overlay(alignment: .top) {
                 if let error = engine.lastError {
@@ -31,6 +47,59 @@ struct DashboardView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var readinessSection: some View {
+        if let today = readinessDays.first(where: { Calendar.current.isDateInToday($0.date) }) {
+            Section {
+                ReadinessCardView(readiness: today)
+                if hasPlanChanges {
+                    NavigationLink {
+                        PlanDiffView()
+                    } label: {
+                        Label("Plan updated — see what changed", systemImage: "arrow.triangle.2.circlepath")
+                            .font(.subheadline)
+                    }
+                }
+            }
+            .task(id: today.computedAt) {
+                hasPlanChanges = !((try? ReadinessStore.todaysChanges(
+                    in: modelContext, today: .now, calendar: .current
+                )) ?? []).isEmpty
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var todaySection: some View {
+        if goals.isEmpty {
+            Section {
+                Button {
+                    isEnteringGoal = true
+                } label: {
+                    Label("Set a race goal", systemImage: "target")
+                        .font(.headline)
+                }
+            }
+        } else if let workout = todayWorkout {
+            Section("Today") {
+                NavigationLink {
+                    WorkoutDetailView(workout: workout)
+                } label: {
+                    PlannedWorkoutRow(workout: workout)
+                }
+            }
+        } else if !plannedWorkouts.isEmpty {
+            Section("Today") {
+                Label("Rest day — recover well", systemImage: "moon.zzz")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var todayWorkout: PlannedWorkout? {
+        plannedWorkouts.first { Calendar.current.isDateInToday($0.date) }
     }
 
     private var waitingSection: some View {

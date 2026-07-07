@@ -1,16 +1,24 @@
+import BackgroundTasks
 import SwiftData
 import SwiftUI
 
 @main
 struct TrainOrRestApp: App {
+    static let refreshTaskIdentifier = "com.khanhnguyen.TrainOrRest.refresh"
+    /// Morning refresh aims to run after Garmin's overnight sync lands.
+    static let refreshHour = 5
+
     private let container: ModelContainer
     @StateObject private var engine: SyncEngine
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let container: ModelContainer
         do {
             container = try ModelContainer(
-                for: CompletedActivity.self, DailyWellness.self, SyncState.self
+                for: CompletedActivity.self, DailyWellness.self, SyncState.self,
+                Goal.self, TrainingPlan.self, PlannedWorkout.self,
+                DailyReadiness.self, PlanSnapshot.self
             )
         } catch {
             fatalError("Failed to create SwiftData container: \(error)")
@@ -26,6 +34,13 @@ struct TrainOrRestApp: App {
         // Registering before authorization is safe (queries return nothing).
         engine.startObserving()
         _engine = StateObject(wrappedValue: engine)
+
+        // Background tasks must be registered before launch finishes.
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: Self.refreshTaskIdentifier, using: nil
+        ) { task in
+            Self.handleMorningRefresh(task, engine: engine)
+        }
     }
 
     var body: some Scene {
@@ -34,6 +49,35 @@ struct TrainOrRestApp: App {
                 .environmentObject(engine)
         }
         .modelContainer(container)
+        .onChange(of: scenePhase) { _, phase in
+            engine.isForeground = phase == .active
+            if phase == .background {
+                Self.scheduleMorningRefresh()
+            }
+        }
+    }
+
+    // MARK: - Morning background refresh (best-effort)
+
+    private static func handleMorningRefresh(_ task: BGTask, engine: SyncEngine) {
+        scheduleMorningRefresh() // always re-arm for tomorrow
+        let work = Task { @MainActor in
+            await engine.syncAll()
+            task.setTaskCompleted(success: true)
+        }
+        task.expirationHandler = { work.cancel() }
+    }
+
+    private static func scheduleMorningRefresh() {
+        let request = BGAppRefreshTaskRequest(identifier: refreshTaskIdentifier)
+        request.earliestBeginDate = Calendar.current.nextDate(
+            after: .now,
+            matching: DateComponents(hour: refreshHour),
+            matchingPolicy: .nextTime
+        )
+        // Submission fails in unsupported environments (e.g. simulator
+        // without background modes) — best-effort, foreground sync covers it.
+        try? BGTaskScheduler.shared.submit(request)
     }
 }
 
@@ -94,7 +138,10 @@ struct RootView: View {
 
     private func activate() {
         stage = .ready
-        Task { await engine.syncAll() }
+        Task {
+            await VerdictNotifier.requestPermission()
+            await engine.syncAll()
+        }
     }
 }
 
