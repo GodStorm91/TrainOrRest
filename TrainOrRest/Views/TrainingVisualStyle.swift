@@ -59,17 +59,38 @@ extension WorkoutStatus {
     }
 }
 
-extension CompletedActivity {
-    var effortColor: Color {
-        if let avgHeartRate, avgHeartRate >= 165 {
-            return TrainingVisualStyle.intervals
+/// Coarse effort classification of a completed run, derived from its real
+/// heart-rate / pace / distance — not a stored or fabricated score.
+enum RunEffort {
+    case easy, tempo, long, intervals
+
+    var color: Color {
+        switch self {
+        case .easy: TrainingVisualStyle.easy
+        case .tempo: TrainingVisualStyle.tempo
+        case .long: TrainingVisualStyle.long
+        case .intervals: TrainingVisualStyle.intervals
         }
-        if let avgPaceSecondsPerKm, avgPaceSecondsPerKm < 300 {
-            return TrainingVisualStyle.tempo
-        }
-        if let distanceMeters, distanceMeters >= 12_000 {
-            return TrainingVisualStyle.long
-        }
-        return TrainingVisualStyle.easy
     }
+
+    var label: String {
+        switch self {
+        case .easy: "Easy"
+        case .tempo: "Tempo"
+        case .long: "Long run"
+        case .intervals: "Intervals"
+        }
+    }
+}
+
+extension CompletedActivity {
+    var effort: RunEffort {
+        if let avgHeartRate, avgHeartRate >= 165 { return .intervals }
+        if let avgPaceSecondsPerKm, avgPaceSecondsPerKm < 300 { return .tempo }
+        if let distanceMeters, distanceMeters >= 12_000 { return .long }
+        return .easy
+    }
+
+    var effortColor: Color { effort.color }
+    var effortLabel: String { effort.label }
 }

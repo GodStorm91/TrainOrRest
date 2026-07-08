@@ -4,47 +4,56 @@ struct ActivityRow: View {
     let activity: CompletedActivity
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 13) {
             Image(systemName: "figure.run")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(activity.effortColor)
-                .frame(width: 34, height: 34)
-                .background(TrainingVisualStyle.tint(activity.effortColor, opacity: 0.16), in: Circle())
-            VStack(alignment: .leading, spacing: 8) {
-                Text(activity.date.formatted(date: .abbreviated, time: .shortened))
-                    .font(.subheadline.weight(.medium))
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 6) { stats }
-                    VStack(alignment: .leading, spacing: 6) { stats }
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 42, height: 42)
+                .background(activity.effortColor.opacity(0.92), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text(activity.date.formatted(.dateTime.month(.abbreviated).day()))
+                        .font(.torHeading(15, .bold))
+                        .foregroundStyle(Theme.text)
+                    Text(activity.date.formatted(date: .omitted, time: .shortened))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.faint)
+                }
+                Text(activity.effortLabel.uppercased())
+                    .font(.torLabel(10, .bold))
+                    .tracking(0.4)
+                    .foregroundStyle(activity.effortColor)
+                HStack(spacing: 14) {
+                    stat(Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " km", with: ""), "km")
+                    divider
+                    stat(Formatters.pace(activity.avgPaceSecondsPerKm).replacingOccurrences(of: " /km", with: ""), "/km")
+                    divider
+                    stat(Formatters.duration(activity.durationSeconds), nil)
                 }
             }
+
+            Spacer(minLength: 4)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.faint)
         }
-        .padding(.vertical, 4)
+        .padding(13)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
     }
 
-    @ViewBuilder
-    private var stats: some View {
-        ActivityStatPill(Formatters.kilometers(activity.distanceMeters), symbol: "map")
-        ActivityStatPill(Formatters.pace(activity.avgPaceSecondsPerKm), symbol: "speedometer")
-        ActivityStatPill(Formatters.duration(activity.durationSeconds), symbol: "clock")
-    }
-}
-
-struct ActivityStatPill: View {
-    let value: String
-    let symbol: String
-
-    init(_ value: String, symbol: String) {
-        self.value = value
-        self.symbol = symbol
+    private var divider: some View {
+        Rectangle().fill(Theme.line).frame(width: 1, height: 14)
     }
 
-    var body: some View {
-        Label(value, systemImage: symbol)
-            .font(.caption2.weight(.medium))
-            .foregroundStyle(Theme.dim)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .background(Theme.chip, in: Capsule())
+    private func stat(_ value: String, _ unit: String?) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 2) {
+            Text(value).font(.torHeading(14, .bold)).foregroundStyle(Theme.text)
+            if let unit {
+                Text(unit).font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.faint)
+            }
+        }
     }
 }

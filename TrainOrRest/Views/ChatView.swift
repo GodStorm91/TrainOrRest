@@ -17,6 +17,13 @@ struct ChatView: View {
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var selectedImageAttachment: CoachImageAttachment?
     @State private var selectedImage: UIImage?
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private let calendar = Calendar.current
+
+    private var language: CoachLanguage {
+        CoachLanguage(rawValue: languageRaw) ?? .en
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -70,11 +77,14 @@ struct ChatView: View {
                     Circle()
                         .fill(Theme.good)
                         .frame(width: 6, height: 6)
-                    Text("Adapting to today's readiness")
+                    Text(language.coachStatus)
                         .font(.system(size: 11.5, weight: .medium))
                         .foregroundStyle(Theme.dim)
                 }
             }
+            Text(language.flag)
+                .font(.system(size: 15))
+                .accessibilityLabel(language.englishName)
         }
     }
 
@@ -145,6 +155,9 @@ struct ChatView: View {
                 plannedWorkouts: plannedWorkouts,
                 completedActivities: completedActivities
             )
+            if !messages.isEmpty, !chatStore.isSending {
+                CoachAskNextStrip(prompts: suggestionPrompts, label: language.askNextLabel) { draft = $0 }
+            }
             composer
         }
         .padding(.horizontal, 12)
@@ -158,7 +171,7 @@ struct ChatView: View {
 
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 9) {
-            TextField("Ask your coach…", text: $draft, axis: .vertical)
+            TextField(language.composerPlaceholder, text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.body)
                 .foregroundStyle(Theme.text)
@@ -195,6 +208,38 @@ struct ChatView: View {
 
     private var isSendDisabled: Bool {
         draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chatStore.isSending
+    }
+
+    // MARK: - Ask Next suggestions
+
+    private var suggestionPrompts: [String] {
+        CoachSuggestions.prompts(for: suggestionContext, language: language)
+    }
+
+    private var suggestionContext: CoachSuggestions.Context {
+        let recent = completedActivities.first
+        let recentIsRecent = recent.map { isWithinRecentWindow($0.date) } ?? false
+        let recentIsHard = recent.map(isHardEffort) ?? false
+        return CoachSuggestions.Context(
+            hasMessages: !messages.isEmpty,
+            lastMessageIsAssistant: messages.last?.role == .assistant,
+            hasRecentRun: recentIsRecent,
+            recentRunWasHard: recentIsHard,
+            todayWorkoutKind: plannedWorkouts.first { calendar.isDateInToday($0.date) }?.kind
+        )
+    }
+
+    /// A run counts as "recent" when it finished within the last two days.
+    private func isWithinRecentWindow(_ date: Date) -> Bool {
+        guard date <= .now else { return false }
+        let days = calendar.dateComponents([.day], from: date, to: .now).day ?? .max
+        return days <= 2
+    }
+
+    private func isHardEffort(_ activity: CompletedActivity) -> Bool {
+        if let hr = activity.avgHeartRate, hr >= 160 { return true }
+        if let pace = activity.avgPaceSecondsPerKm, pace < 300 { return true }
+        return false
     }
 
     private func send() {

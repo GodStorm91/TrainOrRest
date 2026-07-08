@@ -91,7 +91,11 @@ final class CoachChatStore: ObservableObject {
         today: Date,
         in context: ModelContext
     ) async throws {
-        let system = try CoachContextBuilder.build(in: context, today: today, calendar: calendar)
+        var system = try CoachContextBuilder.build(in: context, today: today, calendar: calendar)
+        let directive = CoachLanguage.current.systemPromptDirective
+        if !directive.isEmpty {
+            system += "\n\n\(directive)"
+        }
         var conversation = try messageHistory(in: context)
         if !attachments.isEmpty, var last = conversation.last, last.role == "user" {
             let text = last.content.textContent

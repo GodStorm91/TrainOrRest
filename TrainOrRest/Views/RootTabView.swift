@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The app's tab shell with the design's raised center-FAB bar. A native
 /// TabView drives per-tab navigation state (its bar hidden); a custom bar is
@@ -8,6 +9,7 @@ struct RootTabView: View {
 
     @State private var selection: Tab = .today
     @State private var showGoalEntry = false
+    @State private var isKeyboardVisible = false
 
     var body: some View {
         TabView(selection: $selection) {
@@ -18,7 +20,20 @@ struct RootTabView: View {
         }
         .toolbar(.hidden, for: .tabBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            TorTabBar(selection: $selection, onCenterTap: { showGoalEntry = true })
+            if !isKeyboardVisible {
+                TorTabBar(selection: $selection, onCenterTap: { showGoalEntry = true })
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            withAnimation(.easeOut(duration: 0.18)) {
+                isKeyboardVisible = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            withAnimation(.easeOut(duration: 0.18)) {
+                isKeyboardVisible = false
+            }
         }
         .sheet(isPresented: $showGoalEntry) { GoalEntryView() }
         .tint(Theme.accent)

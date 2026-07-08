@@ -1,112 +1,102 @@
 import SwiftData
 import SwiftUI
 
-/// The full training plan, week by week.
+/// The training plan tab. Switches between a month calendar grid and the
+/// week-by-week list; both share the plan's real workout data.
 struct PlanCalendarView: View {
-    @Query(sort: \PlannedWorkout.date) private var workouts: [PlannedWorkout]
-    @Query private var plans: [TrainingPlan]
-    @State private var isEditingGoal = false
-    @State private var visibleWeekStarts: Set<Date> = []
+    enum Mode: String, CaseIterable, Identifiable {
+        case month = "Month"
+        case week = "Week"
+        var id: Self { self }
+    }
 
-    private var calendar: Calendar { .current }
+    @Query(sort: \PlannedWorkout.date) private var workouts: [PlannedWorkout]
+
+    @State private var mode: Mode = .month
+    @State private var monthAnchor: Date = .now
+    @State private var selectedDate: Date = Calendar.current.startOfDay(for: .now)
+    @State private var weekScrollToken = 0
+    @State private var isEditingGoal = false
+
+    private let calendar = Calendar.current
 
     var body: some View {
-        ScrollViewReader { proxy in
-            List {
-                if workouts.isEmpty {
-                    ContentUnavailableView(
-                        "No Plan Yet",
-                        systemImage: "calendar.badge.plus",
-                        description: Text("Set a race goal to generate your training plan.")
-                    )
-                    .listRowBackground(Color.clear)
-                } else {
-                    ForEach(weekStarts, id: \.self) { weekStart in
-                        Section {
-                            ForEach(workoutsByWeekStart[weekStart] ?? []) { workout in
-                                NavigationLink {
-                                    WorkoutDetailView(workout: workout)
-                                } label: {
-                                    PlannedWorkoutRow(workout: workout)
-                                }
-                                .listRowBackground(Color.clear)
-                                .listRowSeparatorTint(Theme.line)
-                            }
-                        } header: {
-                            weekHeader(weekStart)
-                        }
-                        .id(weekStart)
-                        .onAppear { visibleWeekStarts.insert(weekStart) }
-                    }
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background(Theme.bg)
-            .navigationTitle("Training Plan")
-            .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button("Today", systemImage: "calendar") {
-                        proxy.scrollTo(todayWeekStart, anchor: .top)
-                    }
-                    .disabled(!weekStarts.contains(todayWeekStart))
-                    Button("Edit Goal", systemImage: "target") { isEditingGoal = true }
-                }
-            }
-            .sheet(isPresented: $isEditingGoal) { GoalEntryView() }
+        VStack(spacing: 0) {
+            topBar
+            content
         }
-    }
-
-    // Weeks are grouped by date, not stored week index: regeneration keeps
-    // past rows from older generations whose indices no longer align.
-    private var workoutsByWeekStart: [Date: [PlannedWorkout]] {
-        Dictionary(grouping: workouts) {
-            PlanGenerator.mondayOfWeek(containing: $0.date, calendar: calendar)
+        .background(Theme.bg)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button("Today", systemImage: "calendar") { goToToday() }
+                Button("Edit Goal", systemImage: "target") { isEditingGoal = true }
+            }
         }
-    }
-
-    private var weekStarts: [Date] {
-        workoutsByWeekStart.keys.sorted()
-    }
-
-    private var todayWeekStart: Date {
-        PlanGenerator.mondayOfWeek(containing: .now, calendar: calendar)
-    }
-
-    /// Index into the current plan's week metadata, valid only for weeks at
-    /// or after the plan anchor.
-    private func planWeekIndex(for weekStart: Date) -> Int? {
-        guard let plan = plans.first else { return nil }
-        let anchorWeek = PlanGenerator.mondayOfWeek(containing: plan.anchorDate, calendar: calendar)
-        let offset = (calendar.dateComponents([.day], from: anchorWeek, to: weekStart).day ?? 0) / 7
-        guard offset >= 0, plan.weekPhasesRaw.indices.contains(offset) else { return nil }
-        return offset
+        .sheet(isPresented: $isEditingGoal) { GoalEntryView() }
     }
 
     @ViewBuilder
-    private func weekHeader(_ weekStart: Date) -> some View {
-        PlanWeekHeaderView(
-            weekStart: weekStart,
-            phase: phase(for: weekStart),
-            volumeKm: volume(for: weekStart),
-            isRecovery: isRecoveryWeek(weekStart)
-        )
-        .opacity(visibleWeekStarts.contains(weekStart) ? 1 : 0.85)
-        .animation(.easeOut(duration: 0.18), value: visibleWeekStarts.contains(weekStart))
+    private var content: some View {
+        if workouts.isEmpty {
+            ContentUnavailableView(
+                "No Plan Yet",
+                systemImage: "calendar.badge.plus",
+                description: Text("Set a race goal to generate your training plan.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if mode == .month {
+            PlanMonthView(workouts: workouts, monthAnchor: $monthAnchor, selectedDate: $selectedDate)
+        } else {
+            PlanWeekListView(scrollToTodayToken: weekScrollToken)
+        }
     }
 
-    private func phase(for weekStart: Date) -> TrainingPhase? {
-        guard let index = planWeekIndex(for: weekStart), let plan = plans.first else { return nil }
-        return plan.phase(forWeek: index)
+    private var topBar: some View {
+        HStack {
+            TorEyebrow("Training plan").tracking(2)
+            Spacer()
+            modeToggle
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 6)
     }
 
-    private func volume(for weekStart: Date) -> Double? {
-        guard let index = planWeekIndex(for: weekStart), let plan = plans.first else { return nil }
-        return plan.weekTargetVolumesKm[index]
+    private var modeToggle: some View {
+        HStack(spacing: 4) {
+            ForEach(Mode.allCases) { option in
+                segment(option)
+            }
+        }
+        .padding(3)
+        .background(Theme.chip, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
     }
 
-    private func isRecoveryWeek(_ weekStart: Date) -> Bool {
-        guard let index = planWeekIndex(for: weekStart), let plan = plans.first else { return false }
-        return plan.weekIsDown[index]
+    private func segment(_ option: Mode) -> some View {
+        let selected = option == mode
+        return Text(option.rawValue)
+            .font(.torHeading(12, selected ? .bold : .semibold))
+            .foregroundStyle(selected ? Color.white : Theme.faint)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5)
+            .background(
+                selected ? Theme.accent : Color.clear,
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.easeOut(duration: 0.15)) { mode = option }
+            }
+    }
+
+    private func goToToday() {
+        let today = calendar.startOfDay(for: .now)
+        withAnimation(.easeOut(duration: 0.2)) {
+            monthAnchor = .now
+            selectedDate = today
+        }
+        weekScrollToken += 1
     }
 }
 

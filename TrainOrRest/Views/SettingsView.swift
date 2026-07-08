@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @AppStorage("coachModel") private var model = CoachChatConfig.defaultModel
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
     @Environment(\.dismiss) private var dismiss
     @StateObject private var chatStore = CoachChatStore()
     @State private var apiKey = ""
@@ -40,6 +41,15 @@ struct SettingsView: View {
                         .foregroundStyle(status == "Connection OK" ? .green : .secondary)
                 }
             }
+            Section {
+                ForEach(CoachLanguage.allCases) { language in
+                    languageRow(language)
+                }
+            } header: {
+                Text("Language")
+            } footer: {
+                Text("Coach chat and suggestions will use this language.")
+            }
         }
         .navigationTitle("Settings")
         .toolbar {
@@ -62,6 +72,32 @@ struct SettingsView: View {
             }
             isTesting = false
         }
+    }
+
+    private func languageRow(_ language: CoachLanguage) -> some View {
+        Button {
+            languageRaw = language.rawValue
+        } label: {
+            HStack(spacing: 12) {
+                Text(language.flag).font(.system(size: 22))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(language.nativeName)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                    Text(language.englishName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if language.rawValue == languageRaw {
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.tint)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func modelLabel(_ id: String) -> String {

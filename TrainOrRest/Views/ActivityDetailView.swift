@@ -71,3 +71,22 @@ private struct RunDetailSummary: View {
         ActivityStatPill(Formatters.heartRate(activity.avgHeartRate), symbol: "heart")
     }
 }
+
+struct ActivityStatPill: View {
+    let value: String
+    let symbol: String
+
+    init(_ value: String, symbol: String) {
+        self.value = value
+        self.symbol = symbol
+    }
+
+    var body: some View {
+        Label(value, systemImage: symbol)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(Theme.dim)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(Theme.chip, in: Capsule())
+    }
+}
