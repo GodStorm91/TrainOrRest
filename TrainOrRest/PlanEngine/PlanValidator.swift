@@ -17,6 +17,7 @@ enum PlanValidator {
             case taperNotMonotonic
             case qualityTooClose
             case raceMissing
+            case weeklyVolumeTooHigh
         }
 
         var kind: Kind
@@ -26,15 +27,32 @@ enum PlanValidator {
         var description: String { message }
     }
 
-    static func validate(_ plan: TrainingPlanSpec, calendar: Calendar) -> [Issue] {
+    static func validate(
+        _ plan: TrainingPlanSpec,
+        calendar: Calendar,
+        peakCapKm: Double? = nil
+    ) -> [Issue] {
         var issues: [Issue] = []
         issues += availabilityIssues(plan, calendar: calendar)
+        issues += absoluteVolumeIssues(plan, peakCapKm: peakCapKm)
         issues += longRunIssues(plan)
         issues += rampIssues(plan)
         issues += taperIssues(plan)
         issues += qualitySpacingIssues(plan, calendar: calendar)
         issues += raceIssues(plan, calendar: calendar)
         return issues
+    }
+
+    private static func absoluteVolumeIssues(_ plan: TrainingPlanSpec, peakCapKm: Double?) -> [Issue] {
+        guard let peakCapKm else { return [] }
+        return plan.weeks.compactMap { week in
+            guard !week.isPartial, week.targetVolumeKm > peakCapKm + volumeEpsilonKm else { return nil }
+            return Issue(
+                kind: .weeklyVolumeTooHigh,
+                weekIndex: week.index,
+                message: "Week \(week.index): volume \(week.targetVolumeKm) km exceeds cap \(peakCapKm) km"
+            )
+        }
     }
 
     private static func availabilityIssues(_ plan: TrainingPlanSpec, calendar: Calendar) -> [Issue] {

@@ -28,10 +28,17 @@ struct DashboardView: View {
             }
             .navigationTitle("TrainOrRest")
             .toolbar {
-                NavigationLink {
-                    PlanCalendarView()
-                } label: {
-                    Label("Plan", systemImage: "calendar")
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    NavigationLink {
+                        ChatView()
+                    } label: {
+                        Label("Coach", systemImage: "message")
+                    }
+                    NavigationLink {
+                        PlanCalendarView()
+                    } label: {
+                        Label("Plan", systemImage: "calendar")
+                    }
                 }
             }
             .sheet(isPresented: $isEnteringGoal) { GoalEntryView() }
