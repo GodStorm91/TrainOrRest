@@ -34,7 +34,7 @@ struct GoalEntryView: View {
                 if fitness == nil { coldStartSection }
                 feasibilitySection
                 if let saveError {
-                    Section { Text(saveError).foregroundStyle(.red) }
+                    Section { Text(saveError).foregroundStyle(Theme.bad) }
                 }
             }
             .navigationTitle("Race Goal")
@@ -113,7 +113,7 @@ struct GoalEntryView: View {
             Text("Running Days (\(selectedDays.count)/week)")
         } footer: {
             if selectedDays.count < 3 {
-                Text("Pick at least 3 running days.").foregroundStyle(.red)
+                Text("Pick at least 3 running days.").foregroundStyle(Theme.bad)
             }
         }
     }
@@ -261,9 +261,9 @@ extension FeasibilityVerdict {
 
     var color: Color {
         switch self {
-        case .ok: .green
-        case .stretch: .orange
-        case .unrealistic: .red
+        case .ok: Theme.good
+        case .stretch: Theme.warn
+        case .unrealistic: Theme.bad
         }
     }
 }

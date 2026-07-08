@@ -1,15 +1,17 @@
 import SwiftUI
 
+/// Semantic accents mapped onto the dark-cockpit Theme so every consumer
+/// (activity/workout rows, plan phases, status chips) matches the redesign.
 enum TrainingVisualStyle {
-    static let easy = Color.teal
-    static let long = Color.blue
-    static let tempo = Color.orange
-    static let intervals = Color.orange
-    static let race = Color.red
-    static let recovery = Color.teal
-    static let sleep = Color.blue
-    static let heart = Color.red
-    static let oxygen = Color.teal
+    static let easy = Theme.good
+    static let long = Theme.accent
+    static let tempo = Theme.warn
+    static let intervals = Theme.accent2
+    static let race = Theme.bad
+    static let recovery = Theme.good
+    static let sleep = Theme.accent
+    static let heart = Theme.bad
+    static let oxygen = Theme.accent
 
     static func tint(_ color: Color, opacity: Double = 0.14) -> Color {
         color.opacity(opacity)

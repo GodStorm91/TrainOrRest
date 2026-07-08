@@ -42,9 +42,9 @@ struct ActivityStatPill: View {
     var body: some View {
         Label(value, systemImage: symbol)
             .font(.caption2.weight(.medium))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Theme.dim)
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
-            .background(.secondary.opacity(0.09), in: Capsule())
+            .background(Theme.chip, in: Capsule())
     }
 }

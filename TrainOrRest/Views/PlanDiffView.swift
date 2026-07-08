@@ -121,6 +121,6 @@ private struct ChangePill: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(8)
-        .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 10))
+        .background(Theme.chip, in: RoundedRectangle(cornerRadius: 10))
     }
 }

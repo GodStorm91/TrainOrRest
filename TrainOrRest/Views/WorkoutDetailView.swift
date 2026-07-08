@@ -33,6 +33,8 @@ struct WorkoutDetailView: View {
                 statusButtons
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.bg)
         .navigationTitle(workout.date.formatted(.dateTime.month(.abbreviated).day()))
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -45,9 +47,9 @@ struct WorkoutDetailView: View {
     private var statusButtons: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                statusButton("Done", status: .done, tint: .green)
-                statusButton("Skipped", status: .skipped, tint: .orange)
-                statusButton("Planned", status: .planned, tint: .blue)
+                statusButton("Done", status: .done, tint: Theme.good)
+                statusButton("Skipped", status: .skipped, tint: Theme.warn)
+                statusButton("Planned", status: .planned, tint: Theme.accent)
             }
             .buttonStyle(.bordered)
 
