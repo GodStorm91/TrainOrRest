@@ -17,18 +17,29 @@ final class DailyWellness {
     var sleepHours: Double?
     /// VO2max in ml/kg/min.
     var vo2Max: Double?
+    /// Sleep-stage hours for the night ending on this date (nil when the
+    /// source provided no staged sleep).
+    var deepSleepHours: Double?
+    var remSleepHours: Double?
+    var lightSleepHours: Double?
 
     init(
         date: Date,
         hrvSDNN: Double? = nil,
         restingHeartRate: Double? = nil,
         sleepHours: Double? = nil,
-        vo2Max: Double? = nil
+        vo2Max: Double? = nil,
+        deepSleepHours: Double? = nil,
+        remSleepHours: Double? = nil,
+        lightSleepHours: Double? = nil
     ) {
         self.date = date
         self.hrvSDNN = hrvSDNN
         self.restingHeartRate = restingHeartRate
         self.sleepHours = sleepHours
         self.vo2Max = vo2Max
+        self.deepSleepHours = deepSleepHours
+        self.remSleepHours = remSleepHours
+        self.lightSleepHours = lightSleepHours
     }
 }

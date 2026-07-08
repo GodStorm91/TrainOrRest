@@ -165,11 +165,19 @@ final class HealthKitService {
             type: HKCategoryType(.sleepAnalysis),
             predicate: NSCompoundPredicate(andPredicateWithSubpredicates: [dateRange, asleepValues])
         )
-        return samples.map { sample in
-            SleepInterval(
-                start: sample.startDate,
-                end: sample.endDate,
-                sourceName: sample.sourceRevision.source.name
+        return samples.compactMap { sample in
+            guard let category = sample as? HKCategorySample else { return nil }
+            let stage: SleepStage = switch HKCategoryValueSleepAnalysis(rawValue: category.value) {
+            case .asleepDeep: .deep
+            case .asleepREM: .rem
+            case .asleepCore: .light
+            default: .unspecified
+            }
+            return SleepInterval(
+                start: category.startDate,
+                end: category.endDate,
+                sourceName: category.sourceRevision.source.name,
+                stage: stage
             )
         }
     }

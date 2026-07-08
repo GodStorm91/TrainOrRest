@@ -182,7 +182,9 @@ final class SyncEngine: ObservableObject {
         let hrvByDay = WellnessReducer.firstValuePerDay(try await hrvSamples, calendar: calendar)
         let rhrByDay = WellnessReducer.latestValuePerDay(try await rhrSamples, calendar: calendar)
         let vo2ByDay = WellnessReducer.latestValuePerDay(try await vo2Samples, calendar: calendar)
-        let sleepByDay = SleepAggregator.nightlySleepHours(intervals: try await sleepIntervals, calendar: calendar)
+        let resolvedSleep = try await sleepIntervals
+        let sleepByDay = SleepAggregator.nightlySleepHours(intervals: resolvedSleep, calendar: calendar)
+        let stagesByDay = SleepStageAggregator.nightlyStageHours(intervals: resolvedSleep, calendar: calendar)
 
         // Include existing rows in the window so days whose samples were
         // deleted from Health get cleared rather than keeping stale values.
@@ -201,6 +203,10 @@ final class SyncEngine: ObservableObject {
             row.restingHeartRate = rhrByDay[day]
             row.sleepHours = sleepByDay[day]
             row.vo2Max = vo2ByDay[day]
+            let stages = stagesByDay[day]
+            row.deepSleepHours = stages?.deep
+            row.remSleepHours = stages?.rem
+            row.lightSleepHours = stages?.light
         }
 
         let state = try fetchOrCreateSyncState(domain: SyncState.wellnessDomain)

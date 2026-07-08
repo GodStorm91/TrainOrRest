@@ -21,11 +21,18 @@ struct QuantitySampleSummary {
     let sourceName: String
 }
 
+enum SleepStage: String, Codable {
+    case deep, rem, light, unspecified
+}
+
 /// An asleep-stage interval from sleep analysis.
 struct SleepInterval {
     let start: Date
     let end: Date
     let sourceName: String
+    /// Defaults to `.unspecified` so total-sleep callers/tests that don't care
+    /// about staging keep working.
+    var stage: SleepStage = .unspecified
 }
 
 enum GarminSource {
@@ -75,6 +82,36 @@ enum SleepAggregator {
             hoursByWakeDate[wakeDate, default: 0] += span.end.timeIntervalSince(span.start) / 3600
         }
         return hoursByWakeDate
+    }
+}
+
+enum SleepStageAggregator {
+    struct StageHours: Equatable {
+        var deep = 0.0
+        var rem = 0.0
+        var light = 0.0
+    }
+
+    /// Per-stage hours keyed by wake date. Stages within a source are disjoint,
+    /// so durations are summed directly (no overlap merge); `unspecified`
+    /// counts toward light. Source preference matches the total aggregator.
+    static func nightlyStageHours(intervals: [SleepInterval], calendar: Calendar) -> [Date: StageHours] {
+        let preferred = GarminSource.preferGarmin(intervals, sourceName: \.sourceName)
+            .filter { $0.end > $0.start }
+
+        var byDay: [Date: StageHours] = [:]
+        for interval in preferred {
+            let day = calendar.startOfDay(for: interval.end)
+            let hours = interval.end.timeIntervalSince(interval.start) / 3600
+            var stages = byDay[day] ?? StageHours()
+            switch interval.stage {
+            case .deep: stages.deep += hours
+            case .rem: stages.rem += hours
+            case .light, .unspecified: stages.light += hours
+            }
+            byDay[day] = stages
+        }
+        return byDay
     }
 }
 
