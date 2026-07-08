@@ -43,12 +43,18 @@ struct WorkoutDetailView: View {
     }
 
     private var statusButtons: some View {
-        HStack {
-            statusButton("Done", status: .done, tint: .green)
-            statusButton("Skipped", status: .skipped, tint: .orange)
-            statusButton("Planned", status: .planned, tint: .blue)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                statusButton("Done", status: .done, tint: .green)
+                statusButton("Skipped", status: .skipped, tint: .orange)
+                statusButton("Planned", status: .planned, tint: .blue)
+            }
+            .buttonStyle(.bordered)
+
+            Text(statusHelpText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        .buttonStyle(.bordered)
     }
 
     private func statusButton(_ label: String, status: WorkoutStatus, tint: Color) -> some View {
@@ -64,5 +70,16 @@ struct WorkoutDetailView: View {
         .tint(tint)
         .disabled(workout.status == status)
         .frame(maxWidth: .infinity)
+    }
+
+    private var statusHelpText: String {
+        switch workout.status {
+        case .done:
+            "Done is a manual completion and stays linked to this workout."
+        case .skipped:
+            "Skipped is a manual decision; the planner will not auto-match this workout."
+        case .planned:
+            "Planned clears the manual decision so future sync matching can apply again."
+        }
     }
 }

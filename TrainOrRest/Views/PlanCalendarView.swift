@@ -10,34 +10,43 @@ struct PlanCalendarView: View {
     private var calendar: Calendar { .current }
 
     var body: some View {
-        List {
-            if workouts.isEmpty {
-                ContentUnavailableView(
-                    "No Plan Yet",
-                    systemImage: "calendar.badge.plus",
-                    description: Text("Set a race goal to generate your training plan.")
-                )
-            } else {
-                ForEach(weekStarts, id: \.self) { weekStart in
-                    Section {
-                        ForEach(workoutsByWeekStart[weekStart] ?? []) { workout in
-                            NavigationLink {
-                                WorkoutDetailView(workout: workout)
-                            } label: {
-                                PlannedWorkoutRow(workout: workout)
+        ScrollViewReader { proxy in
+            List {
+                if workouts.isEmpty {
+                    ContentUnavailableView(
+                        "No Plan Yet",
+                        systemImage: "calendar.badge.plus",
+                        description: Text("Set a race goal to generate your training plan.")
+                    )
+                } else {
+                    ForEach(weekStarts, id: \.self) { weekStart in
+                        Section {
+                            ForEach(workoutsByWeekStart[weekStart] ?? []) { workout in
+                                NavigationLink {
+                                    WorkoutDetailView(workout: workout)
+                                } label: {
+                                    PlannedWorkoutRow(workout: workout)
+                                }
                             }
+                        } header: {
+                            weekHeader(weekStart)
                         }
-                    } header: {
-                        weekHeader(weekStart)
+                        .id(weekStart)
                     }
                 }
             }
+            .navigationTitle("Training Plan")
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button("Today", systemImage: "calendar") {
+                        proxy.scrollTo(todayWeekStart, anchor: .top)
+                    }
+                    .disabled(!weekStarts.contains(todayWeekStart))
+                    Button("Edit Goal", systemImage: "target") { isEditingGoal = true }
+                }
+            }
+            .sheet(isPresented: $isEditingGoal) { GoalEntryView() }
         }
-        .navigationTitle("Training Plan")
-        .toolbar {
-            Button("Edit Goal", systemImage: "target") { isEditingGoal = true }
-        }
-        .sheet(isPresented: $isEditingGoal) { GoalEntryView() }
     }
 
     // Weeks are grouped by date, not stored week index: regeneration keeps
@@ -50,6 +59,10 @@ struct PlanCalendarView: View {
 
     private var weekStarts: [Date] {
         workoutsByWeekStart.keys.sorted()
+    }
+
+    private var todayWeekStart: Date {
+        PlanGenerator.mondayOfWeek(containing: .now, calendar: calendar)
     }
 
     /// Index into the current plan's week metadata, valid only for weeks at

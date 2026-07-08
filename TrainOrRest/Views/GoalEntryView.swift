@@ -21,6 +21,8 @@ struct GoalEntryView: View {
     @State private var manualWeeklyKm = 25.0
 
     @State private var saveError: String?
+    @State private var isEditingExistingGoal = false
+    @State private var isConfirmingRegeneration = false
 
     private let calendar = Calendar.current
 
@@ -39,11 +41,21 @@ struct GoalEntryView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: save).disabled(!isValid)
+                    Button("Save", action: requestSave).disabled(!isValid)
                 }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
+            }
+            .confirmationDialog(
+                "Regenerate Future Workouts?",
+                isPresented: $isConfirmingRegeneration,
+                titleVisibility: .visible
+            ) {
+                Button("Regenerate Plan", role: .destructive, action: save)
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Changing this goal replaces future planned workouts. Completed and manually changed workouts stay in your history.")
             }
             .task { load() }
         }
@@ -197,12 +209,21 @@ struct GoalEntryView: View {
     private func load() {
         fitness = try? PlanStore.currentFitness(in: modelContext, today: .now, calendar: calendar)
         guard let existing = try? PlanStore.activeGoal(in: modelContext)?.spec else { return }
+        isEditingExistingGoal = true
         distance = existing.distance
         targetHours = Int(existing.targetTimeSeconds) / 3600
         targetMinutes = (Int(existing.targetTimeSeconds) % 3600) / 60
         raceDate = max(existing.raceDate, calendar.date(byAdding: .day, value: 1, to: .now)!)
         selectedDays = existing.availableDays
         longRunDay = existing.longRunDay
+    }
+
+    private func requestSave() {
+        if isEditingExistingGoal {
+            isConfirmingRegeneration = true
+        } else {
+            save()
+        }
     }
 
     private func save() {

@@ -17,7 +17,7 @@ struct ChatView: View {
                 ContentUnavailableView(
                     "Ask Your Coach",
                     systemImage: "message.badge.waveform",
-                    description: Text("Ask why today's workout is scheduled, or request a safe plan adjustment.")
+                    description: Text("Ask why today's workout is scheduled, or request a change. Plan edits are checked before they are applied.")
                 )
             } else {
                 List(messages) { message in
@@ -64,21 +64,29 @@ struct ChatView: View {
     }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField("Message", text: $draft, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(1...4)
-            Button {
-                send()
-            } label: {
-                if chatStore.isSending {
-                    ProgressView()
-                } else {
-                    Image(systemName: "paperplane.fill")
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            if hasAPIKey {
+                Label("Coach suggestions are validated before your plan changes.", systemImage: "checkmark.shield")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(!hasAPIKey || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chatStore.isSending)
+
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Ask about today's run or request a checked adjustment", text: $draft, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(1...4)
+                Button {
+                    send()
+                } label: {
+                    if chatStore.isSending {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "paperplane.fill")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!hasAPIKey || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chatStore.isSending)
+            }
         }
         .padding()
         .background(.bar)
@@ -109,9 +117,16 @@ private struct ChatBubble: View {
                         .fill(message.role == .user ? Color.accentColor.opacity(0.18) : Color.gray.opacity(0.12))
                 }
             if let applied = message.appliedAdjustment {
-                Label(applied, systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Validated plan update", systemImage: "checkmark.shield.fill")
+                        .font(.caption.weight(.semibold))
+                    Text(applied)
+                        .font(.caption)
+                }
+                .foregroundStyle(.green)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
             }
         }
         .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)

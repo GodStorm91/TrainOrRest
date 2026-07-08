@@ -16,6 +16,16 @@ struct ReadinessCardView: View {
             }
             .foregroundStyle(readiness.verdict.cardColor)
 
+            if let guidance = readiness.verdict.guidanceText {
+                Label(guidance, systemImage: "figure.run.circle")
+                    .font(.subheadline.weight(.medium))
+            }
+            if let rationale = readiness.verdict.rationaleText {
+                Text(rationale)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             if readiness.verdict == .insufficientData {
                 Text("Collecting baseline — day \(min(readiness.baselineDayCount, ReadinessEngine.Tuning.minBaselineDays))/\(ReadinessEngine.Tuning.minBaselineDays)")
                     .font(.subheadline)
@@ -69,6 +79,32 @@ extension ReadinessVerdict {
         case .goEasy: .orange
         case .rest: .red
         case .insufficientData: .secondary
+        }
+    }
+
+    var guidanceText: String? {
+        switch self {
+        case .train:
+            "Follow today's planned session."
+        case .goEasy:
+            "Keep today's effort easy."
+        case .rest:
+            "Make today recovery-focused."
+        case .insufficientData:
+            nil
+        }
+    }
+
+    var rationaleText: String? {
+        switch self {
+        case .train:
+            nil
+        case .goEasy:
+            "The plan stays conservative while recovery signals are mixed."
+        case .rest:
+            "Rest protects the next sessions when recovery signals are stressed."
+        case .insufficientData:
+            nil
         }
     }
 }

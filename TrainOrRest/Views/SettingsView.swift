@@ -21,7 +21,7 @@ struct SettingsView: View {
                     .textContentType(.password)
                     .autocorrectionDisabled()
                 Picker("Model", selection: $model) {
-                    ForEach(models, id: \.self) { Text($0).tag($0) }
+                    ForEach(models, id: \.self) { Text(modelLabel($0)).tag($0) }
                 }
                 Button {
                     saveAndTest()
@@ -61,6 +61,19 @@ struct SettingsView: View {
                 status = "Could not save API key."
             }
             isTesting = false
+        }
+    }
+
+    private func modelLabel(_ id: String) -> String {
+        switch id {
+        case CoachChatConfig.defaultModel:
+            "Balanced coach"
+        case "claude-haiku-4-5":
+            "Fast coach"
+        case "claude-opus-4-8":
+            "Deep review coach"
+        default:
+            id
         }
     }
 }

@@ -214,6 +214,10 @@ private struct MetricCard: View {
                 Text(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+            } else if value == "–" {
+                Text("No recent value")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
