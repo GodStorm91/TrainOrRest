@@ -112,9 +112,10 @@ struct RootView: View {
             case .needsRequest:
                 OnboardingView(health: health, onAuthorized: activate)
             case .ready:
-                DashboardView()
+                RootTabView()
             }
         }
+        .preferredColorScheme(.dark)
         .task { await determineStage() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, stage == .ready {

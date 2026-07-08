@@ -1,39 +1,48 @@
+import PhotosUI
 import SwiftData
 import SwiftUI
+import UIKit
 
 struct ChatView: View {
     @AppStorage("coachModel") private var model = CoachChatConfig.defaultModel
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \ChatMessage.date) private var messages: [ChatMessage]
+    @Query(sort: \PlannedWorkout.date) private var plannedWorkouts: [PlannedWorkout]
+    @Query(sort: \CompletedActivity.date, order: .reverse) private var completedActivities: [CompletedActivity]
     @StateObject private var chatStore = CoachChatStore()
     @State private var draft = ""
     @State private var hasAPIKey = false
+    @State private var includeHealthContext = true
+    @State private var selectedWorkoutContext: WorkoutContextSelection?
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var selectedImageAttachment: CoachImageAttachment?
+    @State private var selectedImage: UIImage?
 
     var body: some View {
         VStack(spacing: 0) {
             if !hasAPIKey {
                 missingKeyView
             } else if messages.isEmpty {
-                ContentUnavailableView(
-                    "Ask Your Coach",
-                    systemImage: "message.badge.waveform",
-                    description: Text("Ask why today's workout is scheduled, or request a change. Plan edits are checked before they are applied.")
-                )
+                emptyState
             } else {
-                List(messages) { message in
-                    ChatBubble(message: message)
-                        .listRowSeparator(.hidden)
-                }
-                .listStyle(.plain)
+                messageFeed
+                    .background(Theme.bg)
             }
-            composer
+            if hasAPIKey {
+                chatFooter
+            }
         }
+        .background(Theme.bg)
         .navigationTitle("Coach")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            NavigationLink {
-                SettingsView()
-            } label: {
-                Label("Settings", systemImage: "gearshape")
+            ToolbarItem(placement: .principal) { coachHeader }
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    SettingsView()
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
+                }
             }
         }
         .task { refreshKeyState() }
@@ -44,8 +53,70 @@ struct ChatView: View {
                     .font(.footnote)
                     .foregroundStyle(.white)
                     .padding(8)
-                    .background(.red, in: Capsule())
+                    .background(Theme.bad, in: Capsule())
                     .padding(.top, 4)
+            }
+        }
+    }
+
+    private var coachHeader: some View {
+        HStack(spacing: 9) {
+            CoachAvatar(size: 30)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Coach")
+                    .font(.torHeading(17, .bold))
+                    .foregroundStyle(Theme.text)
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(Theme.good)
+                        .frame(width: 6, height: 6)
+                    Text("Adapting to today's readiness")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(Theme.dim)
+                }
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            ContentUnavailableView(
+                "Ask Your Coach",
+                systemImage: "message.badge.waveform",
+                description: Text("Ask about today's run, paste a table, attach health context, or request a checked plan adjustment.")
+            )
+            VStack(alignment: .leading, spacing: 8) {
+                ChatPromptButton("Why is today's workout right for me?") { draft = "Why is today's workout right for me?" }
+                ChatPromptButton("Compare my readiness and recent training load.") {
+                    draft = "Compare my readiness and recent training load."
+                }
+                ChatPromptButton("Turn this screenshot into practical training advice.") {
+                    draft = "Turn this screenshot into practical training advice."
+                }
+            }
+            .padding(.horizontal)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.bg)
+    }
+
+    private var messageFeed: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 14) {
+                    ForEach(messages) { message in
+                        ChatBubble(message: message)
+                            .id(message.date)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 16)
+            }
+            .onChange(of: messages.count) {
+                guard let last = messages.last?.date else { return }
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo(last, anchor: .bottom)
+                }
             }
         }
     }
@@ -63,72 +134,106 @@ struct ChatView: View {
         }
     }
 
-    private var composer: some View {
+    private var chatFooter: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if hasAPIKey {
-                Label("Coach suggestions are validated before your plan changes.", systemImage: "checkmark.shield")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            ChatContextTrayView(
+                includeHealthContext: $includeHealthContext,
+                selectedWorkoutContext: $selectedWorkoutContext,
+                selectedPhotoItem: $selectedPhotoItem,
+                selectedImageAttachment: $selectedImageAttachment,
+                selectedImage: $selectedImage,
+                plannedWorkouts: plannedWorkouts,
+                completedActivities: completedActivities
+            )
+            composer
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .background(.bar)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Theme.border).frame(height: 1)
+        }
+    }
 
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField("Ask about today's run or request a checked adjustment", text: $draft, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(1...4)
-                Button {
-                    send()
-                } label: {
+    private var composer: some View {
+        HStack(alignment: .bottom, spacing: 9) {
+            TextField("Ask your coach…", text: $draft, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.body)
+                .foregroundStyle(Theme.text)
+                .tint(Theme.accent)
+                .lineLimit(1...5)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+                .background(Theme.chip, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .strokeBorder(Theme.border, lineWidth: 1)
+                )
+            Button {
+                send()
+            } label: {
+                Group {
                     if chatStore.isSending {
-                        ProgressView()
+                        ProgressView().tint(.white)
                     } else {
                         Image(systemName: "paperplane.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.white)
                     }
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(!hasAPIKey || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chatStore.isSending)
+                .frame(width: 44, height: 44)
+                .background(Theme.accent, in: Circle())
+                .shadow(color: Theme.accentSoft, radius: 8, y: 3)
+                .opacity(isSendDisabled ? 0.45 : 1)
             }
+            .buttonStyle(.plain)
+            .disabled(isSendDisabled)
         }
-        .padding()
-        .background(.bar)
+    }
+
+    private var isSendDisabled: Bool {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chatStore.isSending
     }
 
     private func send() {
         let text = draft
+        let attachments = currentAttachments
         draft = ""
         Task {
-            await chatStore.send(text: text, model: model, in: modelContext)
+            await chatStore.send(text: text, model: model, attachments: attachments, in: modelContext)
+            selectedWorkoutContext = nil
+            clearImageAttachment()
         }
     }
 
     private func refreshKeyState() {
         hasAPIKey = !((try? KeychainStore.load()) ?? "").isEmpty
     }
-}
 
-private struct ChatBubble: View {
-    let message: ChatMessage
-
-    var body: some View {
-        VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
-            Text(message.text)
-                .padding(10)
-                .background {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(message.role == .user ? Color.accentColor.opacity(0.18) : Color.gray.opacity(0.12))
-                }
-            if let applied = message.appliedAdjustment {
-                VStack(alignment: .leading, spacing: 2) {
-                    Label("Validated plan update", systemImage: "checkmark.shield.fill")
-                        .font(.caption.weight(.semibold))
-                    Text(applied)
-                        .font(.caption)
-                }
-                .foregroundStyle(.green)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-            }
+    private var currentAttachments: [CoachContextAttachment] {
+        var attachments: [CoachContextAttachment] = []
+        if includeHealthContext {
+            attachments.append(.health)
         }
-        .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+        switch selectedWorkoutContext {
+        case .planned(let uuid):
+            attachments.append(.plannedWorkout(uuid))
+        case .completed(let uuid):
+            attachments.append(.completedActivity(uuid))
+        case nil:
+            break
+        }
+        if let selectedImageAttachment {
+            attachments.append(.image(selectedImageAttachment))
+        }
+        return attachments
+    }
+
+    private func clearImageAttachment() {
+        selectedPhotoItem = nil
+        selectedImageAttachment = nil
+        selectedImage = nil
     }
 }

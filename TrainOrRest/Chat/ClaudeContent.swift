@@ -39,13 +39,19 @@ enum JSONValue: Codable, Equatable {
 
 enum ClaudeContentBlock: Codable, Equatable {
     case text(String)
+    case image(mediaType: String, data: String)
     case toolUse(id: String, name: String, input: JSONValue)
     case toolResult(toolUseID: String, content: String, isError: Bool)
 
     enum CodingKeys: String, CodingKey {
-        case type, text, id, name, input, content
+        case type, text, id, name, input, content, source
         case toolUseID = "tool_use_id"
         case isError = "is_error"
+    }
+
+    enum SourceKeys: String, CodingKey {
+        case type, data
+        case mediaType = "media_type"
     }
 
     init(from decoder: Decoder) throws {
@@ -53,6 +59,12 @@ enum ClaudeContentBlock: Codable, Equatable {
         switch try container.decode(String.self, forKey: .type) {
         case "text":
             self = .text(try container.decode(String.self, forKey: .text))
+        case "image":
+            let source = try container.nestedContainer(keyedBy: SourceKeys.self, forKey: .source)
+            self = .image(
+                mediaType: try source.decode(String.self, forKey: .mediaType),
+                data: try source.decode(String.self, forKey: .data)
+            )
         case "tool_use":
             self = .toolUse(
                 id: try container.decode(String.self, forKey: .id),
@@ -76,6 +88,12 @@ enum ClaudeContentBlock: Codable, Equatable {
         case .text(let text):
             try container.encode("text", forKey: .type)
             try container.encode(text, forKey: .text)
+        case let .image(mediaType, data):
+            try container.encode("image", forKey: .type)
+            var source = container.nestedContainer(keyedBy: SourceKeys.self, forKey: .source)
+            try source.encode("base64", forKey: .type)
+            try source.encode(mediaType, forKey: .mediaType)
+            try source.encode(data, forKey: .data)
         case let .toolUse(id, name, input):
             try container.encode("tool_use", forKey: .type)
             try container.encode(id, forKey: .id)

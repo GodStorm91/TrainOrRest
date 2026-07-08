@@ -96,6 +96,37 @@ final class ChatFeatureTests: XCTestCase {
         } ?? false)
     }
 
+    func testChatStoreSendsAttachedContextAndImage() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let workout = try XCTUnwrap(try context.fetch(FetchDescriptor<PlannedWorkout>()).first)
+        let image = CoachImageAttachment(data: Data([1, 2, 3]), mediaType: "image/jpeg", filename: "test.jpg")
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [.text("Here is the context review.")], stopReason: "end_turn")
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(
+            text: "Review this workout.",
+            model: "claude-test",
+            attachments: [.health, .plannedWorkout(workout.uuid), .image(image)],
+            apiKey: "test-key",
+            in: context
+        )
+
+        let content = try XCTUnwrap(client.requests.first?.messages.last?.content)
+        XCTAssertTrue(content.textContent.contains("Attached context:"))
+        XCTAssertTrue(content.textContent.contains("Health snapshot:"))
+        XCTAssertTrue(content.textContent.contains("Planned workout:"))
+        XCTAssertTrue(content.contains {
+            if case .image(let mediaType, let data) = $0 {
+                return mediaType == "image/jpeg" && data == image.base64String
+            }
+            return false
+        })
+    }
+
     private func makeContainer() throws -> ModelContainer {
         let schema = Schema([
             CompletedActivity.self, DailyWellness.self, SyncState.self,

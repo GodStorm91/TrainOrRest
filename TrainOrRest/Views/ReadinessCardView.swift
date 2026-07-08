@@ -50,7 +50,13 @@ struct ReadinessCardView: View {
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 4)
+        .padding(12)
+        .background(TrainingVisualStyle.tint(readiness.verdict.cardColor), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(TrainingVisualStyle.tint(readiness.verdict.cardColor, opacity: 0.28), lineWidth: 1)
+        }
+        .animation(.easeOut(duration: 0.2), value: readiness.verdictRaw)
     }
 }
 
@@ -75,10 +81,10 @@ extension ReadinessVerdict {
 
     var cardColor: Color {
         switch self {
-        case .train: .green
-        case .goEasy: .orange
-        case .rest: .red
-        case .insufficientData: .secondary
+        case .train: TrainingVisualStyle.easy
+        case .goEasy: TrainingVisualStyle.tempo
+        case .rest: TrainingVisualStyle.race
+        case .insufficientData: TrainingVisualStyle.long
         }
     }
 

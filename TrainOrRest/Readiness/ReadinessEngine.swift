@@ -14,6 +14,8 @@ struct WellnessSample: Equatable {
 
 struct ReadinessAssessment: Equatable {
     var verdict: ReadinessVerdict
+    /// 0–100 readiness score driving the gauge; nil when insufficientData.
+    var score: Int?
     /// Human-readable explanation per triggered flag, worst first.
     var reasons: [String]
     /// Distinct days of wellness history available (baseline progress).
@@ -85,7 +87,7 @@ enum ReadinessEngine {
 
         guard baselineDays >= Tuning.minBaselineDays else {
             return ReadinessAssessment(
-                verdict: .insufficientData, reasons: [], baselineDayCount: baselineDays, snapshot: snapshot
+                verdict: .insufficientData, score: nil, reasons: [], baselineDayCount: baselineDays, snapshot: snapshot
             )
         }
 
@@ -122,7 +124,7 @@ enum ReadinessEngine {
             || snapshot.acuteChronicRatio != nil
         guard anySignalPresent else {
             return ReadinessAssessment(
-                verdict: .insufficientData, reasons: [], baselineDayCount: baselineDays, snapshot: snapshot
+                verdict: .insufficientData, score: nil, reasons: [], baselineDayCount: baselineDays, snapshot: snapshot
             )
         }
 
@@ -136,7 +138,11 @@ enum ReadinessEngine {
         let finalVerdict = (hrvFlag && acwrFlag) ? .rest : verdict
 
         return ReadinessAssessment(
-            verdict: finalVerdict, reasons: reasons, baselineDayCount: baselineDays, snapshot: snapshot
+            verdict: finalVerdict,
+            score: ReadinessScore.score(snapshot: snapshot, verdict: finalVerdict),
+            reasons: reasons,
+            baselineDayCount: baselineDays,
+            snapshot: snapshot
         )
     }
 }

@@ -8,6 +8,7 @@ import SwiftData
 final class DailyReadiness {
     @Attribute(.unique) var date: Date
     var verdictRaw: String
+    var score: Int?
     var reasons: [String]
     var baselineDayCount: Int
     var hrvMean7: Double?
@@ -23,6 +24,7 @@ final class DailyReadiness {
     init(date: Date, assessment: ReadinessAssessment, computedAt: Date) {
         self.date = date
         self.verdictRaw = assessment.verdict.rawValue
+        self.score = assessment.score
         self.reasons = assessment.reasons
         self.baselineDayCount = assessment.baselineDayCount
         self.hrvMean7 = assessment.snapshot.hrvMean7
@@ -42,6 +44,7 @@ final class DailyReadiness {
 
     func update(from assessment: ReadinessAssessment, computedAt: Date) {
         verdictRaw = assessment.verdict.rawValue
+        score = assessment.score
         reasons = assessment.reasons
         baselineDayCount = assessment.baselineDayCount
         hrvMean7 = assessment.snapshot.hrvMean7

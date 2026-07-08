@@ -15,10 +15,29 @@ enum ReadinessStore {
         today: Date,
         calendar: Calendar
     ) throws -> DailyReadiness? {
+        try backfillMissingScores(in: context)
         let readiness = try computeAndPersistReadiness(in: context, today: today, calendar: calendar)
         try regenerateIfNeeded(in: context, verdict: readiness?.verdict ?? .insufficientData, today: today, calendar: calendar)
         try context.save()
         return readiness
+    }
+
+    /// One-time upgrade path: readiness rows recorded before the score feature
+    /// have `score == nil`. Recompute it from each row's stored snapshot so the
+    /// Trends history isn't blank after updating. Idempotent.
+    private static func backfillMissingScores(in context: ModelContext) throws {
+        let rows = try context.fetch(FetchDescriptor<DailyReadiness>(
+            predicate: #Predicate { $0.score == nil && $0.verdictRaw != "insufficientData" }
+        ))
+        for row in rows {
+            let snapshot = ReadinessAssessment.Snapshot(
+                hrvMean7: row.hrvMean7, hrvMean28: row.hrvMean28,
+                rhrMean7: row.rhrMean7, rhrMean28: row.rhrMean28,
+                sleepLastNight: row.sleepLastNight, sleepMean14: row.sleepMean14,
+                acuteChronicRatio: row.acuteChronicRatio
+            )
+            row.score = ReadinessScore.score(snapshot: snapshot, verdict: row.verdict)
+        }
     }
 
     // MARK: - Readiness

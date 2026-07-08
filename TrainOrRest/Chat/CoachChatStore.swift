@@ -23,30 +23,43 @@ final class CoachChatStore: ObservableObject {
     func send(
         text: String,
         model: String,
+        attachments: [CoachContextAttachment] = [],
         in context: ModelContext
     ) async {
         guard let apiKey = try? KeychainStore.load(), !apiKey.isEmpty else {
             lastError = "Add your Anthropic API key in Settings first."
             return
         }
-        await send(text: text, model: model, apiKey: apiKey, in: context)
+        await send(text: text, model: model, attachments: attachments, apiKey: apiKey, in: context)
     }
 
     func send(
         text: String,
         model: String,
+        attachments: [CoachContextAttachment] = [],
         apiKey: String,
         in context: ModelContext
     ) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        let today = now()
         isSending = true
         lastError = nil
-        context.insert(ChatMessage(role: .user, text: trimmed, date: .now))
+        context.insert(ChatMessage(
+            role: .user,
+            text: CoachAttachmentContextBuilder.displayText(
+                text: trimmed,
+                attachments: attachments,
+                in: context,
+                today: today,
+                calendar: calendar
+            ),
+            date: .now
+        ))
         try? context.save()
 
         do {
-            try await runLoop(apiKey: apiKey, model: model, in: context)
+            try await runLoop(apiKey: apiKey, model: model, attachments: attachments, today: today, in: context)
         } catch {
             let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             lastError = message
@@ -71,10 +84,28 @@ final class CoachChatStore: ObservableObject {
         }
     }
 
-    private func runLoop(apiKey: String, model: String, in context: ModelContext) async throws {
-        let today = now()
+    private func runLoop(
+        apiKey: String,
+        model: String,
+        attachments: [CoachContextAttachment],
+        today: Date,
+        in context: ModelContext
+    ) async throws {
         let system = try CoachContextBuilder.build(in: context, today: today, calendar: calendar)
         var conversation = try messageHistory(in: context)
+        if !attachments.isEmpty, var last = conversation.last, last.role == "user" {
+            let text = last.content.textContent
+                .components(separatedBy: "\n\nAttached:")
+                .first ?? last.content.textContent
+            last.content = CoachAttachmentContextBuilder.content(
+                text: text,
+                attachments: attachments,
+                in: context,
+                today: today,
+                calendar: calendar
+            )
+            conversation[conversation.count - 1] = last
+        }
         var applied: [String] = []
 
         for _ in 0..<CoachChatConfig.maxToolRounds {

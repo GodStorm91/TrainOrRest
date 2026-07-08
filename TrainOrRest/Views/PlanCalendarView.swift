@@ -6,6 +6,7 @@ struct PlanCalendarView: View {
     @Query(sort: \PlannedWorkout.date) private var workouts: [PlannedWorkout]
     @Query private var plans: [TrainingPlan]
     @State private var isEditingGoal = false
+    @State private var visibleWeekStarts: Set<Date> = []
 
     private var calendar: Calendar { .current }
 
@@ -18,6 +19,7 @@ struct PlanCalendarView: View {
                         systemImage: "calendar.badge.plus",
                         description: Text("Set a race goal to generate your training plan.")
                     )
+                    .listRowBackground(Color.clear)
                 } else {
                     ForEach(weekStarts, id: \.self) { weekStart in
                         Section {
@@ -27,14 +29,19 @@ struct PlanCalendarView: View {
                                 } label: {
                                     PlannedWorkoutRow(workout: workout)
                                 }
+                                .listRowBackground(Color.clear)
+                                .listRowSeparatorTint(Theme.line)
                             }
                         } header: {
                             weekHeader(weekStart)
                         }
                         .id(weekStart)
+                        .onAppear { visibleWeekStarts.insert(weekStart) }
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.bg)
             .navigationTitle("Training Plan")
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -77,56 +84,29 @@ struct PlanCalendarView: View {
 
     @ViewBuilder
     private func weekHeader(_ weekStart: Date) -> some View {
-        HStack {
-            Text("Week of \(weekStart.formatted(.dateTime.month(.abbreviated).day()))")
-            if let index = planWeekIndex(for: weekStart), let plan = plans.first {
-                if let phase = plan.phase(forWeek: index) {
-                    Text("· \(phase.displayName)")
-                }
-                Text("· \(Int(plan.weekTargetVolumesKm[index].rounded())) km")
-                if plan.weekIsDown[index] {
-                    Text("· recovery").foregroundStyle(.teal)
-                }
-            }
-        }
+        PlanWeekHeaderView(
+            weekStart: weekStart,
+            phase: phase(for: weekStart),
+            volumeKm: volume(for: weekStart),
+            isRecovery: isRecoveryWeek(weekStart)
+        )
+        .opacity(visibleWeekStarts.contains(weekStart) ? 1 : 0.85)
+        .animation(.easeOut(duration: 0.18), value: visibleWeekStarts.contains(weekStart))
     }
-}
 
-struct PlannedWorkoutRow: View {
-    let workout: PlannedWorkout
+    private func phase(for weekStart: Date) -> TrainingPhase? {
+        guard let index = planWeekIndex(for: weekStart), let plan = plans.first else { return nil }
+        return plan.phase(forWeek: index)
+    }
 
-    private var isToday: Bool { Calendar.current.isDateInToday(workout.date) }
+    private func volume(for weekStart: Date) -> Double? {
+        guard let index = planWeekIndex(for: weekStart), let plan = plans.first else { return nil }
+        return plan.weekTargetVolumesKm[index]
+    }
 
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: workout.kind?.symbolName ?? "questionmark")
-                .foregroundStyle(workout.kind == .race ? .orange : .accentColor)
-                .frame(width: 24)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack {
-                    Text(workout.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
-                        .font(.subheadline.weight(isToday ? .bold : .medium))
-                    if isToday {
-                        Text("Today")
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 6).padding(.vertical, 1)
-                            .background(.tint.opacity(0.15), in: Capsule())
-                    }
-                }
-                HStack(spacing: 8) {
-                    Text(workout.kind?.displayName ?? workout.kindRaw)
-                    Text(Formatters.kilometers(workout.distanceKm * 1000))
-                    if let band = workout.paceBand {
-                        Text(Formatters.paceBand(band))
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Image(systemName: workout.status.symbolName)
-                .foregroundStyle(workout.status.color)
-        }
+    private func isRecoveryWeek(_ weekStart: Date) -> Bool {
+        guard let index = planWeekIndex(for: weekStart), let plan = plans.first else { return false }
+        return plan.weekIsDown[index]
     }
 }
 
@@ -163,9 +143,9 @@ extension WorkoutStatus {
 
     var color: Color {
         switch self {
-        case .planned: .secondary
-        case .done: .green
-        case .skipped: .orange
+        case .planned: Theme.dim
+        case .done: Theme.good
+        case .skipped: Theme.warn
         }
     }
 }

@@ -19,9 +19,11 @@ struct ActivityListView: View {
                     } label: {
                         ActivityRow(activity: activity)
                     }
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                 }
             }
         }
         .navigationTitle("Activities")
+        .animation(.easeOut(duration: 0.22), value: activities.count)
     }
 }
