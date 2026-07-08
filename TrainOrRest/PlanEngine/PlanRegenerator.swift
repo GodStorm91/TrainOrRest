@@ -79,12 +79,14 @@ enum PlanRegenerator {
                 let distance = current.kind == .long
                     ? PlanGenerator.rounded(current.distanceKm * 0.6)
                     : current.distanceKm
+                let structure = WorkoutStructure.easyRun(distanceKm: distance, paces: paces)
                 week.workouts[index] = PlannedWorkoutSpec(
                     date: dayStart,
                     kind: .easy,
                     distanceKm: distance,
                     paceBand: paces.easy,
-                    details: "Easy run at E pace"
+                    details: WorkoutProse.details(for: .easy, structure: structure),
+                    structure: structure
                 )
             }
         default:

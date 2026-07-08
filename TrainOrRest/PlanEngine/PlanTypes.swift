@@ -118,6 +118,7 @@ struct PlannedWorkoutSpec: Equatable {
     var distanceKm: Double
     var paceBand: PaceBand?
     var details: String
+    var structure: [WorkoutStepGroup] = []
 }
 
 struct WeekPlan: Equatable {

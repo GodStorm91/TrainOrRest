@@ -17,6 +17,7 @@ final class PlannedWorkout {
     var paceFastSecondsPerKm: Double?
     var paceSlowSecondsPerKm: Double?
     var details: String
+    var structure: [WorkoutStepGroup] = []
     var statusRaw: String
     /// Set by user actions; auto-matching never overwrites a manual decision.
     var manuallyOverridden: Bool
@@ -33,6 +34,7 @@ final class PlannedWorkout {
         self.paceFastSecondsPerKm = spec.paceBand?.fastSecondsPerKm
         self.paceSlowSecondsPerKm = spec.paceBand?.slowSecondsPerKm
         self.details = spec.details
+        self.structure = spec.structure
         self.statusRaw = WorkoutStatus.planned.rawValue
         self.manuallyOverridden = false
         self.matchedActivityUUID = nil

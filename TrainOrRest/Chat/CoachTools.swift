@@ -94,9 +94,11 @@ enum CoachTools {
             spec.weeks[location.week].workouts.remove(at: location.workout)
             return "Rested \(change.date)"
         case .downgrade:
+            let structure = WorkoutStructure.run(distanceKm: workout.distanceKm, paceBand: paces?.easy)
             spec.weeks[location.week].workouts[location.workout] = PlannedWorkoutSpec(
                 date: date, kind: .easy, distanceKm: workout.distanceKm,
-                paceBand: paces?.easy, details: "Easy run at E pace"
+                paceBand: paces?.easy, details: WorkoutProse.details(for: .easy, structure: structure),
+                structure: structure
             )
             return "Downgraded \(change.date) to easy"
         case .move:
@@ -164,7 +166,7 @@ enum CoachTools {
         guard let kind = row.kind else { return nil }
         return PlannedWorkoutSpec(
             date: row.date, kind: kind, distanceKm: row.distanceKm,
-            paceBand: row.paceBand, details: row.details
+            paceBand: row.paceBand, details: row.details, structure: row.structure
         )
     }
 

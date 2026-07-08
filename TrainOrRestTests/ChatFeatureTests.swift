@@ -43,6 +43,57 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(workouts.first?.kind, .easy)
         XCTAssertEqual(workouts.first?.details, "Easy run at E pace")
         XCTAssertEqual(workouts.first?.manuallyOverridden, true)
+        XCTAssertEqual(workouts.first?.structure.isEmpty, false)
+    }
+
+    func testToolDowngradeWithoutCurrentFitnessUsesUnpacedEasyStructure() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedGoalOnly(in: context)
+
+        try CoachTools.apply(
+            proposal: PlanAdjustmentProposal(changes: [
+                .init(date: CoachContextBuilder.day(qualityDay, calendar: calendar), action: .downgrade, detail: nil)
+            ]),
+            in: context,
+            today: today,
+            calendar: calendar
+        )
+
+        let workout = try XCTUnwrap(try plannedWorkouts(on: qualityDay, in: context).first)
+        XCTAssertEqual(workout.kind, .easy)
+        XCTAssertNil(workout.paceBand)
+        XCTAssertEqual(workout.structure.first?.steps.first?.role, .work)
+        XCTAssertNil(workout.structure.first?.steps.first?.paceBand)
+        XCTAssertEqual(workout.structure.first?.steps.first?.distanceKm, workout.distanceKm)
+    }
+
+    func testToolSwapPreservesWorkoutStructure() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let friday = PlanEngineTestSupport.date(2026, 1, 9, hour: 0)
+
+        let result = try CoachTools.apply(
+            proposal: PlanAdjustmentProposal(changes: [
+                .init(
+                    date: CoachContextBuilder.day(qualityDay, calendar: calendar),
+                    action: .swap,
+                    detail: CoachContextBuilder.day(friday, calendar: calendar)
+                )
+            ]),
+            in: context,
+            today: today,
+            calendar: calendar
+        )
+
+        let wednesdayWorkout = try XCTUnwrap(try plannedWorkouts(on: qualityDay, in: context).first)
+        let fridayWorkout = try XCTUnwrap(try plannedWorkouts(on: friday, in: context).first)
+        XCTAssertEqual(result.summary, "Swapped 2026-01-07 with 2026-01-09")
+        XCTAssertEqual(wednesdayWorkout.kind, .easy)
+        XCTAssertEqual(fridayWorkout.kind, .tempo)
+        XCTAssertFalse(wednesdayWorkout.structure.isEmpty)
+        XCTAssertFalse(fridayWorkout.structure.isEmpty)
     }
 
     func testToolRejectsPastWorkoutEdits() throws {
@@ -138,15 +189,7 @@ final class ChatFeatureTests: XCTestCase {
     }
 
     private func seedTrainingData(in context: ModelContext) throws {
-        let goal = GoalSpec(
-            distance: .halfMarathon,
-            targetTimeSeconds: 105 * 60,
-            raceDate: PlanEngineTestSupport.date(2026, 4, 19),
-            availableDays: [.monday, .wednesday, .friday, .sunday],
-            longRunDay: .sunday
-        )
-        let fitness = FitnessProfile(vdot: 48, weeklyVolumeKm: 40, volumeTrend: 0, longestRecentRunKm: 16)
-        try PlanStore.replaceGoal(spec: goal, fitness: fitness, today: today, calendar: calendar, in: context)
+        try seedGoalOnly(in: context)
 
         context.insert(CompletedActivity(
             hkUUID: UUID(),
@@ -175,6 +218,18 @@ final class ChatFeatureTests: XCTestCase {
             computedAt: today
         ))
         try context.save()
+    }
+
+    private func seedGoalOnly(in context: ModelContext) throws {
+        let goal = GoalSpec(
+            distance: .halfMarathon,
+            targetTimeSeconds: 105 * 60,
+            raceDate: PlanEngineTestSupport.date(2026, 4, 19),
+            availableDays: [.monday, .wednesday, .friday, .sunday],
+            longRunDay: .sunday
+        )
+        let fitness = FitnessProfile(vdot: 48, weeklyVolumeKm: 40, volumeTrend: 0, longestRecentRunKm: 16)
+        try PlanStore.replaceGoal(spec: goal, fitness: fitness, today: today, calendar: calendar, in: context)
     }
 
     private func plannedWorkouts(on date: Date, in context: ModelContext) throws -> [PlannedWorkout] {

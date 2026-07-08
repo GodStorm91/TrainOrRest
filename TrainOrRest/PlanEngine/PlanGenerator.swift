@@ -190,13 +190,7 @@ enum PlanGenerator {
         }
         if let longDate {
             let longKm = min(rounded(volume * Tuning.longRunFraction), Tuning.longRunCapKm)
-            workouts.append(PlannedWorkoutSpec(
-                date: longDate,
-                kind: .long,
-                distanceKm: longKm,
-                paceBand: paces.easy,
-                details: "Long run at E pace"
-            ))
+            workouts.append(longRun(date: longDate, distanceKm: longKm, paces: paces))
             remainingVolume -= longKm
         }
 
@@ -310,21 +304,25 @@ enum PlanGenerator {
         switch kind {
         case .tempo:
             let tempoKm = rounded(min(max(weekVolume * 0.12, 3), 8))
+            let structure = tempoStructure(tempoKm: tempoKm, paces: paces)
             return PlannedWorkoutSpec(
                 date: date,
                 kind: .tempo,
                 distanceKm: rounded(tempoKm + Tuning.warmupCooldownKm),
                 paceBand: paces.threshold,
-                details: "2 km warm-up · \(formatKm(tempoKm)) km at T pace · 2 km cool-down"
+                details: WorkoutProse.details(for: .tempo, structure: structure),
+                structure: structure
             )
         case .intervals:
             let repCount = max(3, min(6, Int(weekVolume * 0.08)))
+            let structure = intervalStructure(repCount: repCount, paces: paces)
             return PlannedWorkoutSpec(
                 date: date,
                 kind: .intervals,
                 distanceKm: rounded(Double(repCount) + Tuning.warmupCooldownKm),
                 paceBand: paces.interval,
-                details: "2 km warm-up · \(repCount) × 1 km at I pace (2–3 min jog) · 2 km cool-down"
+                details: WorkoutProse.details(for: .intervals, structure: structure),
+                structure: structure
             )
         default:
             fatalError("Not a quality template: \(kind)")
@@ -332,13 +330,56 @@ enum PlanGenerator {
     }
 
     private static func easyRun(date: Date, distanceKm: Double, paces: TrainingPaces) -> PlannedWorkoutSpec {
-        PlannedWorkoutSpec(
+        let structure = WorkoutStructure.easyRun(distanceKm: distanceKm, paces: paces)
+        return PlannedWorkoutSpec(
             date: date,
             kind: .easy,
             distanceKm: distanceKm,
             paceBand: paces.easy,
-            details: "Easy run at E pace"
+            details: WorkoutProse.details(for: .easy, structure: structure),
+            structure: structure
         )
+    }
+
+    private static func longRun(date: Date, distanceKm: Double, paces: TrainingPaces) -> PlannedWorkoutSpec {
+        let structure = WorkoutStructure.easyRun(distanceKm: distanceKm, paces: paces)
+        return PlannedWorkoutSpec(
+            date: date,
+            kind: .long,
+            distanceKm: distanceKm,
+            paceBand: paces.easy,
+            details: WorkoutProse.details(for: .long, structure: structure),
+            structure: structure
+        )
+    }
+
+    private static func tempoStructure(tempoKm: Double, paces: TrainingPaces) -> [WorkoutStepGroup] {
+        [
+            WorkoutStepGroup(steps: [
+                WorkoutStep(role: .warmUp, distanceKm: 2, paceBand: paces.easy)
+            ]),
+            WorkoutStepGroup(steps: [
+                WorkoutStep(role: .work, distanceKm: tempoKm, paceBand: paces.threshold)
+            ]),
+            WorkoutStepGroup(steps: [
+                WorkoutStep(role: .coolDown, distanceKm: 2, paceBand: paces.easy)
+            ])
+        ]
+    }
+
+    private static func intervalStructure(repCount: Int, paces: TrainingPaces) -> [WorkoutStepGroup] {
+        [
+            WorkoutStepGroup(steps: [
+                WorkoutStep(role: .warmUp, distanceKm: 2, paceBand: paces.easy)
+            ]),
+            WorkoutStepGroup(repeatCount: repCount, steps: [
+                WorkoutStep(role: .work, distanceKm: 1, paceBand: paces.interval),
+                WorkoutStep(role: .recovery, durationSeconds: 150, paceBand: paces.easy)
+            ]),
+            WorkoutStepGroup(steps: [
+                WorkoutStep(role: .coolDown, distanceKm: 2, paceBand: paces.easy)
+            ])
+        ]
     }
 
     // MARK: - Date helpers
@@ -370,7 +411,4 @@ enum PlanGenerator {
         (km * 10).rounded() / 10
     }
 
-    private static func formatKm(_ km: Double) -> String {
-        km.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(km)) : String(format: "%.1f", km)
-    }
 }

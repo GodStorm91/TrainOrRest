@@ -140,6 +140,7 @@ enum ReadinessStore {
                 && row.kindRaw == new.workout.kind.rawValue
                 && abs(row.distanceKm - new.workout.distanceKm) < 0.05
                 && row.paceFastSecondsPerKm == new.workout.paceBand?.fastSecondsPerKm
+                && row.structure == new.workout.structure
         }
         guard !unchanged else { return }
 
