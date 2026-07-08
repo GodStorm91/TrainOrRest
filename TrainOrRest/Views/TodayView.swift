@@ -260,18 +260,31 @@ struct TodayView: View {
         let r = todayReadiness
         return [
             DriverMetric(label: "HRV", value: r?.hrvMean7.map { "\(Int($0))" } ?? "–", unit: "ms",
-                         delta: delta(r?.hrvMean7, r?.hrvMean28, higherIsBetter: true), caption: r?.hrvMean28.map { "vs \(Int($0)) ms baseline" } ?? "baseline building"),
+                         delta: delta(r?.hrvMean7, r?.hrvMean28, higherIsBetter: true), caption: r?.hrvMean28.map { "vs \(Int($0)) ms baseline" } ?? "baseline building",
+                         sparkline: wellnessSeries(\.hrvSDNN), sparkColor: Theme.accent),
             DriverMetric(label: "Resting HR", value: r?.rhrMean7.map { "\(Int($0))" } ?? "–", unit: "bpm",
-                         delta: delta(r?.rhrMean7, r?.rhrMean28, higherIsBetter: false), caption: r?.rhrMean28.map { "vs \(Int($0)) bpm baseline" } ?? "baseline building"),
+                         delta: delta(r?.rhrMean7, r?.rhrMean28, higherIsBetter: false), caption: r?.rhrMean28.map { "vs \(Int($0)) bpm baseline" } ?? "baseline building",
+                         sparkline: wellnessSeries(\.restingHeartRate), sparkColor: Theme.good),
             DriverMetric(label: "Sleep", value: r?.sleepLastNight.map { Formatters.sleep($0) } ?? "–", unit: "",
-                         delta: nil, caption: "last night"),
+                         delta: nil, caption: "last night",
+                         sparkline: wellnessSeries(\.sleepHours), sparkColor: Theme.accent),
             DriverMetric(label: "VO₂max", value: latestVO2.map { String(format: "%.1f", $0) } ?? "–", unit: "",
                          delta: nil, caption: "ml/kg/min"),
             DriverMetric(label: "Load · ACWR", value: r?.acuteChronicRatio.map { String(format: "%.2f", $0) } ?? "–", unit: "",
-                         delta: nil, caption: loadCaption, badge: loadBadge),
+                         delta: nil, caption: loadCaption, badge: loadBadge,
+                         sparkline: readinessSeries(\.acuteChronicRatio), sparkColor: Theme.accent2),
             DriverMetric(label: "Streak", value: "\(streak)", unit: streak == 1 ? "day" : "days",
                          delta: nil, caption: streak > 0 ? "keep it going" : "run to start"),
         ]
+    }
+
+    /// Recent history for a wellness metric, oldest→newest, capped at 14 points.
+    private func wellnessSeries(_ metric: (DailyWellness) -> Double?) -> [Double] {
+        Array(wellness.prefix(14).compactMap(metric).reversed())
+    }
+
+    private func readinessSeries(_ metric: (DailyReadiness) -> Double?) -> [Double] {
+        Array(readinessDays.prefix(14).compactMap(metric).reversed())
     }
 
     private func delta(_ a: Double?, _ b: Double?, higherIsBetter: Bool) -> DriverMetric.Delta? {
@@ -326,8 +339,35 @@ struct DriverMetric: Identifiable {
     var delta: Delta?
     var caption: String
     var badge: (String, Bool)?
+    var sparkline: [Double] = []
+    var sparkColor: Color = Theme.accent
 
     struct Delta { var text: String; var good: Bool }
+}
+
+/// Thin normalized trend line for a driver card. Renders nothing under 2 points.
+struct Sparkline: View {
+    let values: [Double]
+    var color: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            if values.count >= 2, let lo = values.min(), let hi = values.max() {
+                let range = max(hi - lo, 0.0001)
+                Path { path in
+                    for (index, value) in values.enumerated() {
+                        let x = geo.size.width * CGFloat(index) / CGFloat(values.count - 1)
+                        let y = geo.size.height * (1 - CGFloat((value - lo) / range))
+                        let point = CGPoint(x: x, y: y)
+                        index == 0 ? path.move(to: point) : path.addLine(to: point)
+                    }
+                }
+                .stroke(color, style: .init(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            }
+        }
+        .frame(height: 22)
+        .accessibilityHidden(true)
+    }
 }
 
 struct DriverCard: View {
@@ -355,6 +395,9 @@ struct DriverCard: View {
                 if !metric.unit.isEmpty {
                     Text(metric.unit).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.dim)
                 }
+            }
+            if metric.sparkline.count >= 2 {
+                Sparkline(values: metric.sparkline, color: metric.sparkColor)
             }
             Text(metric.caption).font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.faint)
         }
