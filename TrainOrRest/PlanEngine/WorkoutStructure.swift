@@ -79,6 +79,9 @@ enum WorkoutStructure {
 }
 
 enum WorkoutProse {
+    /// Prose rendered from the structure itself, so a coach-created session
+    /// describes its own warm-up, work and recovery rather than the canonical
+    /// template's. Canonical structures render exactly as they always have.
     static func details(for kind: WorkoutKind, structure: [WorkoutStepGroup]) -> String {
         switch kind {
         case .easy:
@@ -86,14 +89,46 @@ enum WorkoutProse {
         case .long:
             return "Long run at E pace"
         case .tempo:
-            let workKm = structure.flatMap(\.steps).first { $0.role == .work }?.distanceKm ?? 0
-            return "2 km warm-up · \(formatKm(workKm)) km at T pace · 2 km cool-down"
+            let steps = structure.flatMap(\.steps)
+            var parts: [String] = []
+            if let warmUp = steps.first(where: { $0.role == .warmUp })?.distanceKm {
+                parts.append("\(formatKm(warmUp)) km warm-up")
+            }
+            let workKm = steps.first { $0.role == .work }?.distanceKm ?? 0
+            parts.append("\(formatKm(workKm)) km at T pace")
+            if let coolDown = steps.first(where: { $0.role == .coolDown })?.distanceKm {
+                parts.append("\(formatKm(coolDown)) km cool-down")
+            }
+            return parts.joined(separator: " · ")
         case .intervals:
-            let repeatCount = structure.first(where: { $0.repeatCount > 1 })?.repeatCount ?? 0
-            return "2 km warm-up · \(repeatCount) × 1 km at I pace (2–3 min jog) · 2 km cool-down"
+            let steps = structure.flatMap(\.steps)
+            var parts: [String] = []
+            if let warmUp = steps.first(where: { $0.role == .warmUp })?.distanceKm {
+                parts.append("\(formatKm(warmUp)) km warm-up")
+            }
+            let workGroup = structure.first { $0.steps.contains { $0.role == .work } }
+            let reps = workGroup?.repeatCount ?? 0
+            let repKm = workGroup?.steps.first { $0.role == .work }?.distanceKm ?? 0
+            var core = "\(reps) × \(formatKm(repKm)) km at I pace"
+            if let recovery = workGroup?.steps.first(where: { $0.role == .recovery })?.durationSeconds {
+                core += " (\(recoveryPhrase(recovery)))"
+            }
+            parts.append(core)
+            if let coolDown = steps.first(where: { $0.role == .coolDown })?.distanceKm {
+                parts.append("\(formatKm(coolDown)) km cool-down")
+            }
+            return parts.joined(separator: " · ")
         case .race:
             return ""
         }
+    }
+
+    /// The canonical jog is described as a range because the exact stored value
+    /// is a midpoint, not a prescription. Other recoveries print their real time.
+    private static func recoveryPhrase(_ seconds: Double) -> String {
+        guard seconds != WorkoutFactory.intervalRecoverySeconds else { return "2–3 min jog" }
+        let whole = Int(seconds.rounded())
+        return String(format: "%d:%02d jog", whole / 60, whole % 60)
     }
 
     private static func formatKm(_ km: Double) -> String {

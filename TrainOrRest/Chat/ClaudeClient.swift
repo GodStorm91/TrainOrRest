@@ -9,6 +9,9 @@ enum CoachChatConfig {
     static let anthropicVersion = "2023-06-01"
     static let historyLimit = 20
     static let maxToolRounds = 3
+    /// Headroom for adaptive thinking plus a structured tool call. Too low and
+    /// the model stops mid-`tool_use`, leaving an input we must never execute.
+    static let maxOutputTokens = 4_096
 }
 
 enum ClaudeClientError: LocalizedError {
@@ -27,7 +30,7 @@ enum ClaudeClientError: LocalizedError {
 
 struct ClaudeRequest: Encodable {
     var model: String
-    var maxTokens: Int = 1200
+    var maxTokens: Int = CoachChatConfig.maxOutputTokens
     var system: String
     var tools: [ClaudeTool]
     var messages: [ClaudeMessageParam]

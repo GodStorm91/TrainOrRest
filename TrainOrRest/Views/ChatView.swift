@@ -9,7 +9,8 @@ struct ChatView: View {
     @Query(sort: \ChatMessage.date) private var messages: [ChatMessage]
     @Query(sort: \PlannedWorkout.date) private var plannedWorkouts: [PlannedWorkout]
     @Query(sort: \CompletedActivity.date, order: .reverse) private var completedActivities: [CompletedActivity]
-    @StateObject private var chatStore = CoachChatStore()
+    @EnvironmentObject private var chatStore: CoachChatStore
+    @EnvironmentObject private var replacementCoordinator: WorkoutReplacementCoordinator
     @State private var draft = ""
     @State private var hasAPIKey = false
     @State private var includeHealthContext = true
@@ -55,7 +56,7 @@ struct ChatView: View {
         .task { refreshKeyState() }
         .onAppear { refreshKeyState() }
         .overlay(alignment: .top) {
-            if let error = chatStore.lastError {
+            if let error = chatStore.lastError ?? replacementCoordinator.lastError {
                 Text(error)
                     .font(.footnote)
                     .foregroundStyle(.white)
@@ -63,6 +64,20 @@ struct ChatView: View {
                     .background(Theme.bad, in: Capsule())
                     .padding(.top, 4)
             }
+        }
+        .alert(
+            replacementCoordinator.pending?.presentation.title ?? "",
+            isPresented: replacementAlertPresented,
+            presenting: replacementCoordinator.pending
+        ) { replacement in
+            Button(replacement.presentation.replaceAction, role: .destructive) {
+                replacementCoordinator.confirm(replacement.id)
+            }
+            Button(replacement.presentation.keepAction, role: .cancel) {
+                replacementCoordinator.cancel()
+            }
+        } message: { replacement in
+            Text(replacement.presentation.message)
         }
     }
 
@@ -184,6 +199,7 @@ struct ChatView: View {
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .strokeBorder(Theme.border, lineWidth: 1)
                 )
+                .disabled(replacementCoordinator.pending != nil || replacementCoordinator.isConfirming)
             Button {
                 send()
             } label: {
@@ -207,7 +223,17 @@ struct ChatView: View {
     }
 
     private var isSendDisabled: Bool {
-        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chatStore.isSending
+        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || chatStore.isSending
+            || replacementCoordinator.pending != nil
+            || replacementCoordinator.isConfirming
+    }
+
+    private var replacementAlertPresented: Binding<Bool> {
+        Binding(
+            get: { replacementCoordinator.pending != nil && !replacementCoordinator.isConfirming },
+            set: { if !$0 { replacementCoordinator.cancel() } }
+        )
     }
 
     // MARK: - Ask Next suggestions

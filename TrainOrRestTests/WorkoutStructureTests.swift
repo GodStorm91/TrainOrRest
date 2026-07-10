@@ -66,6 +66,77 @@ final class WorkoutStructureTests: XCTestCase {
         XCTAssertEqual(WorkoutStructure.totalDistanceKm(intervals.structure), intervals.distanceKm, accuracy: 0.05)
     }
 
+    // MARK: - Shared factory
+
+    /// The generator and the coach build workouts through the same factory, so
+    /// the generator's output must equal the canonical recipes exactly.
+    func testGeneratorOutputMatchesCanonicalFactory() {
+        let workouts = plan.weeks.flatMap(\.workouts)
+        let tempo = workouts.first { $0.kind == .tempo }!
+        let intervals = workouts.first { $0.kind == .intervals }!
+        let easy = workouts.first { $0.kind == .easy }!
+
+        let workKm = tempo.structure.flatMap(\.steps).first { $0.role == .work }!.distanceKm!
+        let reps = intervals.structure.first { $0.repeatCount > 1 }!.repeatCount
+
+        let canonicalTempo = WorkoutFactory.canonicalTempo(tempoKm: workKm, paces: paces)
+        let canonicalIntervals = WorkoutFactory.canonicalIntervals(repCount: reps, paces: paces)
+        let canonicalEasy = WorkoutFactory.canonicalEasy(distanceKm: easy.distanceKm, paces: paces)
+
+        XCTAssertEqual(canonicalTempo.structure, tempo.structure)
+        XCTAssertEqual(canonicalTempo.distanceKm, tempo.distanceKm, accuracy: 0.001)
+        XCTAssertEqual(canonicalTempo.details, tempo.details)
+        XCTAssertEqual(canonicalTempo.paceBand, tempo.paceBand)
+
+        XCTAssertEqual(canonicalIntervals.structure, intervals.structure)
+        XCTAssertEqual(canonicalIntervals.distanceKm, intervals.distanceKm, accuracy: 0.001)
+        XCTAssertEqual(canonicalIntervals.details, intervals.details)
+
+        XCTAssertEqual(canonicalEasy.structure, easy.structure)
+        XCTAssertEqual(canonicalEasy.details, easy.details)
+    }
+
+    /// A model may only choose shape and zone; the app supplies every pace.
+    func testFactoryResolvesZonesFromAppFitness() throws {
+        let recipe = WorkoutRecipe(kind: .intervals, blocks: [
+            .init(repeatCount: 1, steps: [.distance(.warmUp, 2, .easy)]),
+            .init(repeatCount: 4, steps: [
+                .distance(.work, 1, .interval),
+                .duration(.recovery, 90, .easy)
+            ]),
+            .init(repeatCount: 1, steps: [.distance(.coolDown, 2, .easy)])
+        ])
+
+        let built = try WorkoutFactory.build(recipe, paces: paces)
+
+        XCTAssertEqual(built.paceBand, paces.interval)
+        XCTAssertEqual(built.structure[1].steps[0].paceBand, paces.interval)
+        XCTAssertEqual(built.structure[1].steps[1].paceBand, paces.easy)
+        XCTAssertEqual(built.distanceKm, 8, accuracy: 0.001) // 2 + 4×1 + 2
+        XCTAssertEqual(built.details, "2 km warm-up · 4 × 1 km at I pace (1:30 jog) · 2 km cool-down")
+    }
+
+    func testFactoryRejectsUnsafeOrIncoherentRecipes() {
+        let cases: [(String, WorkoutRecipe, TrainingPaces?)] = [
+            ("race", WorkoutRecipe(kind: .race, blocks: [.init(repeatCount: 1, steps: [.distance(.work, 5, .easy)])]), paces),
+            ("tempo work at easy pace", WorkoutFactory.tempoRecipe(tempoKm: 5).replacingWorkZone(.easy), paces),
+            ("quality without fitness", WorkoutFactory.tempoRecipe(tempoKm: 5), nil),
+            ("zero target", WorkoutRecipe(kind: .easy, blocks: [.init(repeatCount: 1, steps: [.distance(.work, 0, .easy)])]), paces),
+            ("distance over cap", WorkoutRecipe(kind: .easy, blocks: [.init(repeatCount: 1, steps: [.distance(.work, 500, .easy)])]), paces),
+            ("repeat over cap", WorkoutRecipe(kind: .easy, blocks: [.init(repeatCount: 99, steps: [.distance(.work, 1, .easy)])]), paces)
+        ]
+        for (name, recipe, paces) in cases {
+            XCTAssertThrowsError(try WorkoutFactory.build(recipe, paces: paces), "\(name) must be rejected")
+        }
+    }
+
+    /// Easy and long stay unpaced rather than failing when fitness is unknown.
+    func testEasyRunBuildsWithoutFitness() throws {
+        let built = try WorkoutFactory.build(WorkoutFactory.singleRun(kind: .easy, distanceKm: 6), paces: nil)
+        XCTAssertNil(built.paceBand)
+        XCTAssertEqual(built.distanceKm, 6, accuracy: 0.001)
+    }
+
     func testStructuredDurationUsesPerStepPace() {
         let tempoKm = 5.0
         let structure = [
@@ -92,5 +163,22 @@ final class WorkoutStructureTests: XCTestCase {
         let row = PlannedWorkout(spec: workout, weekIndex: 0, phase: .base)
 
         XCTAssertEqual(row.structure, workout.structure)
+    }
+}
+
+private extension WorkoutRecipe {
+    /// Bends a canonical recipe into an invalid one for rejection tests.
+    func replacingWorkZone(_ zone: PaceZone) -> WorkoutRecipe {
+        var copy = self
+        copy.blocks = copy.blocks.map { block in
+            var block = block
+            block.steps = block.steps.map { step in
+                var step = step
+                if step.role == .work { step.zone = zone }
+                return step
+            }
+            return block
+        }
+        return copy
     }
 }

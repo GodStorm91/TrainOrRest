@@ -10,6 +10,9 @@ struct TrainOrRestApp: App {
 
     private let container: ModelContainer
     @StateObject private var engine: SyncEngine
+    @StateObject private var pushService: WorkoutPushService
+    @StateObject private var chatStore: CoachChatStore
+    @StateObject private var replacementCoordinator: WorkoutReplacementCoordinator
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -24,9 +27,13 @@ struct TrainOrRestApp: App {
             fatalError("Failed to create SwiftData container: \(error)")
         }
         self.container = container
+        let pushService = WorkoutPushService(modelContext: container.mainContext)
+        let replacementCoordinator = WorkoutReplacementCoordinator(container: container)
+        let chatStore = CoachChatStore(replacementCoordinator: replacementCoordinator)
         let engine = SyncEngine(
             health: HealthKitService(),
-            modelContext: container.mainContext
+            modelContext: container.mainContext,
+            pushService: pushService
         )
         // Register observer queries at launch, not from view lifecycle:
         // HealthKit background launches never connect a scene, so view
@@ -34,6 +41,9 @@ struct TrainOrRestApp: App {
         // Registering before authorization is safe (queries return nothing).
         engine.startObserving()
         _engine = StateObject(wrappedValue: engine)
+        _pushService = StateObject(wrappedValue: pushService)
+        _chatStore = StateObject(wrappedValue: chatStore)
+        _replacementCoordinator = StateObject(wrappedValue: replacementCoordinator)
 
         // Background tasks must be registered before launch finishes.
         BGTaskScheduler.shared.register(
@@ -47,6 +57,9 @@ struct TrainOrRestApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(engine)
+                .environmentObject(pushService)
+                .environmentObject(chatStore)
+                .environmentObject(replacementCoordinator)
         }
         .modelContainer(container)
         .onChange(of: scenePhase) { _, phase in

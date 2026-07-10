@@ -78,6 +78,375 @@ enum CoachTools {
         return AppliedAdjustment(summary: summaries.joined(separator: "; "))
     }
 
+    /// Action-dependent field rules. The JSON Schema cannot express these, so
+    /// Swift stays authoritative.
+    private static func validateFields(_ change: PlanAdjustmentProposal.Change) throws {
+        switch change.action {
+        case .create:
+            guard change.workout != nil else { throw ValidationError("create requires a workout.") }
+            guard change.detail == nil else { throw ValidationError("create does not take a detail date.") }
+        case .move, .swap:
+            guard change.detail != nil else {
+                throw ValidationError("\(change.action.rawValue) requires a target date.")
+            }
+            guard change.workout == nil else {
+                throw ValidationError("\(change.action.rawValue) does not take a workout.")
+            }
+        case .rest, .downgrade:
+            guard change.detail == nil, change.workout == nil else {
+                throw ValidationError("\(change.action.rawValue) takes only a date.")
+            }
+        }
+    }
+
+    // MARK: - Create
+
+    private struct Candidate {
+        var date: Date
+        var built: BuiltWorkout
+        var weekIndex: Int
+    }
+
+    /// Returns a replacement that needs explicit user confirmation when one
+    /// create targets an eligible occupied day. This is intentionally read-only:
+    /// the coordinator owns the only destructive commit path.
+    static func pendingReplacement(
+        for proposal: PlanAdjustmentProposal,
+        in context: ModelContext,
+        today: Date,
+        calendar: Calendar,
+        language: CoachLanguage
+    ) throws -> PendingWorkoutReplacement? {
+        guard proposal.changes.count == 1,
+              let change = proposal.changes.first,
+              change.action == .create else { return nil }
+        try validateFields(change)
+
+        guard let goal = try PlanStore.activeGoal(in: context)?.spec,
+              let plan = try PlanStore.activePlan(in: context) else {
+            throw ValidationError("No active plan.")
+        }
+        let date = try parseDay(change.date, calendar: calendar)
+        let todayStart = calendar.startOfDay(for: today)
+        let raceDay = calendar.startOfDay(for: goal.raceDate)
+        guard date > todayStart else { return nil }
+        guard date != raceDay, date < raceDay else { return nil }
+        guard goal.availableDays.contains(PlanGenerator.weekday(of: date, calendar: calendar)) else {
+            return nil
+        }
+
+        var spec = try currentPlanSpec(in: context, today: today, calendar: calendar)
+        guard let location = locate(date, in: spec) else { return nil }
+        let rows = try context.fetch(FetchDescriptor<PlannedWorkout>())
+        let matchingRows = rows.filter { calendar.isDate($0.date, inSameDayAs: date) }
+        guard matchingRows.count == 1,
+              let existing = matchingRows.first,
+              existing.status == .planned,
+              existing.kind != .race,
+              existing.plan === plan,
+              let existingKind = existing.kind,
+              let payload = change.workout else { return nil }
+
+        let fitness = try PlanStore.currentFitness(in: context, today: today, calendar: calendar)
+        let paces = fitness.map { VDOTTable.trainingPaces(vdot: $0.vdot) }
+        let built = try WorkoutFactory.build(try recipe(from: payload), paces: paces)
+        let old = spec.weeks[location.week].workouts[location.workout]
+        spec.weeks[location.week].workouts[location.workout] = PlannedWorkoutSpec(
+            date: date,
+            kind: built.kind,
+            distanceKm: built.distanceKm,
+            paceBand: built.paceBand,
+            details: built.details,
+            structure: built.structure
+        )
+        let delta = built.distanceKm - old.distanceKm
+        spec.weeks[location.week].targetVolumeKm = PlanGenerator.rounded(
+            spec.weeks[location.week].targetVolumeKm + delta
+        )
+        let peakCap = fitness.map { max($0.weeklyVolumeKm * 1.35, $0.longestRecentRunKm * 2) }
+        let issues = PlanValidator.validate(spec, calendar: calendar, peakCapKm: peakCap)
+        guard issues.isEmpty else {
+            throw ValidationError(issues.map(\.message).joined(separator: "; "))
+        }
+
+        let existingSummary = WorkoutReplacementSummary(kind: existingKind, distanceKm: existing.distanceKm)
+        let proposedSummary = WorkoutReplacementSummary(kind: built.kind, distanceKm: built.distanceKm)
+        return PendingWorkoutReplacement(
+            expected: WorkoutReplacementFingerprint(workout: existing),
+            date: date,
+            payload: payload,
+            presentation: language.replacementPresentation(
+                date: date, existing: existingSummary, proposed: proposedSummary
+            ),
+            appliedSummary: language.replacementAppliedSummary(
+                date: date, existing: existingSummary, proposed: proposedSummary
+            ),
+            successMessage: language.replacementSuccessMessage(
+                date: date, proposed: proposedSummary
+            ),
+            failureMessage: language.replacementFailureMessage
+        )
+    }
+
+    /// Rebuilds and commits a previously confirmed replacement in an isolated
+    /// context. Every identity and plan invariant is checked again because the
+    /// alert may have been visible while the schedule changed elsewhere.
+    static func confirmReplacement(
+        _ pending: PendingWorkoutReplacement,
+        in context: ModelContext,
+        today: Date,
+        calendar: Calendar
+    ) throws {
+        guard let goal = try PlanStore.activeGoal(in: context)?.spec,
+              let plan = try PlanStore.activePlan(in: context) else {
+            throw ValidationError("The active plan is no longer available.")
+        }
+        let raceDay = calendar.startOfDay(for: goal.raceDate)
+        guard pending.date < raceDay,
+              goal.availableDays.contains(PlanGenerator.weekday(of: pending.date, calendar: calendar)) else {
+            throw ValidationError("That date is no longer available for a workout.")
+        }
+        let rows = try context.fetch(FetchDescriptor<PlannedWorkout>())
+        guard let existing = rows.first(where: { $0.uuid == pending.expected.uuid }),
+              pending.expected.matches(existing),
+              calendar.isDate(existing.date, inSameDayAs: pending.date),
+              existing.date > calendar.startOfDay(for: today),
+              existing.status == .planned,
+              existing.kind != .race,
+              existing.plan === plan else {
+            throw ValidationError("That scheduled workout changed before confirmation. Please ask again.")
+        }
+
+        var spec = try currentPlanSpec(in: context, today: today, calendar: calendar)
+        guard let location = locate(pending.date, in: spec) else {
+            throw ValidationError("That scheduled workout is no longer available.")
+        }
+        let fitness = try PlanStore.currentFitness(in: context, today: today, calendar: calendar)
+        let paces = fitness.map { VDOTTable.trainingPaces(vdot: $0.vdot) }
+        let built = try WorkoutFactory.build(try recipe(from: pending.payload), paces: paces)
+        let old = spec.weeks[location.week].workouts[location.workout]
+        spec.weeks[location.week].workouts[location.workout] = PlannedWorkoutSpec(
+            date: pending.date,
+            kind: built.kind,
+            distanceKm: built.distanceKm,
+            paceBand: built.paceBand,
+            details: built.details,
+            structure: built.structure
+        )
+        spec.weeks[location.week].targetVolumeKm = PlanGenerator.rounded(
+            spec.weeks[location.week].targetVolumeKm + built.distanceKm - old.distanceKm
+        )
+        let peakCap = fitness.map { max($0.weeklyVolumeKm * 1.35, $0.longestRecentRunKm * 2) }
+        let issues = PlanValidator.validate(spec, calendar: calendar, peakCapKm: peakCap)
+        guard issues.isEmpty else {
+            throw ValidationError(issues.map(\.message).joined(separator: "; "))
+        }
+
+        existing.kindRaw = built.kind.rawValue
+        existing.distanceKm = built.distanceKm
+        existing.paceFastSecondsPerKm = built.paceBand?.fastSecondsPerKm
+        existing.paceSlowSecondsPerKm = built.paceBand?.slowSecondsPerKm
+        existing.details = built.details
+        existing.structure = built.structure
+        existing.status = .planned
+        existing.manuallyOverridden = true
+        existing.matchedActivityUUID = nil
+        var targets = plan.weekTargetVolumesKm
+        targets[location.week] = spec.weeks[location.week].targetVolumeKm
+        plan.weekTargetVolumesKm = targets
+        context.insert(ChatMessage(
+            role: .assistant,
+            text: pending.successMessage,
+            date: .now,
+            appliedAdjustment: pending.appliedSummary
+        ))
+        try context.save()
+    }
+
+    /// Creates are validated as a whole batch against a copied plan, then
+    /// inserted as new rows only. Existing workouts are never rewritten.
+    private static func applyCreates(
+        _ changes: [PlanAdjustmentProposal.Change],
+        in context: ModelContext,
+        today: Date,
+        calendar: Calendar
+    ) throws -> AppliedAdjustment {
+        guard let goal = try PlanStore.activeGoal(in: context)?.spec,
+              let plan = try PlanStore.activePlan(in: context) else {
+            throw ValidationError("No active plan.")
+        }
+        let fitness = try PlanStore.currentFitness(in: context, today: today, calendar: calendar)
+        let paces = fitness.map { VDOTTable.trainingPaces(vdot: $0.vdot) }
+        var spec = try currentPlanSpec(in: context, today: today, calendar: calendar)
+
+        let dayStart = calendar.startOfDay(for: today)
+        let raceDay = calendar.startOfDay(for: goal.raceDate)
+        var candidates: [Candidate] = []
+        var proposedDates: Set<Date> = []
+
+        for change in changes {
+            let date = try parseDay(change.date, calendar: calendar)
+            guard date >= dayStart else { throw ValidationError("Cannot create a workout in the past.") }
+            guard date != raceDay else { throw ValidationError("Race day cannot hold another workout.") }
+            guard date < raceDay else { throw ValidationError("\(change.date) is after race day.") }
+            guard goal.availableDays.contains(PlanGenerator.weekday(of: date, calendar: calendar)) else {
+                throw ValidationError("\(change.date) is not one of the user's running days.")
+            }
+            guard proposedDates.insert(date).inserted else {
+                throw ValidationError("Two workouts proposed for \(change.date).")
+            }
+            guard locate(date, in: spec) == nil else {
+                throw ValidationError("\(change.date) already has a workout.")
+            }
+            guard let weekIndex = weekIndex(for: date, in: spec, calendar: calendar) else {
+                throw ValidationError("\(change.date) is outside the training plan.")
+            }
+            guard let payload = change.workout else { throw ValidationError("create requires a workout.") }
+            let built = try WorkoutFactory.build(try recipe(from: payload), paces: paces)
+            candidates.append(Candidate(date: date, built: built, weekIndex: weekIndex))
+        }
+
+        // Candidate plan: add each workout and raise its week's target volume so
+        // the existing volume, ramp and taper checks see the real load.
+        for candidate in candidates {
+            var week = spec.weeks[candidate.weekIndex]
+            week.workouts.append(PlannedWorkoutSpec(
+                date: candidate.date,
+                kind: candidate.built.kind,
+                distanceKm: candidate.built.distanceKm,
+                paceBand: candidate.built.paceBand,
+                details: candidate.built.details,
+                structure: candidate.built.structure
+            ))
+            week.workouts.sort { $0.date < $1.date }
+            week.targetVolumeKm = PlanGenerator.rounded(week.targetVolumeKm + candidate.built.distanceKm)
+            spec.weeks[candidate.weekIndex] = week
+        }
+
+        let peakCap = fitness.map { max($0.weeklyVolumeKm * 1.35, $0.longestRecentRunKm * 2) }
+        let issues = PlanValidator.validate(spec, calendar: calendar, peakCapKm: peakCap)
+        guard issues.isEmpty else {
+            throw ValidationError(issues.map(\.message).joined(separator: "; "))
+        }
+
+        try insert(candidates, into: plan, spec: spec, in: context, calendar: calendar)
+        let summary = candidates
+            .map { "Created \($0.built.kind.rawValue) on \(CoachContextBuilder.day($0.date, calendar: calendar))" }
+            .joined(separator: "; ")
+        return AppliedAdjustment(summary: summary)
+    }
+
+    /// Targeted persistence: insert the new rows and update only the affected
+    /// week targets, then save once. Any failure removes everything staged.
+    private static func insert(
+        _ candidates: [Candidate],
+        into plan: TrainingPlan,
+        spec: TrainingPlanSpec,
+        in context: ModelContext,
+        calendar: Calendar
+    ) throws {
+        // Re-check collisions against the store immediately before staging.
+        let existing = try context.fetch(FetchDescriptor<PlannedWorkout>())
+        for candidate in candidates where existing.contains(where: {
+            calendar.isDate($0.date, inSameDayAs: candidate.date)
+        }) {
+            throw ValidationError("A workout already exists on \(CoachContextBuilder.day(candidate.date, calendar: calendar)).")
+        }
+
+        let originalTargets = plan.weekTargetVolumesKm
+        var staged: [PlannedWorkout] = []
+        do {
+            for candidate in candidates {
+                guard let phase = plan.phase(forWeek: candidate.weekIndex) else {
+                    throw ValidationError("Plan week \(candidate.weekIndex) is missing.")
+                }
+                let row = PlannedWorkout(
+                    spec: PlannedWorkoutSpec(
+                        date: candidate.date,
+                        kind: candidate.built.kind,
+                        distanceKm: candidate.built.distanceKm,
+                        paceBand: candidate.built.paceBand,
+                        details: candidate.built.details,
+                        structure: candidate.built.structure
+                    ),
+                    weekIndex: candidate.weekIndex,
+                    phase: phase
+                )
+                row.manuallyOverridden = true
+                row.plan = plan
+                context.insert(row)
+                staged.append(row)
+            }
+            var targets = plan.weekTargetVolumesKm
+            for candidate in candidates {
+                targets[candidate.weekIndex] = spec.weeks[candidate.weekIndex].targetVolumeKm
+            }
+            plan.weekTargetVolumesKm = targets
+            try context.save()
+        } catch {
+            for row in staged { context.delete(row) }
+            plan.weekTargetVolumesKm = originalTargets
+            throw error
+        }
+    }
+
+    private static func recipe(from payload: PlanAdjustmentProposal.CreateWorkout) throws -> WorkoutRecipe {
+        guard let kind = WorkoutKind(rawValue: payload.kind) else {
+            throw ValidationError("Unknown workout kind \(payload.kind).")
+        }
+        guard kind != .race else { throw ValidationError("Race workouts cannot be created.") }
+        guard !payload.blocks.isEmpty, payload.blocks.count <= WorkoutFactory.Limits.maxBlocks else {
+            throw ValidationError("A workout needs 1 to \(WorkoutFactory.Limits.maxBlocks) blocks.")
+        }
+
+        let blocks = try payload.blocks.map { block -> WorkoutRecipe.Block in
+            guard !block.steps.isEmpty, block.steps.count <= WorkoutFactory.Limits.maxStepsPerBlock else {
+                throw ValidationError("A block needs 1 to \(WorkoutFactory.Limits.maxStepsPerBlock) steps.")
+            }
+            return WorkoutRecipe.Block(
+                repeatCount: block.repeatCount,
+                steps: try block.steps.map(step)
+            )
+        }
+        return WorkoutRecipe(kind: kind, blocks: blocks)
+    }
+
+    private static func step(_ payload: PlanAdjustmentProposal.CreateWorkout.Step) throws -> WorkoutRecipe.Step {
+        guard let role = role(payload.role) else {
+            throw ValidationError("Unknown step role \(payload.role).")
+        }
+        guard let zone = PaceZone(rawValue: payload.paceZone) else {
+            throw ValidationError("Unknown pace zone \(payload.paceZone).")
+        }
+        switch payload.targetType {
+        case "distance_km":
+            return .distance(role, payload.targetValue, zone)
+        case "duration_seconds":
+            return .duration(role, payload.targetValue, zone)
+        default:
+            throw ValidationError("Unknown target type \(payload.targetType).")
+        }
+    }
+
+    private static func role(_ value: String) -> WorkoutStepRole? {
+        switch value {
+        case "warm_up": .warmUp
+        case "work": .work
+        case "recovery": .recovery
+        case "cool_down": .coolDown
+        default: nil
+        }
+    }
+
+    private static func weekIndex(for date: Date, in spec: TrainingPlanSpec, calendar: Calendar) -> Int? {
+        spec.weeks.firstIndex { week in
+            guard let end = calendar.date(byAdding: .day, value: 7, to: week.startDate) else { return false }
+            return date >= week.startDate && date < end
+        }
+    }
+
+    // MARK: - Edit actions
+
     private static func apply(
         _ change: PlanAdjustmentProposal.Change,
         date: Date,
@@ -90,15 +459,17 @@ enum CoachTools {
         guard workout.kind != .race else { throw ValidationError("Race day cannot be edited.") }
 
         switch change.action {
+        case .create:
+            throw ValidationError("create is handled as its own batch.")
         case .rest:
             spec.weeks[location.week].workouts.remove(at: location.workout)
             return "Rested \(change.date)"
         case .downgrade:
-            let structure = WorkoutStructure.run(distanceKm: workout.distanceKm, paceBand: paces?.easy)
+            let built = WorkoutFactory.canonicalEasy(distanceKm: workout.distanceKm, paces: paces)
             spec.weeks[location.week].workouts[location.workout] = PlannedWorkoutSpec(
-                date: date, kind: .easy, distanceKm: workout.distanceKm,
-                paceBand: paces?.easy, details: WorkoutProse.details(for: .easy, structure: structure),
-                structure: structure
+                date: date, kind: built.kind, distanceKm: built.distanceKm,
+                paceBand: built.paceBand, details: built.details,
+                structure: built.structure
             )
             return "Downgraded \(change.date) to easy"
         case .move:
@@ -184,11 +555,24 @@ enum CoachTools {
         return try parseDay(value, calendar: calendar)
     }
 
+    /// Exact `YYYY-MM-DD` in the app's calendar. Rejects locale text, timestamps,
+    /// short fields and rollover dates (`2026-02-30`) by requiring the parsed day
+    /// to render back to the same string.
     static func parseDay(_ value: String, calendar: Calendar) throws -> Date {
-        var format = Date.FormatStyle().year().month(.twoDigits).day(.twoDigits)
-        format.timeZone = calendar.timeZone
-        guard let date = try? Date(value, strategy: format) else { throw ValidationError("Invalid date \(value).") }
-        return calendar.startOfDay(for: date)
+        func invalid() -> ValidationError { ValidationError("Invalid date \(value). Use YYYY-MM-DD.") }
+
+        guard value.count == 10 else { throw invalid() }
+        let parts = value.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 3,
+              parts[0].count == 4, parts[1].count == 2, parts[2].count == 2,
+              parts.allSatisfy({ $0.allSatisfy { $0.isASCII && $0.isNumber } }),
+              let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]),
+              let date = calendar.date(from: DateComponents(year: year, month: month, day: day))
+        else { throw invalid() }
+
+        let dayStart = calendar.startOfDay(for: date)
+        guard CoachContextBuilder.day(dayStart, calendar: calendar) == value else { throw invalid() }
+        return dayStart
     }
 
     struct ValidationError: LocalizedError {

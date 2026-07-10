@@ -9,15 +9,18 @@ final class CoachChatStore: ObservableObject {
     private let client: ClaudeServicing
     private let calendar: Calendar
     private let now: () -> Date
+    private let replacementCoordinator: WorkoutReplacementCoordinator?
 
     init(
         client: ClaudeServicing = ClaudeClient(),
         calendar: Calendar = .current,
-        now: @escaping () -> Date = { .now }
+        now: @escaping () -> Date = { .now },
+        replacementCoordinator: WorkoutReplacementCoordinator? = nil
     ) {
         self.client = client
         self.calendar = calendar
         self.now = now
+        self.replacementCoordinator = replacementCoordinator
     }
 
     func send(
@@ -42,6 +45,10 @@ final class CoachChatStore: ObservableObject {
     ) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        guard replacementCoordinator?.pending == nil else {
+            lastError = CoachLanguage.current.replacementPendingMessage
+            return
+        }
         let today = now()
         isSending = true
         lastError = nil
@@ -134,23 +141,55 @@ final class CoachChatStore: ObservableObject {
             }
 
             conversation.append(ClaudeMessageParam(role: "assistant", content: response.content))
-            let results = toolUses.map { toolUse -> ClaudeContentBlock in
-                guard toolUse.1 == CoachTools.toolName else {
-                    return .toolResult(toolUseID: toolUse.0, content: "Unknown tool.", isError: true)
-                }
-                do {
-                    let proposal = try toolUse.2.decoded(PlanAdjustmentProposal.self)
-                    let result = try CoachTools.apply(
-                        proposal: proposal, in: context, today: today, calendar: calendar
+            guard toolUses.count == 1 else {
+                conversation.append(ClaudeMessageParam(role: "user", content: toolUses.map {
+                    .toolResult(
+                        toolUseID: $0.0,
+                        content: "Rejected: submit one plan adjustment at a time.",
+                        isError: true
                     )
-                    applied.append(result.summary)
-                    return .toolResult(toolUseID: toolUse.0, content: "Applied: \(result.summary)", isError: false)
-                } catch {
-                    let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                    return .toolResult(toolUseID: toolUse.0, content: "Rejected: \(message)", isError: true)
-                }
+                }))
+                continue
             }
-            conversation.append(ClaudeMessageParam(role: "user", content: results))
+
+            let toolUse = toolUses[0]
+            guard toolUse.1 == CoachTools.toolName else {
+                conversation.append(ClaudeMessageParam(role: "user", content: [
+                    .toolResult(toolUseID: toolUse.0, content: "Unknown tool.", isError: true)
+                ]))
+                continue
+            }
+
+            do {
+                let proposal = try toolUse.2.decoded(PlanAdjustmentProposal.self)
+                if let replacement = try CoachTools.pendingReplacement(
+                    for: proposal,
+                    in: context,
+                    today: today,
+                    calendar: calendar,
+                    language: .current
+                ) {
+                    guard let replacementCoordinator else {
+                        throw CoachTools.ValidationError("Workout replacement confirmation is unavailable.")
+                    }
+                    replacementCoordinator.stage(replacement)
+                    return
+                }
+
+                let result = try CoachTools.apply(
+                    proposal: proposal, in: context, today: today, calendar: calendar
+                )
+                applied.append(result.summary)
+                NotificationCenter.default.post(name: .planDidChange, object: nil)
+                conversation.append(ClaudeMessageParam(role: "user", content: [
+                    .toolResult(toolUseID: toolUse.0, content: "Applied: \(result.summary)", isError: false)
+                ]))
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                conversation.append(ClaudeMessageParam(role: "user", content: [
+                    .toolResult(toolUseID: toolUse.0, content: "Rejected: \(message)", isError: true)
+                ]))
+            }
         }
 
         let fallback = "I could not safely finish the plan adjustment in three tool rounds."

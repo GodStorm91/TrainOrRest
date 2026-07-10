@@ -178,6 +178,77 @@ final class ChatFeatureTests: XCTestCase {
         })
     }
 
+    /// End-to-end: user asks, model calls the tool, the app builds and saves a
+    /// canonical workout, and the second round summarizes it.
+    func testChatStoreCreatesStructuredWorkoutEndToEnd() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedEveryDayPlan(in: context)
+        let saturday = PlanEngineTestSupport.date(2026, 1, 10, hour: 0) // left empty by the generator
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [
+                .passthrough(.object(["type": .string("thinking"), "thinking": .string("free day"), "signature": .string("sig")])),
+                .toolUse(id: "toolu_1", name: CoachTools.toolName, input: .object([
+                    "changes": .array([.object([
+                        "date": .string(CoachContextBuilder.day(saturday, calendar: calendar)),
+                        "action": .string("create"),
+                        "workout": .object([
+                            "kind": .string("easy"),
+                            "blocks": .array([.object([
+                                "repeat_count": .number(1),
+                                "steps": .array([.object([
+                                    "role": .string("work"),
+                                    "target_type": .string("distance_km"),
+                                    "target_value": .number(5),
+                                    "pace_zone": .string("easy")
+                                ])])
+                            ])])
+                        ])
+                    ])])
+                ]))
+            ], stopReason: "tool_use"),
+            ClaudeResponse(content: [.text("Added a 5 km easy run on Saturday.")], stopReason: "end_turn")
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(text: "Add an easy run on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
+
+        let created = try XCTUnwrap(try plannedWorkouts(on: saturday, in: context).first)
+        XCTAssertEqual(created.kind, .easy)
+        XCTAssertEqual(created.distanceKm, 5, accuracy: 0.001)
+        XCTAssertTrue(created.manuallyOverridden)
+        XCTAssertEqual(client.requests.count, 2)
+
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        XCTAssertEqual(messages.last?.appliedAdjustment, "Created easy on 2026-01-10")
+
+        // The assistant turn replays every block, thinking first, before the result.
+        let replayed = try XCTUnwrap(client.requests[1].messages.dropLast().last)
+        XCTAssertEqual(replayed.role, "assistant")
+        XCTAssertEqual(replayed.content.count, 2)
+        if case .passthrough = replayed.content[0] {} else { XCTFail("thinking block was dropped") }
+    }
+
+    /// A truncated turn may carry a half-written tool input: never execute it.
+    func testChatStoreRefusesToApplyTruncatedToolCall() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let before = try context.fetch(FetchDescriptor<PlannedWorkout>()).count
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [
+                .toolUse(id: "toolu_1", name: CoachTools.toolName, input: .object(["changes": .array([])]))
+            ], stopReason: "max_tokens")
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(text: "Rebuild my week.", model: "claude-test", apiKey: "test-key", in: context)
+
+        XCTAssertEqual(try context.fetch(FetchDescriptor<PlannedWorkout>()).count, before)
+        XCTAssertEqual(client.requests.count, 1, "a truncated turn must not start another round")
+        XCTAssertNotNil(store.lastError)
+    }
+
     private func makeContainer() throws -> ModelContainer {
         let schema = Schema([
             CompletedActivity.self, DailyWellness.self, SyncState.self,
@@ -218,6 +289,20 @@ final class ChatFeatureTests: XCTestCase {
             computedAt: today
         ))
         try context.save()
+    }
+
+    /// Every weekday available, which leaves the generator a genuinely free day
+    /// for the coach to create on.
+    private func seedEveryDayPlan(in context: ModelContext) throws {
+        let goal = GoalSpec(
+            distance: .halfMarathon,
+            targetTimeSeconds: 105 * 60,
+            raceDate: PlanEngineTestSupport.date(2026, 4, 19),
+            availableDays: Set(Weekday.allCases),
+            longRunDay: .sunday
+        )
+        let fitness = FitnessProfile(vdot: 48, weeklyVolumeKm: 40, volumeTrend: 0, longestRecentRunKm: 16)
+        try PlanStore.replaceGoal(spec: goal, fitness: fitness, today: today, calendar: calendar, in: context)
     }
 
     private func seedGoalOnly(in context: ModelContext) throws {

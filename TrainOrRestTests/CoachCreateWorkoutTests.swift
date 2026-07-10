@@ -1,0 +1,332 @@
+import SwiftData
+import XCTest
+@testable import TrainOrRest
+
+/// Coach-created workouts: canonical construction, the rejection matrix, and
+/// atomic persistence that never touches an existing row.
+@MainActor
+final class CoachCreateWorkoutTests: XCTestCase {
+    private let calendar = PlanEngineTestSupport.calendar
+    private let today = PlanEngineTestSupport.date(2026, 1, 5)      // Monday
+    private let freeDay = PlanEngineTestSupport.date(2026, 1, 9, hour: 0)  // Friday, no workout
+    private let occupiedDay = PlanEngineTestSupport.date(2026, 1, 7, hour: 0) // Wednesday tempo
+    private let raceDay = PlanEngineTestSupport.date(2026, 1, 25, hour: 0)
+
+    // MARK: - Success
+
+    func testCreatesTempoWithAppDerivedPaceAndCanonicalStructure() throws {
+        let container = try seededContainer()
+        let context = container.mainContext
+        let paces = try XCTUnwrap(fitnessPaces(in: context))
+        let targetBefore = try weekTarget(0, in: context)
+
+        let result = try create(.tempo(workKm: 3), on: freeDay, in: context)
+
+        let workout = try XCTUnwrap(workout(on: freeDay, in: context))
+        XCTAssertEqual(result.summary, "Created tempo on 2026-01-09")
+        XCTAssertEqual(workout.kind, .tempo)
+        XCTAssertEqual(workout.distanceKm, 7, accuracy: 0.001) // 2 + 3 + 2
+        XCTAssertEqual(workout.paceBand, paces.threshold, "pace comes from app fitness, never the payload")
+        XCTAssertEqual(workout.details, "2 km warm-up · 3 km at T pace · 2 km cool-down")
+        XCTAssertEqual(workout.structure.flatMap(\.steps).map(\.role), [.warmUp, .work, .coolDown])
+        XCTAssertEqual(workout.structure.flatMap(\.steps)[1].paceBand, paces.threshold)
+        XCTAssertTrue(workout.manuallyOverridden)
+        XCTAssertEqual(workout.status, .planned)
+        XCTAssertNotNil(workout.plan)
+        XCTAssertEqual(try weekTarget(0, in: context), targetBefore + 7, accuracy: 0.001)
+    }
+
+    func testCreatesIntervalsWithRepeatedWorkAndDurationRecovery() throws {
+        let container = try seededContainer()
+        let context = container.mainContext
+        let paces = try XCTUnwrap(fitnessPaces(in: context))
+
+        _ = try create(.intervals(reps: 3), on: freeDay, in: context)
+
+        let workout = try XCTUnwrap(workout(on: freeDay, in: context))
+        let repeatGroup = try XCTUnwrap(workout.structure.first { $0.repeatCount > 1 })
+        XCTAssertEqual(workout.kind, .intervals)
+        XCTAssertEqual(workout.distanceKm, 7, accuracy: 0.001) // 2 + 3×1 + 2; the jog adds time, not distance
+        XCTAssertEqual(repeatGroup.repeatCount, 3)
+        XCTAssertEqual(repeatGroup.steps[0].paceBand, paces.interval)
+        XCTAssertEqual(repeatGroup.steps[1].durationSeconds, 150)
+        XCTAssertEqual(repeatGroup.steps[1].paceBand, paces.easy, "recovery resolves through the app's easy pace")
+        XCTAssertEqual(workout.details, "2 km warm-up · 3 × 1 km at I pace (2–3 min jog) · 2 km cool-down")
+    }
+
+    func testCreatesEasyAndLongWithEasyPace() throws {
+        for payload in [CreatePayload.easy(km: 5), .long(km: 10)] {
+            let container = try seededContainer()
+            let context = container.mainContext
+            let paces = try XCTUnwrap(fitnessPaces(in: context))
+
+            _ = try create(payload, on: freeDay, in: context)
+
+            let workout = try XCTUnwrap(workout(on: freeDay, in: context))
+            XCTAssertEqual(workout.paceBand, paces.easy)
+            XCTAssertEqual(workout.structure.flatMap(\.steps).map(\.role), [.work])
+        }
+    }
+
+    func testMultipleValidCreatesCommitTogether() throws {
+        let container = try seededContainer()
+        let context = container.mainContext
+        let saturday = PlanEngineTestSupport.date(2026, 1, 10, hour: 0)
+        let targetBefore = try weekTarget(0, in: context)
+
+        // Both creates must fit under the week's volume cap, or the batch is
+        // (correctly) rejected as a whole.
+        let result = try CoachTools.apply(
+            proposal: .init(changes: [
+                change(.tempo(workKm: 3), on: freeDay),
+                change(.easy(km: 3), on: saturday)
+            ]),
+            in: context, today: today, calendar: calendar
+        )
+
+        XCTAssertEqual(result.summary, "Created tempo on 2026-01-09; Created easy on 2026-01-10")
+        XCTAssertNotNil(try workout(on: freeDay, in: context))
+        XCTAssertNotNil(try workout(on: saturday, in: context))
+        XCTAssertEqual(try weekTarget(0, in: context), targetBefore + 10, accuracy: 0.001)
+    }
+
+    // MARK: - Rejection matrix (nothing is ever written)
+
+    func testRejectionsWriteNothing() throws {
+        let saturday = PlanEngineTestSupport.date(2026, 1, 10, hour: 0)
+        let cases: [(String, [PlanAdjustmentProposal.Change])] = [
+            ("past date", [change(.easy(km: 5), on: PlanEngineTestSupport.date(2026, 1, 4, hour: 0))]),
+            ("race day", [change(.easy(km: 5), on: raceDay)]),
+            ("after race", [change(.easy(km: 5), on: PlanEngineTestSupport.date(2026, 1, 26, hour: 0))]),
+            ("occupied day", [change(.easy(km: 5), on: occupiedDay)]),
+            ("outside plan", [change(.easy(km: 5), on: PlanEngineTestSupport.date(2026, 3, 6, hour: 0))]),
+            ("hard sessions too close", [change(.tempo(workKm: 3), on: saturday)]),
+            ("duplicate date in batch", [change(.easy(km: 5), on: freeDay), change(.easy(km: 4), on: freeDay)]),
+            ("mixed batch", [change(.easy(km: 5), on: freeDay), .init(date: "2026-01-07", action: .rest, detail: nil, workout: nil)]),
+            ("race kind", [change(.raw(kind: "race"), on: freeDay)]),
+            ("both targets on one step", [change(.malformedStep, on: freeDay)]),
+            ("unknown pace zone", [change(.raw(kind: "easy", zone: "sprint"), on: freeDay)]),
+            ("create carries a detail date", [.init(date: "2026-01-09", action: .create, detail: "2026-01-10", workout: CreatePayload.easy(km: 5).workout)]),
+            ("create without a workout", [.init(date: "2026-01-09", action: .create, detail: nil, workout: nil)]),
+            ("excessive distance", [change(.easy(km: 500), on: freeDay)]),
+            ("weekly volume over cap", [change(.easy(km: 12), on: freeDay)])
+        ]
+
+        for (name, changes) in cases {
+            let container = try seededContainer()
+            let context = container.mainContext
+            let before = try snapshot(in: context)
+            let targetsBefore = try targets(in: context)
+
+            XCTAssertThrowsError(
+                try CoachTools.apply(proposal: .init(changes: changes), in: context, today: today, calendar: calendar),
+                "\(name) must be rejected"
+            )
+            XCTAssertEqual(try snapshot(in: context), before, "\(name) must not change any workout")
+            XCTAssertEqual(try targets(in: context), targetsBefore, "\(name) must not change week targets")
+        }
+    }
+
+    func testUnavailableDayIsRejected() throws {
+        let container = try seededContainer(availableDays: [.monday, .tuesday, .wednesday, .thursday, .friday, .sunday])
+        let context = container.mainContext
+        let saturday = PlanEngineTestSupport.date(2026, 1, 10, hour: 0)
+        XCTAssertThrowsError(try create(.easy(km: 5), on: saturday, in: context)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("running days"))
+        }
+    }
+
+    /// Quality zones cannot be invented without fitness; the app refuses rather
+    /// than guessing a threshold pace.
+    func testQualityCreateWithoutFitnessIsRejected() throws {
+        let container = try seededContainer(withHistory: false)
+        let context = container.mainContext
+        XCTAssertThrowsError(try create(.tempo(workKm: 3), on: freeDay, in: context)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("Not enough recent running data"))
+        }
+        XCTAssertNil(try workout(on: freeDay, in: context))
+    }
+
+    /// One bad create in a batch rolls the whole batch back, including targets.
+    func testInvalidCreateInBatchRollsBackEverything() throws {
+        let container = try seededContainer()
+        let context = container.mainContext
+        let saturday = PlanEngineTestSupport.date(2026, 1, 10, hour: 0)
+        let before = try snapshot(in: context)
+        let targetsBefore = try targets(in: context)
+
+        XCTAssertThrowsError(try CoachTools.apply(
+            proposal: .init(changes: [
+                change(.tempo(workKm: 3), on: freeDay),      // valid on its own
+                change(.tempo(workKm: 3), on: saturday)      // too close to Sunday's long run
+            ]),
+            in: context, today: today, calendar: calendar
+        ))
+
+        XCTAssertNil(try workout(on: freeDay, in: context), "the valid create must not survive alone")
+        XCTAssertEqual(try snapshot(in: context), before)
+        XCTAssertEqual(try targets(in: context), targetsBefore)
+    }
+
+    func testExistingWorkoutsKeepIdentityAndStateAfterSuccessfulCreate() throws {
+        let container = try seededContainer()
+        let context = container.mainContext
+        let before = try snapshot(in: context)
+
+        _ = try create(.easy(km: 5), on: freeDay, in: context)
+
+        let after = try snapshot(in: context).filter { row in before.contains { $0.uuid == row.uuid } }
+        XCTAssertEqual(after, before, "creating a workout must not rewrite any existing row")
+    }
+
+    // MARK: - Payloads
+
+    private enum CreatePayload {
+        case easy(km: Double), long(km: Double), tempo(workKm: Double), intervals(reps: Int)
+        case malformedStep
+        case raw(kind: String, zone: String = "easy")
+
+        var workout: PlanAdjustmentProposal.CreateWorkout {
+            typealias Step = PlanAdjustmentProposal.CreateWorkout.Step
+            func distance(_ role: String, _ km: Double, _ zone: String) -> Step {
+                Step(role: role, targetType: "distance_km", targetValue: km, paceZone: zone)
+            }
+            switch self {
+            case .easy(let km):
+                return .init(kind: "easy", blocks: [.init(repeatCount: 1, steps: [distance("work", km, "easy")])])
+            case .long(let km):
+                return .init(kind: "long", blocks: [.init(repeatCount: 1, steps: [distance("work", km, "easy")])])
+            case .tempo(let workKm):
+                return .init(kind: "tempo", blocks: [.init(repeatCount: 1, steps: [
+                    distance("warm_up", 2, "easy"),
+                    distance("work", workKm, "threshold"),
+                    distance("cool_down", 2, "easy")
+                ])])
+            case .intervals(let reps):
+                return .init(kind: "intervals", blocks: [
+                    .init(repeatCount: 1, steps: [distance("warm_up", 2, "easy")]),
+                    .init(repeatCount: reps, steps: [
+                        distance("work", 1, "interval"),
+                        Step(role: "recovery", targetType: "duration_seconds", targetValue: 150, paceZone: "easy")
+                    ]),
+                    .init(repeatCount: 1, steps: [distance("cool_down", 2, "easy")])
+                ])
+            case .malformedStep:
+                return .init(kind: "easy", blocks: [.init(repeatCount: 1, steps: [
+                    Step(role: "work", targetType: "elevation_m", targetValue: 5, paceZone: "easy")
+                ])])
+            case .raw(let kind, let zone):
+                return .init(kind: kind, blocks: [.init(repeatCount: 1, steps: [distance("work", 5, zone)])])
+            }
+        }
+    }
+
+    private func change(_ payload: CreatePayload, on date: Date) -> PlanAdjustmentProposal.Change {
+        .init(
+            date: CoachContextBuilder.day(date, calendar: calendar),
+            action: .create,
+            detail: nil,
+            workout: payload.workout
+        )
+    }
+
+    @discardableResult
+    private func create(_ payload: CreatePayload, on date: Date, in context: ModelContext) throws -> AppliedAdjustment {
+        try CoachTools.apply(
+            proposal: .init(changes: [change(payload, on: date)]),
+            in: context, today: today, calendar: calendar
+        )
+    }
+
+    // MARK: - Fixtures
+
+    private struct RowSnapshot: Equatable {
+        var uuid: UUID
+        var date: Date
+        var kind: String
+        var distanceKm: Double
+        var status: String
+        var manuallyOverridden: Bool
+        var matched: UUID?
+    }
+
+    private func snapshot(in context: ModelContext) throws -> [RowSnapshot] {
+        try context.fetch(FetchDescriptor<PlannedWorkout>(sortBy: [SortDescriptor(\.date)])).map {
+            RowSnapshot(
+                uuid: $0.uuid, date: $0.date, kind: $0.kindRaw, distanceKm: $0.distanceKm,
+                status: $0.statusRaw, manuallyOverridden: $0.manuallyOverridden,
+                matched: $0.matchedActivityUUID
+            )
+        }
+    }
+
+    private func targets(in context: ModelContext) throws -> [Double] {
+        try XCTUnwrap(PlanStore.activePlan(in: context)).weekTargetVolumesKm
+    }
+
+    private func weekTarget(_ index: Int, in context: ModelContext) throws -> Double {
+        try targets(in: context)[index]
+    }
+
+    private func workout(on date: Date, in context: ModelContext) throws -> PlannedWorkout? {
+        try context.fetch(FetchDescriptor<PlannedWorkout>()).first {
+            calendar.isDate($0.date, inSameDayAs: date)
+        }
+    }
+
+    private func fitnessPaces(in context: ModelContext) throws -> TrainingPaces? {
+        try PlanStore.currentFitness(in: context, today: today, calendar: calendar)
+            .map { VDOTTable.trainingPaces(vdot: $0.vdot) }
+    }
+
+    /// Returns the container: the caller must retain it, or SwiftData traps on
+    /// a context whose container has been deallocated.
+    private func seededContainer(
+        availableDays: Set<Weekday> = [.sunday, .monday, .tuesday, .wednesday, .thursday, .friday, .saturday],
+        withHistory: Bool = true
+    ) throws -> ModelContainer {
+        let schema = Schema([
+            CompletedActivity.self, DailyWellness.self, SyncState.self,
+            Goal.self, TrainingPlan.self, PlannedWorkout.self,
+            DailyReadiness.self, PlanSnapshot.self, ChatMessage.self
+        ])
+        let container = try ModelContainer(
+            for: schema,
+            configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)]
+        )
+        let context = container.mainContext
+
+        if withHistory {
+            // 11 runs of 12 km spanning 30 days: enough qualifying runs and span
+            // for a real FitnessProfile (~30 km/week).
+            for step in 0..<11 {
+                let offset = -(1 + step * 3)
+                context.insert(CompletedActivity(
+                    hkUUID: UUID(),
+                    date: calendar.date(byAdding: .day, value: offset, to: today)!,
+                    distanceMeters: 12_000,
+                    durationSeconds: 3_960,
+                    avgHeartRate: 145,
+                    maxHeartRate: 168,
+                    avgPaceSecondsPerKm: 330,
+                    sourceName: "Garmin"
+                ))
+            }
+            try context.save()
+        }
+
+        let goal = GoalSpec(
+            distance: .halfMarathon,
+            targetTimeSeconds: 105 * 60,
+            raceDate: raceDay,
+            availableDays: availableDays,
+            longRunDay: .sunday
+        )
+        // Generate the plan from the same fitness the coach path will recompute,
+        // so cap and ramp checks agree with the stored plan.
+        let fitness = try PlanStore.currentFitness(in: context, today: today, calendar: calendar)
+            ?? FitnessProfile(vdot: 44, weeklyVolumeKm: 30, volumeTrend: 0, longestRecentRunKm: 12)
+        try PlanStore.replaceGoal(spec: goal, fitness: fitness, today: today, calendar: calendar, in: context)
+        return container
+    }
+}

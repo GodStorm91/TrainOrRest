@@ -8,7 +8,10 @@ enum CoachContextBuilder {
     static func build(in context: ModelContext, today: Date, calendar: Calendar) throws -> String {
         var lines: [String] = [
             "You are TrainOrRest, a cautious running coach. Explain decisions from the user's actual data.",
-            "Use plan tools only for schedule changes. Never claim a plan edit was applied unless a tool result confirms it."
+            "Use plan tools only for schedule changes. Never claim a plan edit was applied unless a tool result confirms it.",
+            "Today is \(day(today, calendar: calendar)) (\(weekdayName(today, calendar: calendar))). Timezone: \(calendar.timeZone.identifier).",
+            "Every tool date must be an absolute local calendar date formatted YYYY-MM-DD. Resolve relative wording like 'tomorrow' or 'Saturday' against today's date yourself; never pass relative text to a tool.",
+            "You may create easy, long, tempo, and interval workouts. You cannot create or edit a race workout, and you cannot change the goal — say so plainly if asked."
         ]
 
         let goal = try PlanStore.activeGoal(in: context)?.spec
@@ -86,11 +89,19 @@ enum CoachContextBuilder {
     }
 
     static func day(_ date: Date, calendar: Calendar = .current) -> String {
+        formatter(calendar: calendar, format: "yyyy-MM-dd").string(from: date)
+    }
+
+    static func weekdayName(_ date: Date, calendar: Calendar = .current) -> String {
+        formatter(calendar: calendar, format: "EEEE").string(from: date)
+    }
+
+    private static func formatter(calendar: Calendar, format: String) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.timeZone = calendar.timeZone
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
+        formatter.dateFormat = format
+        return formatter
     }
 }

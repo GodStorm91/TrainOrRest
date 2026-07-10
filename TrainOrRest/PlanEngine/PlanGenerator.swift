@@ -298,88 +298,40 @@ enum PlanGenerator {
         return min(diff, 7 - diff)
     }
 
+    /// Quality templates come from the shared factory, so a coach-created tempo
+    /// or interval session is built by exactly the same code path.
     private static func qualityWorkout(
         kind: WorkoutKind, date: Date, weekVolume: Double, paces: TrainingPaces
     ) -> PlannedWorkoutSpec {
         switch kind {
         case .tempo:
             let tempoKm = rounded(min(max(weekVolume * 0.12, 3), 8))
-            let structure = tempoStructure(tempoKm: tempoKm, paces: paces)
-            return PlannedWorkoutSpec(
-                date: date,
-                kind: .tempo,
-                distanceKm: rounded(tempoKm + Tuning.warmupCooldownKm),
-                paceBand: paces.threshold,
-                details: WorkoutProse.details(for: .tempo, structure: structure),
-                structure: structure
-            )
+            return spec(date: date, built: WorkoutFactory.canonicalTempo(tempoKm: tempoKm, paces: paces))
         case .intervals:
             let repCount = max(3, min(6, Int(weekVolume * 0.08)))
-            let structure = intervalStructure(repCount: repCount, paces: paces)
-            return PlannedWorkoutSpec(
-                date: date,
-                kind: .intervals,
-                distanceKm: rounded(Double(repCount) + Tuning.warmupCooldownKm),
-                paceBand: paces.interval,
-                details: WorkoutProse.details(for: .intervals, structure: structure),
-                structure: structure
-            )
+            return spec(date: date, built: WorkoutFactory.canonicalIntervals(repCount: repCount, paces: paces))
         default:
             fatalError("Not a quality template: \(kind)")
         }
     }
 
     private static func easyRun(date: Date, distanceKm: Double, paces: TrainingPaces) -> PlannedWorkoutSpec {
-        let structure = WorkoutStructure.easyRun(distanceKm: distanceKm, paces: paces)
-        return PlannedWorkoutSpec(
-            date: date,
-            kind: .easy,
-            distanceKm: distanceKm,
-            paceBand: paces.easy,
-            details: WorkoutProse.details(for: .easy, structure: structure),
-            structure: structure
-        )
+        spec(date: date, built: WorkoutFactory.canonicalEasy(distanceKm: distanceKm, paces: paces))
     }
 
     private static func longRun(date: Date, distanceKm: Double, paces: TrainingPaces) -> PlannedWorkoutSpec {
-        let structure = WorkoutStructure.easyRun(distanceKm: distanceKm, paces: paces)
-        return PlannedWorkoutSpec(
+        spec(date: date, built: WorkoutFactory.canonicalLong(distanceKm: distanceKm, paces: paces))
+    }
+
+    private static func spec(date: Date, built: BuiltWorkout) -> PlannedWorkoutSpec {
+        PlannedWorkoutSpec(
             date: date,
-            kind: .long,
-            distanceKm: distanceKm,
-            paceBand: paces.easy,
-            details: WorkoutProse.details(for: .long, structure: structure),
-            structure: structure
+            kind: built.kind,
+            distanceKm: built.distanceKm,
+            paceBand: built.paceBand,
+            details: built.details,
+            structure: built.structure
         )
-    }
-
-    private static func tempoStructure(tempoKm: Double, paces: TrainingPaces) -> [WorkoutStepGroup] {
-        [
-            WorkoutStepGroup(steps: [
-                WorkoutStep(role: .warmUp, distanceKm: 2, paceBand: paces.easy)
-            ]),
-            WorkoutStepGroup(steps: [
-                WorkoutStep(role: .work, distanceKm: tempoKm, paceBand: paces.threshold)
-            ]),
-            WorkoutStepGroup(steps: [
-                WorkoutStep(role: .coolDown, distanceKm: 2, paceBand: paces.easy)
-            ])
-        ]
-    }
-
-    private static func intervalStructure(repCount: Int, paces: TrainingPaces) -> [WorkoutStepGroup] {
-        [
-            WorkoutStepGroup(steps: [
-                WorkoutStep(role: .warmUp, distanceKm: 2, paceBand: paces.easy)
-            ]),
-            WorkoutStepGroup(repeatCount: repCount, steps: [
-                WorkoutStep(role: .work, distanceKm: 1, paceBand: paces.interval),
-                WorkoutStep(role: .recovery, durationSeconds: 150, paceBand: paces.easy)
-            ]),
-            WorkoutStepGroup(steps: [
-                WorkoutStep(role: .coolDown, distanceKm: 2, paceBand: paces.easy)
-            ])
-        ]
     }
 
     // MARK: - Date helpers
