@@ -90,6 +90,60 @@ final class CoachCreateWorkoutTests: XCTestCase {
         XCTAssertEqual(try weekTarget(0, in: context), targetBefore + 10, accuracy: 0.001)
     }
 
+    func testCreateIgnoresUnrelatedExistingFutureVolumeViolation() throws {
+        let container = try seededContainer()
+        let context = container.mainContext
+        let plan = try XCTUnwrap(PlanStore.activePlan(in: context))
+        var targets = plan.weekTargetVolumesKm
+        targets[2] = 100
+        plan.weekTargetVolumesKm = targets
+        try context.save()
+
+        let result = try create(.easy(km: 5), on: freeDay, in: context)
+
+        XCTAssertEqual(result.summary, "Created easy on 2026-01-09")
+        XCTAssertNotNil(try workout(on: freeDay, in: context))
+        XCTAssertEqual(try weekTarget(2, in: context), 100, accuracy: 0.001)
+    }
+
+    func testMoveCannotWorsenExistingDuplicateDay() throws {
+        let container = try seededContainer()
+        let context = container.mainContext
+        let plan = try XCTUnwrap(PlanStore.activePlan(in: context))
+        let occupied = try XCTUnwrap(try workout(on: occupiedDay, in: context))
+        let kind = try XCTUnwrap(occupied.kind)
+        let phase = try XCTUnwrap(TrainingPhase(rawValue: occupied.phaseRaw))
+        let duplicate = PlannedWorkout(
+            spec: .init(
+                date: occupied.date, kind: kind, distanceKm: occupied.distanceKm,
+                paceBand: occupied.paceBand, details: occupied.details, structure: occupied.structure
+            ),
+            weekIndex: occupied.weekIndex,
+            phase: phase
+        )
+        duplicate.plan = plan
+        context.insert(duplicate)
+        try context.save()
+
+        let source = try XCTUnwrap(try context.fetch(FetchDescriptor<PlannedWorkout>()).first {
+            $0.weekIndex == occupied.weekIndex
+                && $0.kind != .race
+                && !calendar.isDate($0.date, inSameDayAs: occupiedDay)
+        })
+        XCTAssertThrowsError(try CoachTools.apply(
+            proposal: .init(changes: [.init(
+                date: CoachContextBuilder.day(source.date, calendar: calendar),
+                action: .move,
+                detail: CoachContextBuilder.day(occupiedDay, calendar: calendar)
+            )]),
+            in: context,
+            today: today,
+            calendar: calendar
+        )) { error in
+            XCTAssertTrue(error.localizedDescription.contains("Two workouts scheduled"))
+        }
+    }
+
     // MARK: - Rejection matrix (nothing is ever written)
 
     func testRejectionsWriteNothing() throws {

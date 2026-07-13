@@ -55,6 +55,13 @@ struct PendingWorkoutReplacement: Identifiable, Equatable {
     let date: Date
     let payload: PlanAdjustmentProposal.CreateWorkout
     let presentation: WorkoutReplacementPresentation
+    /// What the day holds now, and what would take its place — rendered as the
+    /// before/after rows of the plan-update card.
+    let existing: WorkoutReplacementSummary
+    let proposed: WorkoutReplacementSummary
+    /// Change to the affected week's target volume, in km. This is the same
+    /// delta the plan engine applies; nothing here is estimated.
+    let volumeDeltaKm: Double
     let appliedSummary: String
     let successMessage: String
     let failureMessage: String
@@ -64,6 +71,9 @@ struct PendingWorkoutReplacement: Identifiable, Equatable {
         date: Date,
         payload: PlanAdjustmentProposal.CreateWorkout,
         presentation: WorkoutReplacementPresentation,
+        existing: WorkoutReplacementSummary,
+        proposed: WorkoutReplacementSummary,
+        volumeDeltaKm: Double,
         appliedSummary: String,
         successMessage: String,
         failureMessage: String
@@ -73,6 +83,9 @@ struct PendingWorkoutReplacement: Identifiable, Equatable {
         self.date = date
         self.payload = payload
         self.presentation = presentation
+        self.existing = existing
+        self.proposed = proposed
+        self.volumeDeltaKm = volumeDeltaKm
         self.appliedSummary = appliedSummary
         self.successMessage = successMessage
         self.failureMessage = failureMessage

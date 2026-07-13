@@ -21,6 +21,27 @@ final class WorkoutReplacementTests: XCTestCase {
         XCTAssertTrue(try messages(in: ModelContext(container)).isEmpty)
     }
 
+    /// The plan-update card renders these fields, so they must describe the real
+    /// before/after workouts and the real change to the week's target volume.
+    func testStagedReplacementCarriesRealBeforeAfterAndVolumeDelta() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let existing = try XCTUnwrap(workout(on: occupiedDay, in: context))
+        let existingKind = try XCTUnwrap(existing.kind)
+        let existingDistance = existing.distanceKm
+
+        let pending = try pendingReplacement(in: context)
+
+        XCTAssertEqual(pending.existing.kind, existingKind)
+        XCTAssertEqual(pending.existing.distanceKm, existingDistance, accuracy: 0.001)
+        XCTAssertEqual(
+            pending.volumeDeltaKm,
+            pending.proposed.distanceKm - pending.existing.distanceKm,
+            accuracy: 0.051,
+            "the card's footer delta must match what the engine applies to the week target"
+        )
+    }
+
     func testConfirmationPreservesIdentityReplacesFieldsAndWritesAudit() throws {
         let container = try makeContainer()
         let context = container.mainContext

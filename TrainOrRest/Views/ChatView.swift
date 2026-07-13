@@ -65,20 +65,6 @@ struct ChatView: View {
                     .padding(.top, 4)
             }
         }
-        .alert(
-            replacementCoordinator.pending?.presentation.title ?? "",
-            isPresented: replacementAlertPresented,
-            presenting: replacementCoordinator.pending
-        ) { replacement in
-            Button(replacement.presentation.replaceAction, role: .destructive) {
-                replacementCoordinator.confirm(replacement.id)
-            }
-            Button(replacement.presentation.keepAction, role: .cancel) {
-                replacementCoordinator.cancel()
-            }
-        } message: { replacement in
-            Text(replacement.presentation.message)
-        }
     }
 
     private var coachHeader: some View {
@@ -170,7 +156,24 @@ struct ChatView: View {
                 plannedWorkouts: plannedWorkouts,
                 completedActivities: completedActivities
             )
-            if !messages.isEmpty, !chatStore.isSending {
+            // A staged swap takes over the suggestion slot: it needs a decision
+            // before anything else can be asked.
+            if let pending = replacementCoordinator.pending, !replacementCoordinator.isConfirming {
+                PlanUpdateCard(
+                    pending: pending,
+                    language: language,
+                    onApply: { replacementCoordinator.confirm(pending.id) },
+                    onKeep: { replacementCoordinator.cancel() },
+                    // Asking why is not a decision to swap, and the composer is
+                    // locked while a proposal stands — so dismiss it and prefill
+                    // the question. Nothing is applied either way.
+                    onAskWhy: {
+                        replacementCoordinator.cancel()
+                        draft = language.whySwapPrompt
+                    }
+                )
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else if !messages.isEmpty, !chatStore.isSending {
                 CoachAskNextStrip(prompts: suggestionPrompts, label: language.askNextLabel) { draft = $0 }
             }
             composer
@@ -182,6 +185,7 @@ struct ChatView: View {
         .overlay(alignment: .top) {
             Rectangle().fill(Theme.border).frame(height: 1)
         }
+        .animation(.easeOut(duration: 0.2), value: replacementCoordinator.pending)
     }
 
     private var composer: some View {
@@ -227,13 +231,6 @@ struct ChatView: View {
             || chatStore.isSending
             || replacementCoordinator.pending != nil
             || replacementCoordinator.isConfirming
-    }
-
-    private var replacementAlertPresented: Binding<Bool> {
-        Binding(
-            get: { replacementCoordinator.pending != nil && !replacementCoordinator.isConfirming },
-            set: { if !$0 { replacementCoordinator.cancel() } }
-        )
     }
 
     // MARK: - Ask Next suggestions

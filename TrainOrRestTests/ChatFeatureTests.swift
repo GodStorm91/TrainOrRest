@@ -23,6 +23,18 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertTrue(text.contains("Data freshness:"))
     }
 
+    func testCoachContextTreatsRaceTargetAsWorkoutContext() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+
+        let text = try CoachContextBuilder.build(in: context, today: today, calendar: calendar)
+
+        XCTAssertTrue(text.contains("target time can be context for a training request"))
+        XCTAssertTrue(text.contains("not a goal change or race workout"))
+        XCTAssertTrue(text.contains("if no day is stated, ask which day to schedule it"))
+    }
+
     func testToolDowngradeAppliesToPersistedPlan() throws {
         let container = try makeContainer()
         let context = container.mainContext

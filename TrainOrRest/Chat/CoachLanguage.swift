@@ -69,6 +69,24 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Copy-to-clipboard action under a chat bubble.
+    var copyLabel: String {
+        switch self {
+        case .en: "Copy"
+        case .ja: "コピー"
+        case .vi: "Sao chép"
+        }
+    }
+
+    /// Transient confirmation shown after copying.
+    var copiedLabel: String {
+        switch self {
+        case .en: "Copied"
+        case .ja: "コピーしました"
+        case .vi: "Đã sao chép"
+        }
+    }
+
     /// Appended to the coach system prompt so replies match the chosen language.
     /// Empty for English (no behavior change).
     var systemPromptDirective: String {
@@ -93,6 +111,118 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         case .ja: "先に予定済みワークアウトを置き換えるか選択してください。"
         case .vi: "Hãy chọn có thay bài tập đã lên lịch hay không trước."
         }
+    }
+
+    // MARK: - Plan update card
+
+    /// Eyebrow above the proposed change.
+    var planUpdateTitle: String {
+        switch self {
+        case .en: "PLAN UPDATED"
+        case .ja: "プラン更新"
+        case .vi: "KẾ HOẠCH CẬP NHẬT"
+        }
+    }
+
+    /// Badge on the workout that would take the day.
+    var planUpdateNewBadge: String {
+        switch self {
+        case .en: "NEW"
+        case .ja: "新規"
+        case .vi: "MỚI"
+        }
+    }
+
+    /// Primary action on the card.
+    var applyChangesLabel: String {
+        switch self {
+        case .en: "Apply changes"
+        case .ja: "変更を適用"
+        case .vi: "Áp dụng thay đổi"
+        }
+    }
+
+    /// Dismissing action, named after the workout the day already holds.
+    func keepExistingLabel(_ kind: WorkoutKind) -> String {
+        switch self {
+        case .en: "Keep \(shortKindName(kind))"
+        case .ja: "\(shortKindName(kind))のまま"
+        case .vi: "Giữ \(shortKindName(kind))"
+        }
+    }
+
+    /// Third action on the card; also the text prefilled into the composer.
+    var whySwapPrompt: String {
+        switch self {
+        case .en: "Why the swap?"
+        case .ja: "なぜ入れ替えるの？"
+        case .vi: "Vì sao lại đổi?"
+        }
+    }
+
+    /// One row of the card, e.g. "Tempo run · 8 km".
+    func workoutRowText(_ workout: WorkoutReplacementSummary) -> String {
+        "\(kindName(workout.kind)) · \(distanceText(workout.distanceKm))"
+    }
+
+    /// The real change to the week's target volume — never a projected ACWR,
+    /// which the app does not compute for future plan changes.
+    func weeklyVolumeDeltaText(_ deltaKm: Double) -> String {
+        guard abs(deltaKm) >= 0.05 else {
+            switch self {
+            case .en: return "Weekly volume unchanged"
+            case .ja: return "週間走行距離は変わりません"
+            case .vi: return "Khối lượng tuần không đổi"
+            }
+        }
+        let signed = "\(deltaKm > 0 ? "+" : "−")\(distanceText(abs(deltaKm)))"
+        switch self {
+        case .en: return "Projected weekly volume \(signed)"
+        case .ja: return "週間走行距離の見込み \(signed)"
+        case .vi: return "Khối lượng tuần dự kiến \(signed)"
+        }
+    }
+
+    /// Bare kind word, for reading inside a sentence ("Keep tempo").
+    private func shortKindName(_ kind: WorkoutKind) -> String {
+        switch (self, kind) {
+        case (.en, .easy): "easy"
+        case (.en, .long): "the long run"
+        case (.en, .tempo): "tempo"
+        case (.en, .intervals): "intervals"
+        case (.en, .race): "the race"
+        case (.ja, _): kindName(kind)
+        case (.vi, _): kindName(kind).lowercased()
+        }
+    }
+
+    private func kindName(_ kind: WorkoutKind) -> String {
+        switch (self, kind) {
+        case (.en, .easy): "Easy run"
+        case (.en, .long): "Long run"
+        case (.en, .tempo): "Tempo run"
+        case (.en, .intervals): "Intervals"
+        case (.en, .race): "Race"
+        case (.ja, .easy): "イージーラン"
+        case (.ja, .long): "ロングラン"
+        case (.ja, .tempo): "テンポ走"
+        case (.ja, .intervals): "インターバル"
+        case (.ja, .race): "レース"
+        case (.vi, .easy): "Chạy dễ"
+        case (.vi, .long): "Chạy dài"
+        case (.vi, .tempo): "Bài tempo"
+        case (.vi, .intervals): "Bài interval"
+        case (.vi, .race): "Cuộc đua"
+        }
+    }
+
+    /// Drops a trailing ".0" so a whole number reads "8 km", not "8.0 km".
+    private func distanceText(_ km: Double) -> String {
+        let rounded = (km * 10).rounded() / 10
+        let value = rounded == rounded.rounded()
+            ? String(Int(rounded))
+            : String(format: "%.1f", rounded)
+        return "\(value) km"
     }
 
     func replacementPresentation(

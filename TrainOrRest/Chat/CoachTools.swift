@@ -6,12 +6,44 @@ struct PlanAdjustmentProposal: Codable, Equatable {
 
     struct Change: Codable, Equatable {
         enum Action: String, Codable {
-            case swap, downgrade, rest, move
+            case swap, downgrade, rest, move, create
         }
 
         var date: String
         var action: Action
-        var detail: String?
+        var detail: String? = nil
+        var workout: CreateWorkout? = nil
+    }
+
+    /// A structured workout the coach asked the app to build. Only shape and
+    /// zones come from the model; the app resolves every pace itself.
+    struct CreateWorkout: Codable, Equatable {
+        var kind: String
+        var blocks: [Block]
+
+        struct Block: Codable, Equatable {
+            var repeatCount: Int
+            var steps: [Step]
+
+            enum CodingKeys: String, CodingKey {
+                case repeatCount = "repeat_count"
+                case steps
+            }
+        }
+
+        struct Step: Codable, Equatable {
+            var role: String
+            var targetType: String
+            var targetValue: Double
+            var paceZone: String
+
+            enum CodingKeys: String, CodingKey {
+                case role
+                case targetType = "target_type"
+                case targetValue = "target_value"
+                case paceZone = "pace_zone"
+            }
+        }
     }
 }
 
@@ -22,25 +54,26 @@ struct AppliedAdjustment: Equatable {
 @MainActor
 enum CoachTools {
     static let toolName = "propose_plan_adjustment"
+    /// Bounds untrusted batches before any allocation or persistence.
+    static let maxChangesPerProposal = 5
 
     static var tool: ClaudeTool {
         ClaudeTool(
             name: toolName,
-            description: "Propose safe edits to the user's planned workouts. The app validates every edit before applying it.",
+            description: """
+            Propose safe edits to the user's planned workouts, or create a new structured workout \
+            on a free training day. The app validates every proposal (dates, collisions, volume, \
+            intensity spacing) and resolves all paces itself before applying it.
+            """,
             inputSchema: .object([
                 "type": .string("object"),
+                "additionalProperties": .bool(false),
                 "properties": .object([
                     "changes": .object([
                         "type": .string("array"),
-                        "items": .object([
-                            "type": .string("object"),
-                            "properties": .object([
-                                "date": .object(["type": .string("string"), "description": .string("Workout date as YYYY-MM-DD")]),
-                                "action": .object(["type": .string("string"), "enum": .array(["swap", "downgrade", "rest", "move"].map(JSONValue.string))]),
-                                "detail": .object(["type": .string("string"), "description": .string("Target date as YYYY-MM-DD for swap or move")])
-                            ]),
-                            "required": .array(["date", "action"].map(JSONValue.string))
-                        ])
+                        "minItems": .number(1),
+                        "maxItems": .number(Double(maxChangesPerProposal)),
+                        "items": changeSchema
                     ])
                 ]),
                 "required": .array([.string("changes")])
@@ -48,13 +81,121 @@ enum CoachTools {
         )
     }
 
+    private static var changeSchema: JSONValue {
+        .object([
+            "type": .string("object"),
+            "additionalProperties": .bool(false),
+            "properties": .object([
+                "date": .object([
+                    "type": .string("string"),
+                    "description": .string("Absolute local workout date, formatted YYYY-MM-DD")
+                ]),
+                "action": .object([
+                    "type": .string("string"),
+                    "enum": .array(["swap", "downgrade", "rest", "move", "create"].map(JSONValue.string)),
+                    "description": .string("create adds a new workout; the others edit the workout already on date")
+                ]),
+                "detail": .object([
+                    "type": .string("string"),
+                    "description": .string("Target date as YYYY-MM-DD; required for swap and move, forbidden otherwise")
+                ]),
+                "workout": workoutSchema
+            ]),
+            "required": .array(["date", "action"].map(JSONValue.string))
+        ])
+    }
+
+    private static var workoutSchema: JSONValue {
+        .object([
+            "type": .string("object"),
+            "additionalProperties": .bool(false),
+            "description": .string("Required for action=create; forbidden otherwise. Race workouts cannot be created."),
+            "properties": .object([
+                "kind": .object([
+                    "type": .string("string"),
+                    "enum": .array(["easy", "long", "tempo", "intervals"].map(JSONValue.string))
+                ]),
+                "blocks": .object([
+                    "type": .string("array"),
+                    "minItems": .number(1),
+                    "maxItems": .number(Double(WorkoutFactory.Limits.maxBlocks)),
+                    "items": .object([
+                        "type": .string("object"),
+                        "additionalProperties": .bool(false),
+                        "properties": .object([
+                            "repeat_count": .object([
+                                "type": .string("integer"),
+                                "minimum": .number(1),
+                                "maximum": .number(Double(WorkoutFactory.Limits.maxRepeatCount)),
+                                "description": .string("How many times the steps in this block repeat")
+                            ]),
+                            "steps": .object([
+                                "type": .string("array"),
+                                "minItems": .number(1),
+                                "maxItems": .number(Double(WorkoutFactory.Limits.maxStepsPerBlock)),
+                                "items": stepSchema
+                            ])
+                        ]),
+                        "required": .array(["repeat_count", "steps"].map(JSONValue.string))
+                    ])
+                ])
+            ]),
+            "required": .array(["kind", "blocks"].map(JSONValue.string))
+        ])
+    }
+
+    private static var stepSchema: JSONValue {
+        .object([
+            "type": .string("object"),
+            "additionalProperties": .bool(false),
+            "properties": .object([
+                "role": .object([
+                    "type": .string("string"),
+                    "enum": .array(["warm_up", "work", "recovery", "cool_down"].map(JSONValue.string))
+                ]),
+                "target_type": .object([
+                    "type": .string("string"),
+                    "enum": .array(["distance_km", "duration_seconds"].map(JSONValue.string))
+                ]),
+                "target_value": .object([
+                    "type": .string("number"),
+                    "exclusiveMinimum": .number(0),
+                    "description": .string("Kilometres for distance_km, seconds for duration_seconds")
+                ]),
+                "pace_zone": .object([
+                    "type": .string("string"),
+                    "enum": .array(["easy", "threshold", "interval", "none"].map(JSONValue.string)),
+                    "description": .string("Tempo work uses threshold; interval work uses interval; everything else easy. The app supplies the actual pace.")
+                ])
+            ]),
+            "required": .array(["role", "target_type", "target_value", "pace_zone"].map(JSONValue.string))
+        ])
+    }
+
+    // MARK: - Apply
+
     static func apply(
         proposal: PlanAdjustmentProposal,
         in context: ModelContext,
         today: Date,
         calendar: Calendar
     ) throws -> AppliedAdjustment {
+        guard !proposal.changes.isEmpty else { throw ValidationError("No changes proposed.") }
+        guard proposal.changes.count <= maxChangesPerProposal else {
+            throw ValidationError("At most \(maxChangesPerProposal) changes per proposal.")
+        }
+        for change in proposal.changes { try validateFields(change) }
+
+        let creates = proposal.changes.filter { $0.action == .create }
+        if !creates.isEmpty {
+            guard creates.count == proposal.changes.count else {
+                throw ValidationError("Creating a workout cannot be combined with other changes.")
+            }
+            return try applyCreates(creates, in: context, today: today, calendar: calendar)
+        }
+
         var spec = try currentPlanSpec(in: context, today: today, calendar: calendar)
+        let baseline = spec
         let fitness = try PlanStore.currentFitness(in: context, today: today, calendar: calendar)
         let paces = fitness.map { VDOTTable.trainingPaces(vdot: $0.vdot) }
 
@@ -68,7 +209,9 @@ enum CoachTools {
         }
 
         let peakCap = fitness.map { max($0.weeklyVolumeKm * 1.35, $0.longestRecentRunKm * 2) }
-        let issues = PlanValidator.validate(spec, calendar: calendar, peakCapKm: peakCap)
+        let issues = introducedValidationIssues(
+            in: spec, comparedTo: baseline, calendar: calendar, peakCapKm: peakCap
+        )
         guard issues.isEmpty else {
             throw ValidationError(issues.map(\.message).joined(separator: "; "))
         }
@@ -136,6 +279,7 @@ enum CoachTools {
         }
 
         var spec = try currentPlanSpec(in: context, today: today, calendar: calendar)
+        let baseline = spec
         guard let location = locate(date, in: spec) else { return nil }
         let rows = try context.fetch(FetchDescriptor<PlannedWorkout>())
         let matchingRows = rows.filter { calendar.isDate($0.date, inSameDayAs: date) }
@@ -164,7 +308,9 @@ enum CoachTools {
             spec.weeks[location.week].targetVolumeKm + delta
         )
         let peakCap = fitness.map { max($0.weeklyVolumeKm * 1.35, $0.longestRecentRunKm * 2) }
-        let issues = PlanValidator.validate(spec, calendar: calendar, peakCapKm: peakCap)
+        let issues = introducedValidationIssues(
+            in: spec, comparedTo: baseline, calendar: calendar, peakCapKm: peakCap
+        )
         guard issues.isEmpty else {
             throw ValidationError(issues.map(\.message).joined(separator: "; "))
         }
@@ -178,6 +324,9 @@ enum CoachTools {
             presentation: language.replacementPresentation(
                 date: date, existing: existingSummary, proposed: proposedSummary
             ),
+            existing: existingSummary,
+            proposed: proposedSummary,
+            volumeDeltaKm: PlanGenerator.rounded(delta),
             appliedSummary: language.replacementAppliedSummary(
                 date: date, existing: existingSummary, proposed: proposedSummary
             ),
@@ -218,6 +367,7 @@ enum CoachTools {
         }
 
         var spec = try currentPlanSpec(in: context, today: today, calendar: calendar)
+        let baseline = spec
         guard let location = locate(pending.date, in: spec) else {
             throw ValidationError("That scheduled workout is no longer available.")
         }
@@ -237,7 +387,9 @@ enum CoachTools {
             spec.weeks[location.week].targetVolumeKm + built.distanceKm - old.distanceKm
         )
         let peakCap = fitness.map { max($0.weeklyVolumeKm * 1.35, $0.longestRecentRunKm * 2) }
-        let issues = PlanValidator.validate(spec, calendar: calendar, peakCapKm: peakCap)
+        let issues = introducedValidationIssues(
+            in: spec, comparedTo: baseline, calendar: calendar, peakCapKm: peakCap
+        )
         guard issues.isEmpty else {
             throw ValidationError(issues.map(\.message).joined(separator: "; "))
         }
@@ -278,6 +430,7 @@ enum CoachTools {
         let fitness = try PlanStore.currentFitness(in: context, today: today, calendar: calendar)
         let paces = fitness.map { VDOTTable.trainingPaces(vdot: $0.vdot) }
         var spec = try currentPlanSpec(in: context, today: today, calendar: calendar)
+        let baseline = spec
 
         let dayStart = calendar.startOfDay(for: today)
         let raceDay = calendar.startOfDay(for: goal.raceDate)
@@ -324,7 +477,9 @@ enum CoachTools {
         }
 
         let peakCap = fitness.map { max($0.weeklyVolumeKm * 1.35, $0.longestRecentRunKm * 2) }
-        let issues = PlanValidator.validate(spec, calendar: calendar, peakCapKm: peakCap)
+        let issues = introducedValidationIssues(
+            in: spec, comparedTo: baseline, calendar: calendar, peakCapKm: peakCap
+        )
         guard issues.isEmpty else {
             throw ValidationError(issues.map(\.message).joined(separator: "; "))
         }
@@ -388,6 +543,26 @@ enum CoachTools {
             plan.weekTargetVolumesKm = originalTargets
             throw error
         }
+    }
+
+    /// Existing plans can contain violations from an earlier generator or
+    /// changed fitness profile. A coach edit must not be blocked by untouched
+    /// historical issues, but it may never introduce or worsen one.
+    private static func introducedValidationIssues(
+        in candidate: TrainingPlanSpec,
+        comparedTo baseline: TrainingPlanSpec,
+        calendar: Calendar,
+        peakCapKm: Double?
+    ) -> [PlanValidator.Issue] {
+        var remainingBaselineIssues = PlanValidator.validate(
+            baseline, calendar: calendar, peakCapKm: peakCapKm
+        )
+        return PlanValidator.validate(candidate, calendar: calendar, peakCapKm: peakCapKm)
+            .compactMap { issue in
+                guard let match = remainingBaselineIssues.firstIndex(of: issue) else { return issue }
+                remainingBaselineIssues.remove(at: match)
+                return nil
+            }
     }
 
     private static func recipe(from payload: PlanAdjustmentProposal.CreateWorkout) throws -> WorkoutRecipe {

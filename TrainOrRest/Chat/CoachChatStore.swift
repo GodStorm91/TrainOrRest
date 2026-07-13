@@ -124,6 +124,25 @@ final class CoachChatStore: ObservableObject {
                 ClaudeRequest(model: model, system: system, tools: [CoachTools.tool], messages: conversation),
                 apiKey: apiKey
             )
+
+            // A truncated turn can carry a half-written tool input. Never decode
+            // or apply it; a refusal must not be treated as a plan edit either.
+            if response.stopReason == "max_tokens" {
+                throw CoachTools.ValidationError(
+                    "Claude's reply was cut off before the plan edit was complete. Ask again."
+                )
+            }
+            if response.stopReason == "refusal" {
+                let text = response.content.textContent
+                context.insert(ChatMessage(
+                    role: .assistant,
+                    text: text.isEmpty ? "Claude declined to answer that." : text,
+                    date: .now
+                ))
+                try context.save()
+                return
+            }
+
             let toolUses = response.content.compactMap { block -> (String, String, JSONValue)? in
                 if case let .toolUse(id, name, input) = block { return (id, name, input) }
                 return nil

@@ -11,7 +11,7 @@ enum CoachContextBuilder {
             "Use plan tools only for schedule changes. Never claim a plan edit was applied unless a tool result confirms it.",
             "Today is \(day(today, calendar: calendar)) (\(weekdayName(today, calendar: calendar))). Timezone: \(calendar.timeZone.identifier).",
             "Every tool date must be an absolute local calendar date formatted YYYY-MM-DD. Resolve relative wording like 'tomorrow' or 'Saturday' against today's date yourself; never pass relative text to a tool.",
-            "You may create easy, long, tempo, and interval workouts. You cannot create or edit a race workout, and you cannot change the goal — say so plainly if asked."
+            "You may create easy, long, tempo, and interval workouts. A race distance or target time can be context for a training request: for example, ‘create a workout to help me run a half marathon under 1:50’ means create a safe non-race workout, not a goal change or race workout. Use the stated training day; if no day is stated, ask which day to schedule it. You cannot create or edit a race workout, and you cannot change the goal."
         ]
 
         let goal = try PlanStore.activeGoal(in: context)?.spec
