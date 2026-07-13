@@ -14,6 +14,9 @@ targets:
     type: application
     platform: iOS
     sources: [TrainOrRest]
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     entitlements:
       path: TrainOrRest/TrainOrRest.entitlements
       properties:
