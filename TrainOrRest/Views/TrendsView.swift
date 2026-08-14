@@ -8,6 +8,7 @@ import SwiftUI
 struct TrendsView: View {
     @Query(sort: \DailyReadiness.date, order: .reverse) private var readiness: [DailyReadiness]
     @Query(sort: \DailyWellness.date, order: .reverse) private var wellness: [DailyWellness]
+    @Query(sort: \CompletedActivity.date, order: .reverse) private var activities: [CompletedActivity]
     private let calendar = Calendar.current
 
     var body: some View {
@@ -16,8 +17,8 @@ struct TrendsView: View {
                 header
                 statChips
                 readinessBars
-                trendLine(title: "Heart Rate Variability", unit: "ms", color: Theme.accent, series: hrvSeries)
-                trendLine(title: "Resting Heart Rate", unit: "bpm", color: Theme.good, series: rhrSeries)
+                trendLine(title: "Heart Rate Variability", unit: "ms", color: Theme.data, series: hrvSeries)
+                trendLine(title: "Resting Heart Rate", unit: "bpm", color: Theme.data, series: rhrSeries)
                 sleepStagesCard
                 if readiness.isEmpty {
                     Text("Trends appear once a few days of readiness are recorded.")
@@ -48,13 +49,16 @@ struct TrendsView: View {
         let avg = scored.isEmpty ? 0 : scored.reduce(0, +) / scored.count
         let trained = last28.filter { $0.verdict == .train }.count
         let rested = last28.filter { $0.verdict == .rest }.count
-        let best = scored.max() ?? 0
         return HStack(spacing: 8) {
             statChip("\(avg)", "AVG READY", Theme.text)
-            statChip("\(trained)", "TRAINED", Theme.good)
-            statChip("\(rested)", "RESTED", Theme.bad)
-            statChip("\(best)", "BEST", Theme.accent)
+            statChip("\(trained)", "TRAINED", Theme.verdictTrain)
+            statChip("\(rested)", "RESTED", Theme.verdictRest)
+            statChip("\(currentStreak)", currentStreak == 1 ? "STREAK DAY" : "STREAK DAYS", Theme.data)
         }
+    }
+
+    private var currentStreak: Int {
+        TrainingStreak.current(activityDates: activities.map(\.date), today: .now, calendar: calendar)
     }
 
     private func statChip(_ value: String, _ label: String, _ color: Color) -> some View {
@@ -106,8 +110,8 @@ struct TrendsView: View {
     }
 
     private func barColor(_ score: Int?) -> Color {
-        guard let score else { return Theme.chip }
-        return score >= 70 ? Theme.good : score >= 50 ? Theme.warn : Theme.bad
+        guard score != nil else { return Theme.chip }
+        return Theme.data
     }
 
     private func barHeight(_ score: Int?) -> CGFloat {
@@ -188,7 +192,7 @@ struct TrendsView: View {
                         )
                         .foregroundStyle(by: .value("Stage", bar.stage))
                     }
-                    .chartForegroundStyleScale(["Deep": Theme.accent2, "REM": Theme.accent, "Light": Theme.accentSoft])
+                    .chartForegroundStyleScale(["Deep": Theme.data, "REM": Theme.data.opacity(0.72), "Light": Theme.data.opacity(0.44)])
                     .chartYAxis { AxisMarks(position: .leading) }
                     .frame(height: 120)
                 }

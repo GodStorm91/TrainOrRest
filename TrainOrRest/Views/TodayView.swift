@@ -1,20 +1,22 @@
 import SwiftData
 import SwiftUI
 
-/// Redesigned Today screen: wordmark bar, greeting, hero readiness gauge with
-/// driver chips, suggested session, coach entry, and the "what's driving this"
+/// Redesigned Today screen: wordmark bar, greeting, verdict banner, suggested
+/// session, coach entry, and the "what's driving this"
 /// metric grid. All values are real (readiness snapshot, HealthKit wellness,
 /// training history); no fabricated metrics.
 struct TodayView: View {
     @EnvironmentObject private var engine: SyncEngine
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \DailyReadiness.date, order: .reverse) private var readinessDays: [DailyReadiness]
+    @Query(sort: \DailyCheckIn.date, order: .reverse) private var checkIns: [DailyCheckIn]
     @Query(sort: \DailyWellness.date, order: .reverse) private var wellness: [DailyWellness]
-    @Query(sort: \CompletedActivity.date, order: .reverse) private var activities: [CompletedActivity]
     @Query(sort: \PlannedWorkout.date) private var plannedWorkouts: [PlannedWorkout]
+    @Query private var syncStates: [SyncState]
     @Query private var goals: [Goal]
 
     @State private var showGoalEntry = false
+    @State private var checkInSaveFailed = false
     private let calendar = Calendar.current
 
     var body: some View {
@@ -24,6 +26,7 @@ struct TodayView: View {
                     header
                     greeting
                     heroCard
+                    checkInCard
                     if goals.isEmpty {
                         setGoalCard
                     } else if let workout = todayWorkout {
@@ -56,14 +59,6 @@ struct TodayView: View {
                     .foregroundStyle(Theme.text)
             }
             Spacer()
-            if streak > 0 {
-                HStack(spacing: 5) {
-                    Text("🔥").font(.system(size: 12))
-                    Text("\(streak)").font(.torHeading(13, .bold)).foregroundStyle(Theme.text)
-                }
-                .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(Theme.chip, in: Capsule())
-            }
             NavigationLink { SettingsView() } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 16))
@@ -98,58 +93,15 @@ struct TodayView: View {
     // MARK: - Hero
 
     private var heroCard: some View {
-        TorCard(padding: 22, cornerRadius: 26) {
-            VStack(spacing: 6) {
-                TorEyebrow("Today's readiness").tracking(2)
-                ReadinessGauge(score: todayReadiness?.score, verdict: verdict)
-                    .padding(.top, 2)
-                    .background(
-                        RadialGradient(colors: [Theme.accentSoft, .clear], center: .center, startRadius: 0, endRadius: 150)
-                    )
-                Text(verdict.torWord)
-                    .font(.torHeading(32, .bold)).tracking(4)
-                    .foregroundStyle(verdict.torColor)
-                Text(verdict.torSubtitle)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.dim)
-                if verdict == .insufficientData {
-                    baselineProgress
-                } else if !driverChips.isEmpty {
-                    FlowChips(chips: driverChips)
-                        .padding(.top, 6)
-                }
-            }
-            .frame(maxWidth: .infinity)
-        }
+        VerdictBannerView(readiness: todayReadiness, workout: todayWorkout, lastSyncAt: latestSyncAt)
     }
 
-    private var baselineProgress: some View {
-        let days = min(todayReadiness?.baselineDayCount ?? 0, ReadinessEngine.Tuning.minBaselineDays)
-        return VStack(spacing: 6) {
-            Text("Collecting baseline — day \(days)/\(ReadinessEngine.Tuning.minBaselineDays)")
-                .font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.dim)
-            ProgressView(value: Double(days), total: Double(ReadinessEngine.Tuning.minBaselineDays))
-                .tint(Theme.accent)
-        }
-        .padding(.top, 8)
-    }
-
-    /// Short green/amber chips for the top driving signals.
-    private var driverChips: [FlowChips.Chip] {
-        guard let r = todayReadiness else { return [] }
-        var chips: [FlowChips.Chip] = []
-        if let hrv7 = r.hrvMean7, let hrv28 = r.hrvMean28 {
-            let up = hrv7 >= hrv28
-            chips.append(.init(text: "HRV \(up ? "▲" : "▼") \(Int(abs(hrv7 - hrv28)))", dot: up ? Theme.good : Theme.warn))
-        }
-        if let sleep = r.sleepLastNight {
-            chips.append(.init(text: "Slept \(Formatters.sleep(sleep))", dot: sleep >= 7 ? Theme.good : Theme.warn))
-        }
-        if let acwr = r.acuteChronicRatio {
-            let ok = acwr <= 1.3 && acwr >= 0.8
-            chips.append(.init(text: ok ? "Load optimal" : String(format: "Load %.2f", acwr), dot: ok ? Theme.accent : Theme.warn))
-        }
-        return chips
+    private var checkInCard: some View {
+        TodayCheckInCard(
+            selected: Set(todayCheckIn?.signals ?? []),
+            saveFailed: checkInSaveFailed,
+            onToggle: toggleCheckIn
+        )
     }
 
     // MARK: - Suggested session / goal
@@ -214,35 +166,28 @@ struct TodayView: View {
         NavigationLink {
             ChatView()
         } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 10) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 15)).foregroundStyle(.white)
-                        .frame(width: 36, height: 36)
-                        .background(LinearGradient(colors: [Theme.accent, Theme.accent2], startPoint: .topLeading, endPoint: .bottomTrailing), in: Circle())
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Coach").font(.torHeading(16, .bold)).foregroundStyle(Theme.text)
-                        Text("Adapts your plan to how you feel")
-                            .font(.system(size: 11.5, weight: .medium)).foregroundStyle(Theme.dim)
-                    }
-                    Spacer()
-                    Image(systemName: "arrow.up.right").font(.system(size: 13, weight: .bold)).foregroundStyle(Theme.faint)
-                }
-                HStack(spacing: 9) {
-                    Text("Ask your coach…").font(.system(size: 13.5, weight: .medium)).foregroundStyle(Theme.faint)
-                    Spacer()
-                    Image(systemName: "paperplane.fill").font(.system(size: 13)).foregroundStyle(.white)
-                        .frame(width: 30, height: 30).background(Theme.accent, in: Circle())
-                }
-                .padding(.horizontal, 15).padding(.vertical, 10)
-                .background(Theme.chip, in: Capsule())
-                .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
+            HStack(spacing: 12) {
+                Image(systemName: "message")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 36, height: 36)
+                    .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                Text("Ask your coach")
+                    .font(.torHeading(16, .semibold))
+                    .foregroundStyle(Theme.text)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.faint)
             }
-            .padding(15)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+            .frame(minHeight: 44)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Ask your coach")
     }
 
     // MARK: - Drivers grid
@@ -261,20 +206,18 @@ struct TodayView: View {
         return [
             DriverMetric(label: "HRV", value: r?.hrvMean7.map { "\(Int($0))" } ?? "–", unit: "ms",
                          delta: delta(r?.hrvMean7, r?.hrvMean28, higherIsBetter: true), caption: r?.hrvMean28.map { "vs \(Int($0)) ms baseline" } ?? "baseline building",
-                         sparkline: wellnessSeries(\.hrvSDNN), sparkColor: Theme.accent),
+                         sparkline: wellnessSeries(\.hrvSDNN), sparkColor: Theme.data),
             DriverMetric(label: "Resting HR", value: r?.rhrMean7.map { "\(Int($0))" } ?? "–", unit: "bpm",
                          delta: delta(r?.rhrMean7, r?.rhrMean28, higherIsBetter: false), caption: r?.rhrMean28.map { "vs \(Int($0)) bpm baseline" } ?? "baseline building",
-                         sparkline: wellnessSeries(\.restingHeartRate), sparkColor: Theme.good),
+                         sparkline: wellnessSeries(\.restingHeartRate), sparkColor: Theme.data),
             DriverMetric(label: "Sleep", value: r?.sleepLastNight.map { Formatters.sleep($0) } ?? "–", unit: "",
                          delta: nil, caption: "last night",
-                         sparkline: wellnessSeries(\.sleepHours), sparkColor: Theme.accent),
+                         sparkline: wellnessSeries(\.sleepHours), sparkColor: Theme.data),
             DriverMetric(label: "VO₂max", value: latestVO2.map { String(format: "%.1f", $0) } ?? "–", unit: "",
                          delta: nil, caption: "ml/kg/min"),
             DriverMetric(label: "Load · ACWR", value: r?.acuteChronicRatio.map { String(format: "%.2f", $0) } ?? "–", unit: "",
                          delta: nil, caption: loadCaption, badge: loadBadge,
-                         sparkline: readinessSeries(\.acuteChronicRatio), sparkColor: Theme.accent2),
-            DriverMetric(label: "Streak", value: "\(streak)", unit: streak == 1 ? "day" : "days",
-                         delta: nil, caption: streak > 0 ? "keep it going" : "run to start"),
+                         sparkline: readinessSeries(\.acuteChronicRatio), sparkColor: Theme.data),
         ]
     }
 
@@ -314,18 +257,121 @@ struct TodayView: View {
         readinessDays.first { calendar.isDateInToday($0.date) }
     }
 
-    private var verdict: ReadinessVerdict { todayReadiness?.verdict ?? .insufficientData }
+    private var todayCheckIn: DailyCheckIn? {
+        checkIns.first { calendar.isDateInToday($0.date) }
+    }
 
     private var todayWorkout: PlannedWorkout? {
         plannedWorkouts.first { calendar.isDateInToday($0.date) }
+    }
+
+    private var latestSyncAt: Date? {
+        syncStates.compactMap(\.lastSyncAt).max()
     }
 
     private var latestVO2: Double? {
         wellness.first { $0.vo2Max != nil }?.vo2Max
     }
 
-    private var streak: Int {
-        TrainingStreak.current(activityDates: activities.map(\.date), today: .now, calendar: calendar)
+    private func toggleCheckIn(_ signal: CheckInSignal) {
+        let day = calendar.startOfDay(for: .now)
+        let row: DailyCheckIn
+        if let todayCheckIn {
+            row = todayCheckIn
+        } else {
+            row = DailyCheckIn(date: day)
+            modelContext.insert(row)
+        }
+
+        var signals = Set(row.signals)
+        if signals.contains(signal) {
+            signals.remove(signal)
+        } else {
+            signals.insert(signal)
+        }
+        row.signals = CheckInSignal.allCases.filter { signals.contains($0) }
+
+        do {
+            try modelContext.save()
+            checkInSaveFailed = false
+        } catch {
+            checkInSaveFailed = true
+            return
+        }
+        try? ReadinessStore.runDailyPipeline(in: modelContext, today: .now, calendar: calendar)
+    }
+}
+
+struct TodayCheckInCard: View {
+    let selected: Set<CheckInSignal>
+    let saveFailed: Bool
+    let onToggle: (CheckInSignal) -> Void
+
+    private let columns = [GridItem(.adaptive(minimum: 96), spacing: 8)]
+
+    var body: some View {
+        TorCard(padding: 14, cornerRadius: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "checklist")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                    Text("Anything to note?")
+                        .font(.torHeading(16, .semibold))
+                        .foregroundStyle(Theme.text)
+                    Spacer()
+                }
+
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                    ForEach(CheckInSignal.allCases, id: \.self) { signal in
+                        CheckInChip(
+                            signal: signal,
+                            isSelected: selected.contains(signal),
+                            onToggle: { onToggle(signal) }
+                        )
+                    }
+                }
+
+                if saveFailed {
+                    Text("Could not save check-in.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.bad)
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+private struct CheckInChip: View {
+    let signal: CheckInSignal
+    let isSelected: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: 6) {
+                Image(systemName: signal.symbolName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 14)
+                Text(signal.displayName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+            }
+            .foregroundStyle(isSelected ? Theme.text : Theme.dim)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .padding(.horizontal, 10)
+            .background(isSelected ? Theme.accentSoft : Theme.chip, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(isSelected ? Theme.accent.opacity(0.45) : Theme.border, lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(signal.displayName) check-in")
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
     }
 }
 
@@ -340,7 +386,7 @@ struct DriverMetric: Identifiable {
     var caption: String
     var badge: (String, Bool)?
     var sparkline: [Double] = []
-    var sparkColor: Color = Theme.accent
+    var sparkColor: Color = Theme.data
 
     struct Delta { var text: String; var good: Bool }
 }
@@ -385,9 +431,9 @@ struct DriverCard: View {
                         .background(Theme.soft(delta.good ? Theme.good : Theme.warn), in: RoundedRectangle(cornerRadius: 6))
                 } else if let badge = metric.badge {
                     Text(badge.0).font(.torHeading(11, .bold))
-                        .foregroundStyle(badge.1 ? Theme.accent : Theme.warn)
+                        .foregroundStyle(badge.1 ? Theme.data : Theme.warn)
                         .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Theme.soft(badge.1 ? Theme.accent : Theme.warn), in: RoundedRectangle(cornerRadius: 6))
+                        .background(Theme.soft(badge.1 ? Theme.data : Theme.warn), in: RoundedRectangle(cornerRadius: 6))
                 }
             }
             HStack(alignment: .firstTextBaseline, spacing: 4) {

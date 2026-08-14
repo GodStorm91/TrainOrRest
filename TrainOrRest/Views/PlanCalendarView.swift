@@ -11,6 +11,7 @@ struct PlanCalendarView: View {
     }
 
     @Query(sort: \PlannedWorkout.date) private var workouts: [PlannedWorkout]
+    @Query private var goals: [Goal]
 
     @State private var mode: Mode = .month
     @State private var monthAnchor: Date = .now
@@ -30,7 +31,11 @@ struct PlanCalendarView: View {
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button("Today", systemImage: "calendar") { goToToday() }
-                Button("Edit Goal", systemImage: "target") { isEditingGoal = true }
+                Button {
+                    isEditingGoal = true
+                } label: {
+                    Label(goalButtonTitle, systemImage: "target")
+                }
             }
         }
         .sheet(isPresented: $isEditingGoal) { GoalEntryView() }
@@ -88,6 +93,10 @@ struct PlanCalendarView: View {
             .onTapGesture {
                 withAnimation(.easeOut(duration: 0.15)) { mode = option }
             }
+    }
+
+    private var goalButtonTitle: String {
+        goals.isEmpty ? "Set race goal" : "Change goal"
     }
 
     private func goToToday() {

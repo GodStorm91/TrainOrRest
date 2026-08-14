@@ -235,6 +235,7 @@ struct GoalEntryView: View {
                 calendar: calendar,
                 in: modelContext
             )
+            NotificationCenter.default.post(name: .planDidChange, object: nil)
             dismiss()
         } catch {
             saveError = "Could not save goal: \(error.localizedDescription)"
@@ -263,7 +264,7 @@ extension FeasibilityVerdict {
         switch self {
         case .ok: Theme.good
         case .stretch: Theme.warn
-        case .unrealistic: Theme.bad
+        case .unrealistic: Theme.warn
         }
     }
 }

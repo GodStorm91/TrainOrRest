@@ -265,7 +265,7 @@ final class ChatFeatureTests: XCTestCase {
         let schema = Schema([
             CompletedActivity.self, DailyWellness.self, SyncState.self,
             Goal.self, TrainingPlan.self, PlannedWorkout.self,
-            DailyReadiness.self, PlanSnapshot.self, ChatMessage.self
+            DailyReadiness.self, DailyCheckIn.self, PlanSnapshot.self, ChatMessage.self
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: [configuration])

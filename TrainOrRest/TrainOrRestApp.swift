@@ -21,7 +21,7 @@ struct TrainOrRestApp: App {
             container = try ModelContainer(
                 for: CompletedActivity.self, DailyWellness.self, SyncState.self,
                 Goal.self, TrainingPlan.self, PlannedWorkout.self,
-                DailyReadiness.self, PlanSnapshot.self, ChatMessage.self
+                DailyReadiness.self, DailyCheckIn.self, PlanSnapshot.self, ChatMessage.self
             )
         } catch {
             fatalError("Failed to create SwiftData container: \(error)")

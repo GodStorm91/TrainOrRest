@@ -56,7 +56,8 @@ enum ReadinessEngine {
         wellness: [WellnessSample],
         loads: [(date: Date, load: Double)],
         today: Date,
-        calendar: Calendar
+        calendar: Calendar,
+        checkIns: [CheckInSignal] = []
     ) -> ReadinessAssessment {
         let dayStart = calendar.startOfDay(for: today)
         let windowStart = calendar.date(byAdding: .day, value: -27, to: dayStart) ?? .distantPast
@@ -85,14 +86,27 @@ enum ReadinessEngine {
             acuteChronicRatio: TrainingLoad.acuteChronicRatio(loads: loads, today: today, calendar: calendar)
         )
 
+        let selectedCheckIns = Set(checkIns)
+        var reasons = subjectiveStandaloneReasons(for: selectedCheckIns)
+        let forceRest = selectedCheckIns.contains(.ill)
+
         guard baselineDays >= Tuning.minBaselineDays else {
+            if !reasons.isEmpty {
+                let verdict: ReadinessVerdict = forceRest ? .rest : .goEasy
+                return ReadinessAssessment(
+                    verdict: verdict,
+                    score: ReadinessScore.score(snapshot: snapshot, verdict: verdict),
+                    reasons: reasons,
+                    baselineDayCount: baselineDays,
+                    snapshot: snapshot
+                )
+            }
             return ReadinessAssessment(
                 verdict: .insufficientData, score: nil, reasons: [], baselineDayCount: baselineDays, snapshot: snapshot
             )
         }
 
-        var hrvFlag = false, acwrFlag = false
-        var reasons: [String] = []
+        var hrvFlag = false, rhrFlag = false, sleepFlag = false, acwrFlag = false
 
         if let hrv7 = snapshot.hrvMean7, let hrv28 = snapshot.hrvMean28, hrv28 > 0,
            hrv7 < Tuning.hrvDropRatio * hrv28 {
@@ -102,6 +116,7 @@ enum ReadinessEngine {
         }
         if let rhr7 = snapshot.rhrMean7, let rhr28 = snapshot.rhrMean28,
            rhr7 > rhr28 + Tuning.rhrRiseBpm {
+            rhrFlag = true
             let rise = Int((rhr7 - rhr28).rounded())
             reasons.append("Resting HR \(rise) bpm above baseline")
         }
@@ -109,6 +124,7 @@ enum ReadinessEngine {
             let belowFloor = lastNight < Tuning.sleepMinHours
             let belowMean = snapshot.sleepMean14.map { lastNight < Tuning.sleepDropRatio * $0 } ?? false
             if belowFloor || belowMean {
+                sleepFlag = true
                 reasons.append(String(format: "Slept %.1f h last night", lastNight))
             }
         }
@@ -117,11 +133,17 @@ enum ReadinessEngine {
             reasons.append(String(format: "Training load ramping fast (%.2f× your usual)", acwr))
         }
 
+        let wearableFlagFired = hrvFlag || rhrFlag || sleepFlag || acwrFlag
+        if wearableFlagFired {
+            reasons.append(contentsOf: corroboratingReasons(for: selectedCheckIns))
+        }
+
         // No signal evaluable at all → don't fake a "Train" verdict.
         let anySignalPresent = snapshot.hrvMean7 != nil
             || snapshot.rhrMean7 != nil
             || snapshot.sleepLastNight != nil
             || snapshot.acuteChronicRatio != nil
+            || selectedCheckIns.contains { $0.role == .standalone }
         guard anySignalPresent else {
             return ReadinessAssessment(
                 verdict: .insufficientData, score: nil, reasons: [], baselineDayCount: baselineDays, snapshot: snapshot
@@ -135,7 +157,7 @@ enum ReadinessEngine {
         }
         // Suppressed recovery and rising load together is the classic
         // overreaching pattern — always rest, regardless of other flags.
-        let finalVerdict = (hrvFlag && acwrFlag) ? .rest : verdict
+        let finalVerdict = (forceRest || (hrvFlag && acwrFlag)) ? .rest : verdict
 
         return ReadinessAssessment(
             verdict: finalVerdict,
@@ -144,5 +166,23 @@ enum ReadinessEngine {
             baselineDayCount: baselineDays,
             snapshot: snapshot
         )
+    }
+
+    private static func subjectiveStandaloneReasons(for checkIns: Set<CheckInSignal>) -> [String] {
+        var reasons: [String] = []
+        if checkIns.contains(.ill) {
+            reasons.append("Reported illness")
+        }
+        if checkIns.contains(.sore) {
+            // TODO: Replace this single-day soreness reason with the 2-day persistence gate.
+            reasons.append("Reported soreness")
+        }
+        return reasons
+    }
+
+    private static func corroboratingReasons(for checkIns: Set<CheckInSignal>) -> [String] {
+        CheckInSignal.allCases
+            .filter { $0.role == .corroborator && checkIns.contains($0) }
+            .map { "Reported \($0.displayName.lowercased()) (corroborates recovery signals)" }
     }
 }

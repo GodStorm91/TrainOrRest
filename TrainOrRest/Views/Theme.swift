@@ -18,13 +18,26 @@ enum Theme {
     static let faint = dynamicA(dark: (0xF5F5FA, 0.46), light: (0x0C0C14, 0.46))
     static let chip = dynamicA(dark: (0xFFFFFF, 0.06), light: (0x0A0A14, 0.05))
 
+    /// Interactive primary: buttons, links, selected state, and focus.
     static let accent = dynamic(dark: 0x9B7BF0, light: 0x7C3AED)
+    /// Interactive secondary: pressed, gradient, and paired action states.
     static let accent2 = dynamic(dark: 0x7C5CE0, light: 0x6D28D9)
+    /// Interactive tint: soft selected, pressed, or focus backgrounds.
     static let accentSoft = dynamicA(dark: (0x9B7BF0, 0.16), light: (0x7C3AED, 0.10))
 
     static let good = dynamic(dark: 0x35D9A0, light: 0x0F9D6E)
+    /// Uncertainty only: stale, disputed, or unconfirmed signals.
     static let warn = dynamic(dark: 0xFBBF24, light: 0xD97706)
+    /// Error only: failed sync, denied permission, or rejected validation.
     static let bad = dynamic(dark: 0xFB7185, light: 0xE11D48)
+    /// Data series only: charts and sparklines, with no good/bad judgment.
+    static let data = dynamic(dark: 0x6BB8D6, light: 0x08758F)
+    /// Verdict only: Train recommendation.
+    static let verdictTrain = dynamic(dark: 0x4EDCC4, light: 0x087A6E)
+    /// Verdict only: Go easy recommendation.
+    static let verdictEasy = dynamic(dark: 0xE4C58A, light: 0x806021)
+    /// Verdict only: Rest recommendation.
+    static let verdictRest = dynamic(dark: 0x97AEDC, light: 0x496BA3)
 
     /// Soft tint of a semantic color for badge backgrounds.
     static func soft(_ color: Color, _ opacity: Double = 0.14) -> Color {

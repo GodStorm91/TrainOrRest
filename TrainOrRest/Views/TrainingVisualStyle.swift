@@ -7,11 +7,11 @@ enum TrainingVisualStyle {
     static let long = Theme.accent
     static let tempo = Theme.warn
     static let intervals = Theme.accent2
-    static let race = Theme.bad
+    static let race = Theme.accent2
     static let recovery = Theme.good
-    static let sleep = Theme.accent
-    static let heart = Theme.bad
-    static let oxygen = Theme.accent
+    static let sleep = Theme.data
+    static let heart = Theme.data
+    static let oxygen = Theme.data
 
     static func tint(_ color: Color, opacity: Double = 0.14) -> Color {
         color.opacity(opacity)
@@ -93,4 +93,62 @@ extension CompletedActivity {
 
     var effortColor: Color { effort.color }
     var effortLabel: String { effort.label }
+}
+
+extension ReadinessVerdict {
+    /// Legacy verdict word retained for existing call sites outside the retired ring.
+    var torWord: String {
+        switch self {
+        case .train: "TRAIN"
+        case .goEasy: "EASY"
+        case .rest: "REST"
+        case .insufficientData: "BASELINE"
+        }
+    }
+
+    /// Verdict role color per the non-alarm palette.
+    var torColor: Color {
+        switch self {
+        case .train: Theme.verdictTrain
+        case .goEasy: Theme.verdictEasy
+        case .rest: Theme.verdictRest
+        case .insufficientData: Theme.dim
+        }
+    }
+
+    var torSubtitle: String {
+        switch self {
+        case .train: "Primed for a quality session"
+        case .goEasy: "Keep it light — active recovery"
+        case .rest: "Recovery comes first today"
+        case .insufficientData: "Collecting your baseline"
+        }
+    }
+
+    var cardTitle: String {
+        switch self {
+        case .train: "Train"
+        case .goEasy: "Go Easy"
+        case .rest: "Rest"
+        case .insufficientData: "Building Your Baseline"
+        }
+    }
+
+    var bannerWord: String {
+        switch self {
+        case .train: "Train"
+        case .goEasy: "Go easy"
+        case .rest: "Rest"
+        case .insufficientData: "Baseline"
+        }
+    }
+
+    var bannerSymbol: String {
+        switch self {
+        case .train: "figure.run"
+        case .goEasy: "tortoise"
+        case .rest: "moon.zzz"
+        case .insufficientData: "chart.line.uptrend.xyaxis"
+        }
+    }
 }

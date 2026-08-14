@@ -70,10 +70,12 @@ enum ReadinessStore {
             )
         }
 
-        guard !samples.isEmpty || !loads.isEmpty else { return nil }
+        let checkIns = try todayCheckInSignals(in: context, today: today, calendar: calendar)
+        let hasStandaloneCheckIn = checkIns.contains { $0.role == .standalone }
+        guard !samples.isEmpty || !loads.isEmpty || hasStandaloneCheckIn else { return nil }
 
         let assessment = ReadinessEngine.assess(
-            wellness: samples, loads: loads, today: today, calendar: calendar
+            wellness: samples, loads: loads, today: today, calendar: calendar, checkIns: checkIns
         )
 
         let day = calendar.startOfDay(for: today)
@@ -86,6 +88,17 @@ enum ReadinessStore {
         let row = DailyReadiness(date: day, assessment: assessment, computedAt: today)
         context.insert(row)
         return row
+    }
+
+    private static func todayCheckInSignals(
+        in context: ModelContext,
+        today: Date,
+        calendar: Calendar
+    ) throws -> [CheckInSignal] {
+        let day = calendar.startOfDay(for: today)
+        var descriptor = FetchDescriptor<DailyCheckIn>(predicate: #Predicate { $0.date == day })
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first?.signals ?? []
     }
 
     // MARK: - Regeneration

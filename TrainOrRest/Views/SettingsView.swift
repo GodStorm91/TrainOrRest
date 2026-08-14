@@ -42,6 +42,14 @@ struct SettingsView: View {
                 }
             }
             Section {
+                NavigationLink {
+                    ProfileView()
+                } label: {
+                    Label("Profile", systemImage: "person")
+                }
+                .accessibilityLabel("Profile")
+            }
+            Section {
                 ForEach(CoachLanguage.allCases) { language in
                     languageRow(language)
                 }
