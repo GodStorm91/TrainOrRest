@@ -93,7 +93,12 @@ struct TodayView: View {
     // MARK: - Hero
 
     private var heroCard: some View {
-        VerdictBannerView(readiness: todayReadiness, workout: todayWorkout, lastSyncAt: latestSyncAt)
+        VerdictBannerView(
+            readiness: todayReadiness,
+            workout: todayWorkout,
+            lastSyncAt: latestSyncAt,
+            onKeepPlanned: keepPlannedSession
+        )
     }
 
     private var checkInCard: some View {
@@ -301,6 +306,18 @@ struct TodayView: View {
             return
         }
         _ = try? ReadinessStore.runDailyPipeline(in: modelContext, today: .now, calendar: calendar)
+    }
+
+    private func keepPlannedSession(for rule: ReadinessRule) {
+        let day = calendar.startOfDay(for: .now)
+        modelContext.insert(RuleOverride(date: day, rule: rule))
+        do {
+            try modelContext.save()
+            _ = try ReadinessStore.runDailyPipeline(in: modelContext, today: .now, calendar: calendar)
+            checkInSaveFailed = false
+        } catch {
+            checkInSaveFailed = true
+        }
     }
 }
 

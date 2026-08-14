@@ -20,6 +20,10 @@ struct ReadinessAssessment: Equatable {
     var reasons: [String]
     /// True when the evidence is soft or not persistent enough to cut volume.
     var hedged: Bool = false
+    /// Primary deterministic rule responsible for a visible adjustment.
+    var primaryRule: ReadinessRule? = nil
+    /// Number of confirmed flags after subjective corroborators are applied.
+    var corroboratedFlagCount: Int = 0
     /// Distinct days of wellness history available (baseline progress).
     var baselineDayCount: Int
     var snapshot: Snapshot
@@ -74,6 +78,8 @@ enum ReadinessEngine {
         var snapshot: ReadinessAssessment.Snapshot
         var corroboratedFlagCount: Int
         var forceRest: Bool
+        var primaryRule: ReadinessRule?
+        var hasSorenessFlag: Bool
     }
 
     static func assess(
@@ -81,26 +87,45 @@ enum ReadinessEngine {
         loads: [(date: Date, load: Double)],
         today: Date,
         calendar: Calendar,
-        checkIns: [CheckInSignal] = []
+        checkIns: [CheckInSignal] = [],
+        overrides: [(date: Date, rule: ReadinessRule)] = [],
+        checkInHistory: [(date: Date, signals: [CheckInSignal])] = []
     ) -> ReadinessAssessment {
+        let todaySignals = Set(checkIns)
+        let multipliers = ruleMultipliers(overrides: overrides, today: today, calendar: calendar)
         var current = evaluateDay(
             wellness: wellness,
             loads: loads,
             day: today,
             calendar: calendar,
-            checkIns: Set(checkIns)
+            checkIns: signals(
+                for: today,
+                today: today,
+                todaySignals: todaySignals,
+                checkInHistory: checkInHistory,
+                calendar: calendar
+            ),
+            checkInHistory: checkInHistory,
+            multipliers: multipliers
         )
 
-        if current.verdict.needsVolumeCut && !current.forceRest {
+        if current.verdict.needsVolumeCut && !current.forceRest && !current.hasSorenessFlag {
             let persistentDays = (0..<3).filter { offset in
                 guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { return false }
-                let dayCheckIns = offset == 0 ? Set(checkIns) : []
                 return evaluateDay(
                     wellness: wellness,
                     loads: loads,
                     day: day,
                     calendar: calendar,
-                    checkIns: dayCheckIns
+                    checkIns: signals(
+                        for: day,
+                        today: today,
+                        todaySignals: todaySignals,
+                        checkInHistory: checkInHistory,
+                        calendar: calendar
+                    ),
+                    checkInHistory: checkInHistory,
+                    multipliers: multipliers
                 ).corroboratedFlagCount >= 2
             }.count
 
@@ -111,11 +136,16 @@ enum ReadinessEngine {
         }
 
         let score = ReadinessScore.score(snapshot: current.snapshot, verdict: current.verdict)
+        let primaryRule = (current.verdict.needsVolumeCut || (current.hedged && current.corroboratedFlagCount == 1))
+            ? current.primaryRule
+            : nil
         return ReadinessAssessment(
             verdict: current.verdict,
             score: score,
             reasons: current.reasons,
             hedged: current.hedged,
+            primaryRule: primaryRule,
+            corroboratedFlagCount: current.corroboratedFlagCount,
             baselineDayCount: current.baselineDayCount,
             snapshot: current.snapshot
         )
@@ -126,7 +156,9 @@ enum ReadinessEngine {
         loads: [(date: Date, load: Double)],
         day: Date,
         calendar: Calendar,
-        checkIns: Set<CheckInSignal>
+        checkIns: Set<CheckInSignal>,
+        checkInHistory: [(date: Date, signals: [CheckInSignal])],
+        multipliers: [ReadinessRule: Double]
     ) -> DayEvaluation {
         let dayStart = calendar.startOfDay(for: day)
         let hrvStats = metricStats(wellness, day: dayStart, calendar: calendar, metric: \.hrvSDNN)
@@ -162,7 +194,9 @@ enum ReadinessEngine {
                 baselineDayCount: baselineDays,
                 snapshot: snapshot,
                 corroboratedFlagCount: 3,
-                forceRest: true
+                forceRest: true,
+                primaryRule: nil,
+                hasSorenessFlag: false
             )
         }
 
@@ -174,7 +208,9 @@ enum ReadinessEngine {
                 baselineDayCount: baselineDays,
                 snapshot: snapshot,
                 corroboratedFlagCount: 0,
-                forceRest: false
+                forceRest: false,
+                primaryRule: nil,
+                hasSorenessFlag: false
             )
         }
 
@@ -184,8 +220,9 @@ enum ReadinessEngine {
         var sleepShort = false
         var acwrHigh = false
 
+        let hrvMultiplier = multipliers[.hrv] ?? 1.0
         if let recentHRV, let hrvStats, hrvStats.count >= Tuning.minBaselineDays, hrvStats.standardDeviation > 0,
-           recentHRV < hrvStats.median - hrvStats.standardDeviation {
+           recentHRV < hrvStats.median - hrvMultiplier * hrvStats.standardDeviation {
             hrvLow = true
             reasons.append(String(
                 format: "HRV %.0f ms below %.0f ms baseline band",
@@ -194,8 +231,9 @@ enum ReadinessEngine {
             ))
         }
 
+        let rhrMultiplier = multipliers[.rhr] ?? 1.0
         if let recentRHR, let rhrStats, rhrStats.count >= Tuning.minBaselineDays, rhrStats.standardDeviation > 0,
-           recentRHR > rhrStats.median + max(Tuning.rhrRiseBpm, rhrStats.standardDeviation) {
+           recentRHR > rhrStats.median + max(Tuning.rhrRiseBpm, rhrMultiplier * rhrStats.standardDeviation) {
             rhrHigh = true
             let rise = Int((recentRHR - rhrStats.median).rounded())
             reasons.append("Resting HR \(rise) bpm above baseline")
@@ -218,9 +256,18 @@ enum ReadinessEngine {
         let wearableCount = [hrvLow, rhrHigh, sleepShort, acwrHigh].filter { $0 }.count
         var corroboratedFlagCount = wearableCount
 
+        let hasSorenessFlag = checkIns.contains(.sore) && didReportSoreOnPreviousDay(
+            day: dayStart,
+            checkInHistory: checkInHistory,
+            calendar: calendar
+        )
         if checkIns.contains(.sore) {
-            corroboratedFlagCount += 1
-            reasons.append("Reported soreness")
+            if hasSorenessFlag {
+                corroboratedFlagCount += 1
+                reasons.append("Reported soreness for 2 consecutive days")
+            } else {
+                reasons.append("Reported soreness; watching for a second day")
+            }
         }
 
         if wearableCount > 0 {
@@ -251,6 +298,7 @@ enum ReadinessEngine {
             }
         }
 
+        let primaryRule = primaryRule(hrvLow: hrvLow, acwrHigh: acwrHigh, rhrHigh: rhrHigh, sleepShort: sleepShort)
         return DayEvaluation(
             verdict: verdict,
             reasons: reasons,
@@ -258,8 +306,78 @@ enum ReadinessEngine {
             baselineDayCount: baselineDays,
             snapshot: snapshot,
             corroboratedFlagCount: corroboratedFlagCount,
-            forceRest: false
+            forceRest: false,
+            primaryRule: primaryRule,
+            hasSorenessFlag: hasSorenessFlag
         )
+    }
+
+    private static func ruleMultipliers(
+        overrides: [(date: Date, rule: ReadinessRule)],
+        today: Date,
+        calendar: Calendar
+    ) -> [ReadinessRule: Double] {
+        let todayStart = calendar.startOfDay(for: today)
+        guard let start = calendar.date(byAdding: .day, value: -14, to: todayStart),
+              let end = calendar.date(byAdding: .day, value: 1, to: todayStart)
+        else { return [:] }
+
+        var counts: [ReadinessRule: Int] = [:]
+        for override in overrides {
+            let day = calendar.startOfDay(for: override.date)
+            guard day >= start && day < end else { continue }
+            counts[override.rule, default: 0] += 1
+        }
+
+        return ReadinessRule.allCases.reduce(into: [:]) { result, rule in
+            let count = counts[rule, default: 0]
+            result[rule] = min(2.0, 1.0 + 0.25 * floor(Double(count) / 2.0))
+        }
+    }
+
+    private static func signals(
+        for day: Date,
+        today: Date,
+        todaySignals: Set<CheckInSignal>,
+        checkInHistory: [(date: Date, signals: [CheckInSignal])],
+        calendar: Calendar
+    ) -> Set<CheckInSignal> {
+        let dayStart = calendar.startOfDay(for: day)
+        if calendar.isDate(dayStart, inSameDayAs: today) {
+            if !todaySignals.isEmpty {
+                return todaySignals
+            }
+            return Set(checkInHistory.first {
+                calendar.isDate($0.date, inSameDayAs: dayStart)
+            }?.signals ?? [])
+        }
+        return Set(checkInHistory.first {
+            calendar.isDate($0.date, inSameDayAs: dayStart)
+        }?.signals ?? [])
+    }
+
+    private static func didReportSoreOnPreviousDay(
+        day: Date,
+        checkInHistory: [(date: Date, signals: [CheckInSignal])],
+        calendar: Calendar
+    ) -> Bool {
+        guard let previousDay = calendar.date(byAdding: .day, value: -1, to: day) else { return false }
+        return checkInHistory.contains {
+            calendar.isDate($0.date, inSameDayAs: previousDay) && $0.signals.contains(.sore)
+        }
+    }
+
+    private static func primaryRule(
+        hrvLow: Bool,
+        acwrHigh: Bool,
+        rhrHigh: Bool,
+        sleepShort: Bool
+    ) -> ReadinessRule? {
+        if hrvLow { return .hrv }
+        if acwrHigh { return .load }
+        if rhrHigh { return .rhr }
+        if sleepShort { return .sleep }
+        return nil
     }
 
     private static func baselineDayCount(_ wellness: [WellnessSample], day: Date, calendar: Calendar) -> Int {

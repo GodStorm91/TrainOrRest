@@ -11,6 +11,8 @@ final class DailyReadiness {
     var score: Int?
     var reasons: [String]
     var hedged: Bool = false
+    var primaryRuleRaw: String?
+    var corroboratedFlagCount: Int = 0
     var baselineDayCount: Int
     var hrvMean7: Double?
     var hrvMean28: Double?
@@ -32,6 +34,8 @@ final class DailyReadiness {
         self.score = assessment.score
         self.reasons = assessment.reasons
         self.hedged = assessment.hedged
+        self.primaryRuleRaw = assessment.primaryRule?.rawValue
+        self.corroboratedFlagCount = assessment.corroboratedFlagCount
         self.baselineDayCount = assessment.baselineDayCount
         self.hrvMean7 = assessment.snapshot.hrvMean7
         self.hrvMean28 = assessment.snapshot.hrvMean28
@@ -52,11 +56,18 @@ final class DailyReadiness {
         ReadinessVerdict(rawValue: verdictRaw) ?? .insufficientData
     }
 
+    var primaryRule: ReadinessRule? {
+        get { primaryRuleRaw.flatMap(ReadinessRule.init(rawValue:)) }
+        set { primaryRuleRaw = newValue?.rawValue }
+    }
+
     func update(from assessment: ReadinessAssessment, computedAt: Date) {
         verdictRaw = assessment.verdict.rawValue
         score = assessment.score
         reasons = assessment.reasons
         hedged = assessment.hedged
+        primaryRuleRaw = assessment.primaryRule?.rawValue
+        corroboratedFlagCount = assessment.corroboratedFlagCount
         baselineDayCount = assessment.baselineDayCount
         hrvMean7 = assessment.snapshot.hrvMean7
         hrvMean28 = assessment.snapshot.hrvMean28

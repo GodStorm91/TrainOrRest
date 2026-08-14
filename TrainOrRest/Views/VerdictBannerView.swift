@@ -5,11 +5,23 @@ struct VerdictBannerView: View {
     let readiness: DailyReadiness?
     let workout: PlannedWorkout?
     let lastSyncAt: Date?
+    let onKeepPlanned: (ReadinessRule) -> Void
 
     @State private var showsDrivers = false
     @State private var showsRuleReceipt = false
-    // TODO: Persist this override with the planned workout once the engine supports user decisions.
     @State private var keepsPlannedSession = false
+
+    init(
+        readiness: DailyReadiness?,
+        workout: PlannedWorkout?,
+        lastSyncAt: Date?,
+        onKeepPlanned: @escaping (ReadinessRule) -> Void = { _ in }
+    ) {
+        self.readiness = readiness
+        self.workout = workout
+        self.lastSyncAt = lastSyncAt
+        self.onKeepPlanned = onKeepPlanned
+    }
 
     private var verdict: ReadinessVerdict {
         readiness?.verdict ?? .insufficientData
@@ -91,6 +103,9 @@ struct VerdictBannerView: View {
                     Button {
                         withAnimation(.easeOut(duration: 0.18)) {
                             keepsPlannedSession = true
+                        }
+                        if let rule = readiness?.primaryRule {
+                            onKeepPlanned(rule)
                         }
                     } label: {
                         Text("Keep planned session")

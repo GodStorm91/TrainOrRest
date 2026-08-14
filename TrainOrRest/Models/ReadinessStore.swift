@@ -74,12 +74,20 @@ enum ReadinessStore {
             )
         }
 
-        let checkIns = try todayCheckInSignals(in: context, today: today, calendar: calendar)
+        let checkInHistory = try recentCheckInHistory(in: context, today: today, calendar: calendar)
+        let checkIns = todayCheckInSignals(from: checkInHistory, today: today, calendar: calendar)
+        let overrides = try recentRuleOverrides(in: context, today: today, calendar: calendar)
         let hasStandaloneCheckIn = checkIns.contains { $0.role == .standalone }
         guard !samples.isEmpty || !loads.isEmpty || hasStandaloneCheckIn else { return nil }
 
         let assessment = ReadinessEngine.assess(
-            wellness: samples, loads: loads, today: today, calendar: calendar, checkIns: checkIns
+            wellness: samples,
+            loads: loads,
+            today: today,
+            calendar: calendar,
+            checkIns: checkIns,
+            overrides: overrides,
+            checkInHistory: checkInHistory
         )
 
         let day = calendar.startOfDay(for: today)
@@ -94,15 +102,43 @@ enum ReadinessStore {
         return row
     }
 
-    private static func todayCheckInSignals(
+    private static func recentRuleOverrides(
         in context: ModelContext,
         today: Date,
         calendar: Calendar
-    ) throws -> [CheckInSignal] {
+    ) throws -> [(date: Date, rule: ReadinessRule)] {
         let day = calendar.startOfDay(for: today)
-        var descriptor = FetchDescriptor<DailyCheckIn>(predicate: #Predicate { $0.date == day })
-        descriptor.fetchLimit = 1
-        return try context.fetch(descriptor).first?.signals ?? []
+        guard let start = calendar.date(byAdding: .day, value: -14, to: day),
+              let end = calendar.date(byAdding: .day, value: 1, to: day)
+        else { return [] }
+        let descriptor = FetchDescriptor<RuleOverride>(
+            predicate: #Predicate { $0.date >= start && $0.date < end }
+        )
+        return try context.fetch(descriptor).map { (date: $0.date, rule: $0.rule) }
+    }
+
+    private static func recentCheckInHistory(
+        in context: ModelContext,
+        today: Date,
+        calendar: Calendar
+    ) throws -> [(date: Date, signals: [CheckInSignal])] {
+        let day = calendar.startOfDay(for: today)
+        guard let start = calendar.date(byAdding: .day, value: -2, to: day),
+              let end = calendar.date(byAdding: .day, value: 1, to: day)
+        else { return [] }
+        let descriptor = FetchDescriptor<DailyCheckIn>(
+            predicate: #Predicate { $0.date >= start && $0.date < end }
+        )
+        return try context.fetch(descriptor).map { (date: $0.date, signals: $0.signals) }
+    }
+
+    private static func todayCheckInSignals(
+        from history: [(date: Date, signals: [CheckInSignal])],
+        today: Date,
+        calendar: Calendar
+    ) -> [CheckInSignal] {
+        let day = calendar.startOfDay(for: today)
+        return history.first { calendar.isDate($0.date, inSameDayAs: day) }?.signals ?? []
     }
 
     // MARK: - Regeneration
