@@ -394,6 +394,25 @@ enum CoachTools {
             throw ValidationError(issues.map(\.message).joined(separator: "; "))
         }
 
+        let weekTargetVolumeKmBefore = plan.weekTargetVolumesKm[location.week]
+        let weekTargetVolumeKmAfter = spec.weeks[location.week].targetVolumeKm
+        let edit = PlanEdit(
+            appliedAt: today,
+            workout: existing,
+            weekTargetVolumeKmBefore: weekTargetVolumeKmBefore,
+            afterKindRaw: built.kind.rawValue,
+            afterDistanceKm: built.distanceKm,
+            afterPaceFastSecondsPerKm: built.paceBand?.fastSecondsPerKm,
+            afterPaceSlowSecondsPerKm: built.paceBand?.slowSecondsPerKm,
+            afterDetails: built.details,
+            afterStructure: built.structure,
+            afterStatusRaw: WorkoutStatus.planned.rawValue,
+            afterManuallyOverridden: true,
+            afterMatchedActivityUUID: nil,
+            weekTargetVolumeKmAfter: weekTargetVolumeKmAfter
+        )
+        context.insert(edit)
+
         existing.kindRaw = built.kind.rawValue
         existing.distanceKm = built.distanceKm
         existing.paceFastSecondsPerKm = built.paceBand?.fastSecondsPerKm
@@ -404,7 +423,7 @@ enum CoachTools {
         existing.manuallyOverridden = true
         existing.matchedActivityUUID = nil
         var targets = plan.weekTargetVolumesKm
-        targets[location.week] = spec.weeks[location.week].targetVolumeKm
+        targets[location.week] = weekTargetVolumeKmAfter
         plan.weekTargetVolumesKm = targets
         context.insert(ChatMessage(
             role: .assistant,

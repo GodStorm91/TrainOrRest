@@ -1,3 +1,4 @@
+import Foundation
 import SwiftData
 import SwiftUI
 
@@ -11,19 +12,27 @@ struct PlanCalendarView: View {
     }
 
     @Query(sort: \PlannedWorkout.date) private var workouts: [PlannedWorkout]
+    @Query(sort: \PlanEdit.appliedAt, order: .reverse) private var planEdits: [PlanEdit]
     @Query private var goals: [Goal]
+    @Environment(\.modelContext) private var modelContext
 
     @State private var mode: Mode = .month
     @State private var monthAnchor: Date = .now
     @State private var selectedDate: Date = Calendar.current.startOfDay(for: .now)
     @State private var weekScrollToken = 0
     @State private var isEditingGoal = false
+    @State private var revertError: String?
 
     private let calendar = Calendar.current
 
     var body: some View {
         VStack(spacing: 0) {
             topBar
+            RecentCoachChangesView(
+                edits: recentCoachEdits,
+                error: revertError,
+                onRevert: revert
+            )
             content
         }
         .background(Theme.bg)
@@ -99,6 +108,17 @@ struct PlanCalendarView: View {
         goals.isEmpty ? "Set race goal" : "Change goal"
     }
 
+    private var recentCoachEdits: [PlanEdit] {
+        let cutoff = calendar.date(
+            byAdding: .day,
+            value: -PlanEditStore.revertWindowDays,
+            to: .now
+        ) ?? .now
+        return planEdits.filter {
+            $0.source == "coach" && $0.revertedAt == nil && $0.appliedAt >= cutoff
+        }
+    }
+
     private func goToToday() {
         let today = calendar.startOfDay(for: .now)
         withAnimation(.easeOut(duration: 0.2)) {
@@ -106,6 +126,88 @@ struct PlanCalendarView: View {
             selectedDate = today
         }
         weekScrollToken += 1
+    }
+
+    private func revert(_ edit: PlanEdit) {
+        do {
+            try PlanEditStore.revert(edit.id, in: modelContext, today: .now, calendar: calendar)
+            revertError = nil
+        } catch {
+            revertError = error.localizedDescription
+        }
+    }
+}
+
+private struct RecentCoachChangesView: View {
+    var edits: [PlanEdit]
+    var error: String?
+    var onRevert: (PlanEdit) -> Void
+
+    var body: some View {
+        if !edits.isEmpty {
+            TorCard(padding: 12, cornerRadius: 16) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.uturn.backward.circle")
+                            .foregroundStyle(Theme.accent)
+                        Text("Recent coach changes")
+                            .font(.torHeading(16, .semibold))
+                            .foregroundStyle(Theme.text)
+                    }
+
+                    ForEach(edits) { edit in
+                        row(edit)
+                    }
+
+                    if let error {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(Theme.bad)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+        }
+    }
+
+    private func row(_ edit: PlanEdit) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(summary(for: edit))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(2)
+                Text(edit.appliedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+                    .font(.caption)
+                    .foregroundStyle(Theme.faint)
+            }
+            Spacer(minLength: 8)
+            Button {
+                onRevert(edit)
+            } label: {
+                Label("Revert", systemImage: "arrow.uturn.backward")
+                    .labelStyle(.titleAndIcon)
+            }
+            .font(.caption.weight(.semibold))
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .accessibilityLabel("Revert coach change")
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func summary(for edit: PlanEdit) -> String {
+        "\(kindName(edit.kindRaw)) \(km(edit.distanceKm)) km -> \(kindName(edit.afterKindRaw)) \(km(edit.afterDistanceKm)) km"
+    }
+
+    private func kindName(_ raw: String) -> String {
+        WorkoutKind(rawValue: raw)?.displayName ?? raw.capitalized
+    }
+
+    private func km(_ value: Double) -> String {
+        String(format: "%.1f", value)
     }
 }
 
