@@ -205,10 +205,12 @@ struct TodayView: View {
         let r = todayReadiness
         return [
             DriverMetric(label: "HRV", value: r?.hrvMean7.map { "\(Int($0))" } ?? "–", unit: "ms",
-                         delta: delta(r?.hrvMean7, r?.hrvMean28, higherIsBetter: true), caption: r?.hrvMean28.map { "vs \(Int($0)) ms baseline" } ?? "baseline building",
+                         delta: delta(r?.hrvMean7, r?.hrvBaseline ?? r?.hrvMean28, higherIsBetter: true),
+                         caption: (r?.hrvBaseline ?? r?.hrvMean28).map { "vs \(Int($0)) ms baseline" } ?? "baseline building",
                          sparkline: wellnessSeries(\.hrvSDNN), sparkColor: Theme.data),
             DriverMetric(label: "Resting HR", value: r?.rhrMean7.map { "\(Int($0))" } ?? "–", unit: "bpm",
-                         delta: delta(r?.rhrMean7, r?.rhrMean28, higherIsBetter: false), caption: r?.rhrMean28.map { "vs \(Int($0)) bpm baseline" } ?? "baseline building",
+                         delta: delta(r?.rhrMean7, r?.rhrBaseline ?? r?.rhrMean28, higherIsBetter: false),
+                         caption: (r?.rhrBaseline ?? r?.rhrMean28).map { "vs \(Int($0)) bpm baseline" } ?? "baseline building",
                          sparkline: wellnessSeries(\.restingHeartRate), sparkColor: Theme.data),
             DriverMetric(label: "Sleep", value: r?.sleepLastNight.map { Formatters.sleep($0) } ?? "–", unit: "",
                          delta: nil, caption: "last night",

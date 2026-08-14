@@ -151,7 +151,7 @@ struct VerdictBannerView: View {
     }
 
     private var displayWord: String {
-        if isStale, verdict != .insufficientData {
+        if (readiness?.hedged == true || isStale), verdict != .insufficientData {
             return "Likely \(verdict.bannerWord.lowercased())"
         }
         return verdict.bannerWord
@@ -199,11 +199,13 @@ struct VerdictBannerView: View {
     }
 
     private var hrvDriver: String {
-        guard let readiness, let hrv7 = readiness.hrvMean7, let hrv28 = readiness.hrvMean28 else {
+        guard let readiness, let hrv7 = readiness.hrvMean7,
+              let baseline = readiness.hrvBaseline ?? readiness.hrvMean28
+        else {
             return "HRV: baseline building"
         }
-        if hrv28 > 0 {
-            let percent = Int(((hrv7 / hrv28 - 1) * 100).rounded())
+        if baseline > 0 {
+            let percent = Int(((hrv7 / baseline - 1) * 100).rounded())
             let band = percent >= 0 ? "\(percent)% above baseline" : "\(abs(percent))% below baseline"
             return "HRV: \(Int(hrv7.rounded())) ms, \(band)"
         }

@@ -34,7 +34,11 @@ enum ReadinessStore {
                 hrvMean7: row.hrvMean7, hrvMean28: row.hrvMean28,
                 rhrMean7: row.rhrMean7, rhrMean28: row.rhrMean28,
                 sleepLastNight: row.sleepLastNight, sleepMean14: row.sleepMean14,
-                acuteChronicRatio: row.acuteChronicRatio
+                acuteChronicRatio: row.acuteChronicRatio,
+                hrvBaseline: row.hrvBaseline ?? row.hrvMean28,
+                hrvSD: row.hrvSD,
+                rhrBaseline: row.rhrBaseline ?? row.rhrMean28,
+                rhrSD: row.rhrSD
             )
             row.score = ReadinessScore.score(snapshot: snapshot, verdict: row.verdict)
         }

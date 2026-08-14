@@ -15,9 +15,11 @@ struct WellnessSample: Equatable {
 struct ReadinessAssessment: Equatable {
     var verdict: ReadinessVerdict
     /// 0–100 readiness score driving the gauge; nil when insufficientData.
-    var score: Int?
+    var score: Int? = nil
     /// Human-readable explanation per triggered flag, worst first.
     var reasons: [String]
+    /// True when the evidence is soft or not persistent enough to cut volume.
+    var hedged: Bool = false
     /// Distinct days of wellness history available (baseline progress).
     var baselineDayCount: Int
     var snapshot: Snapshot
@@ -31,6 +33,10 @@ struct ReadinessAssessment: Equatable {
         var sleepLastNight: Double?
         var sleepMean14: Double?
         var acuteChronicRatio: Double?
+        var hrvBaseline: Double? = nil
+        var hrvSD: Double? = nil
+        var rhrBaseline: Double? = nil
+        var rhrSD: Double? = nil
     }
 }
 
@@ -38,9 +44,7 @@ struct ReadinessAssessment: Equatable {
 /// load. Pure: caller supplies samples, loads, `today`, and a calendar.
 enum ReadinessEngine {
     enum Tuning {
-        /// HRV flag: 7-day mean below this fraction of the 28-day baseline.
-        static let hrvDropRatio = 0.85
-        /// RHR flag: 7-day mean this many bpm above the 28-day baseline.
+        /// RHR flag: recent mean this many bpm above the 60-day baseline at minimum.
         static let rhrRiseBpm = 5.0
         /// Sleep flags: last night under this many hours…
         static let sleepMinHours = 6.0
@@ -50,6 +54,26 @@ enum ReadinessEngine {
         static let acwrLimit = 1.3
         /// Days of wellness history required before any verdict.
         static let minBaselineDays = 14
+        /// Personal baseline window.
+        static let baselineWindowDays = 60
+        /// Recent wearable reading window.
+        static let recentMetricDays = 3
+    }
+
+    private struct MetricStats {
+        var median: Double
+        var standardDeviation: Double
+        var count: Int
+    }
+
+    private struct DayEvaluation {
+        var verdict: ReadinessVerdict
+        var reasons: [String]
+        var hedged: Bool
+        var baselineDayCount: Int
+        var snapshot: ReadinessAssessment.Snapshot
+        var corroboratedFlagCount: Int
+        var forceRest: Bool
     }
 
     static func assess(
@@ -59,130 +83,281 @@ enum ReadinessEngine {
         calendar: Calendar,
         checkIns: [CheckInSignal] = []
     ) -> ReadinessAssessment {
-        let dayStart = calendar.startOfDay(for: today)
-        let windowStart = calendar.date(byAdding: .day, value: -27, to: dayStart) ?? .distantPast
-        let recent = wellness.filter { $0.date >= windowStart && $0.date <= dayStart }
-
-        let baselineDays = Set(recent
-            .filter { $0.hrvSDNN != nil || $0.restingHeartRate != nil || $0.sleepHours != nil }
-            .map { calendar.startOfDay(for: $0.date) }
-        ).count
-
-        func mean(_ values: [Double]) -> Double? {
-            values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
-        }
-        func windowMean(_ metric: (WellnessSample) -> Double?, days: Int) -> Double? {
-            guard let start = calendar.date(byAdding: .day, value: -(days - 1), to: dayStart) else { return nil }
-            return mean(recent.filter { $0.date >= start }.compactMap(metric))
-        }
-
-        let snapshot = ReadinessAssessment.Snapshot(
-            hrvMean7: windowMean(\.hrvSDNN, days: 7),
-            hrvMean28: windowMean(\.hrvSDNN, days: 28),
-            rhrMean7: windowMean(\.restingHeartRate, days: 7),
-            rhrMean28: windowMean(\.restingHeartRate, days: 28),
-            sleepLastNight: recent.first { calendar.isDate($0.date, inSameDayAs: dayStart) }?.sleepHours,
-            sleepMean14: windowMean(\.sleepHours, days: 14),
-            acuteChronicRatio: TrainingLoad.acuteChronicRatio(loads: loads, today: today, calendar: calendar)
+        var current = evaluateDay(
+            wellness: wellness,
+            loads: loads,
+            day: today,
+            calendar: calendar,
+            checkIns: Set(checkIns)
         )
 
-        let selectedCheckIns = Set(checkIns)
-        var reasons = subjectiveStandaloneReasons(for: selectedCheckIns)
-        let forceRest = selectedCheckIns.contains(.ill)
+        if current.verdict.needsVolumeCut && !current.forceRest {
+            let persistentDays = (0..<3).filter { offset in
+                guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { return false }
+                let dayCheckIns = offset == 0 ? Set(checkIns) : []
+                return evaluateDay(
+                    wellness: wellness,
+                    loads: loads,
+                    day: day,
+                    calendar: calendar,
+                    checkIns: dayCheckIns
+                ).corroboratedFlagCount >= 2
+            }.count
 
-        guard baselineDays >= Tuning.minBaselineDays else {
-            if !reasons.isEmpty {
-                let verdict: ReadinessVerdict = forceRest ? .rest : .goEasy
-                return ReadinessAssessment(
-                    verdict: verdict,
-                    score: ReadinessScore.score(snapshot: snapshot, verdict: verdict),
-                    reasons: reasons,
-                    baselineDayCount: baselineDays,
-                    snapshot: snapshot
-                )
-            }
-            return ReadinessAssessment(
-                verdict: .insufficientData, score: nil, reasons: [], baselineDayCount: baselineDays, snapshot: snapshot
-            )
-        }
-
-        var hrvFlag = false, rhrFlag = false, sleepFlag = false, acwrFlag = false
-
-        if let hrv7 = snapshot.hrvMean7, let hrv28 = snapshot.hrvMean28, hrv28 > 0,
-           hrv7 < Tuning.hrvDropRatio * hrv28 {
-            hrvFlag = true
-            let dropPercent = Int(((1 - hrv7 / hrv28) * 100).rounded())
-            reasons.append("HRV \(dropPercent)% below baseline")
-        }
-        if let rhr7 = snapshot.rhrMean7, let rhr28 = snapshot.rhrMean28,
-           rhr7 > rhr28 + Tuning.rhrRiseBpm {
-            rhrFlag = true
-            let rise = Int((rhr7 - rhr28).rounded())
-            reasons.append("Resting HR \(rise) bpm above baseline")
-        }
-        if let lastNight = snapshot.sleepLastNight {
-            let belowFloor = lastNight < Tuning.sleepMinHours
-            let belowMean = snapshot.sleepMean14.map { lastNight < Tuning.sleepDropRatio * $0 } ?? false
-            if belowFloor || belowMean {
-                sleepFlag = true
-                reasons.append(String(format: "Slept %.1f h last night", lastNight))
+            if persistentDays < 2 {
+                current.verdict = .train
+                current.hedged = true
             }
         }
-        if let acwr = snapshot.acuteChronicRatio, acwr > Tuning.acwrLimit {
-            acwrFlag = true
-            reasons.append(String(format: "Training load ramping fast (%.2f× your usual)", acwr))
-        }
 
-        let wearableFlagFired = hrvFlag || rhrFlag || sleepFlag || acwrFlag
-        if wearableFlagFired {
-            reasons.append(contentsOf: corroboratingReasons(for: selectedCheckIns))
-        }
-
-        // No signal evaluable at all → don't fake a "Train" verdict.
-        let anySignalPresent = snapshot.hrvMean7 != nil
-            || snapshot.rhrMean7 != nil
-            || snapshot.sleepLastNight != nil
-            || snapshot.acuteChronicRatio != nil
-            || selectedCheckIns.contains { $0.role == .standalone }
-        guard anySignalPresent else {
-            return ReadinessAssessment(
-                verdict: .insufficientData, score: nil, reasons: [], baselineDayCount: baselineDays, snapshot: snapshot
-            )
-        }
-
-        let verdict: ReadinessVerdict = switch reasons.count {
-        case 0: .train
-        case 1: .goEasy
-        default: .rest
-        }
-        // Suppressed recovery and rising load together is the classic
-        // overreaching pattern — always rest, regardless of other flags.
-        let finalVerdict = (forceRest || (hrvFlag && acwrFlag)) ? .rest : verdict
-
+        let score = ReadinessScore.score(snapshot: current.snapshot, verdict: current.verdict)
         return ReadinessAssessment(
-            verdict: finalVerdict,
-            score: ReadinessScore.score(snapshot: snapshot, verdict: finalVerdict),
-            reasons: reasons,
-            baselineDayCount: baselineDays,
-            snapshot: snapshot
+            verdict: current.verdict,
+            score: score,
+            reasons: current.reasons,
+            hedged: current.hedged,
+            baselineDayCount: current.baselineDayCount,
+            snapshot: current.snapshot
         )
     }
 
-    private static func subjectiveStandaloneReasons(for checkIns: Set<CheckInSignal>) -> [String] {
-        var reasons: [String] = []
-        if checkIns.contains(.ill) {
-            reasons.append("Reported illness")
+    private static func evaluateDay(
+        wellness: [WellnessSample],
+        loads: [(date: Date, load: Double)],
+        day: Date,
+        calendar: Calendar,
+        checkIns: Set<CheckInSignal>
+    ) -> DayEvaluation {
+        let dayStart = calendar.startOfDay(for: day)
+        let hrvStats = metricStats(wellness, day: dayStart, calendar: calendar, metric: \.hrvSDNN)
+        let rhrStats = metricStats(wellness, day: dayStart, calendar: calendar, metric: \.restingHeartRate)
+        let recentHRV = recentMean(wellness, day: dayStart, calendar: calendar, metric: \.hrvSDNN)
+        let recentRHR = recentMean(wellness, day: dayStart, calendar: calendar, metric: \.restingHeartRate)
+        let sleepLastNight = dayValue(wellness, day: dayStart, calendar: calendar, metric: \.sleepHours)
+        let sleepValues14 = dailyValues(wellness, day: dayStart, days: 14, calendar: calendar, metric: \.sleepHours)
+        let sleepMean14 = mean(sleepValues14.map(\.value))
+        let acwr = TrainingLoad.acuteChronicRatio(loads: loads, today: dayStart, calendar: calendar)
+
+        let snapshot = ReadinessAssessment.Snapshot(
+            hrvMean7: recentHRV,
+            hrvMean28: hrvStats?.median,
+            rhrMean7: recentRHR,
+            rhrMean28: rhrStats?.median,
+            sleepLastNight: sleepLastNight,
+            sleepMean14: sleepMean14,
+            acuteChronicRatio: acwr,
+            hrvBaseline: hrvStats?.median,
+            hrvSD: hrvStats?.standardDeviation,
+            rhrBaseline: rhrStats?.median,
+            rhrSD: rhrStats?.standardDeviation
+        )
+
+        let forceRest = checkIns.contains(.ill)
+        let baselineDays = baselineDayCount(wellness, day: dayStart, calendar: calendar)
+        if forceRest {
+            return DayEvaluation(
+                verdict: .rest,
+                reasons: ["Reported illness"],
+                hedged: false,
+                baselineDayCount: baselineDays,
+                snapshot: snapshot,
+                corroboratedFlagCount: 3,
+                forceRest: true
+            )
         }
+
+        guard baselineDays >= Tuning.minBaselineDays else {
+            return DayEvaluation(
+                verdict: .insufficientData,
+                reasons: [],
+                hedged: false,
+                baselineDayCount: baselineDays,
+                snapshot: snapshot,
+                corroboratedFlagCount: 0,
+                forceRest: false
+            )
+        }
+
+        var reasons: [String] = []
+        var hrvLow = false
+        var rhrHigh = false
+        var sleepShort = false
+        var acwrHigh = false
+
+        if let recentHRV, let hrvStats, hrvStats.count >= Tuning.minBaselineDays, hrvStats.standardDeviation > 0,
+           recentHRV < hrvStats.median - hrvStats.standardDeviation {
+            hrvLow = true
+            reasons.append(String(
+                format: "HRV %.0f ms below %.0f ms baseline band",
+                recentHRV,
+                hrvStats.median
+            ))
+        }
+
+        if let recentRHR, let rhrStats, rhrStats.count >= Tuning.minBaselineDays, rhrStats.standardDeviation > 0,
+           recentRHR > rhrStats.median + max(Tuning.rhrRiseBpm, rhrStats.standardDeviation) {
+            rhrHigh = true
+            let rise = Int((recentRHR - rhrStats.median).rounded())
+            reasons.append("Resting HR \(rise) bpm above baseline")
+        }
+
+        if let sleepLastNight, sleepValues14.count >= Tuning.minBaselineDays {
+            let belowFloor = sleepLastNight < Tuning.sleepMinHours
+            let belowMean = sleepMean14.map { sleepLastNight < Tuning.sleepDropRatio * $0 } ?? false
+            if belowFloor || belowMean {
+                sleepShort = true
+                reasons.append(String(format: "Slept %.1f h last night", sleepLastNight))
+            }
+        }
+
+        if let acwr, acwr > Tuning.acwrLimit {
+            acwrHigh = true
+            reasons.append(String(format: "Training load ramping fast (%.2f× your usual)", acwr))
+        }
+
+        let wearableCount = [hrvLow, rhrHigh, sleepShort, acwrHigh].filter { $0 }.count
+        var corroboratedFlagCount = wearableCount
+
         if checkIns.contains(.sore) {
-            // TODO: Replace this single-day soreness reason with the 2-day persistence gate.
+            corroboratedFlagCount += 1
             reasons.append("Reported soreness")
         }
-        return reasons
+
+        if wearableCount > 0 {
+            let corroborators = corroboratingReasons(for: checkIns)
+            corroboratedFlagCount += corroborators.count
+            reasons.append(contentsOf: corroborators)
+        }
+
+        let verdict: ReadinessVerdict
+        let hedged: Bool
+        if hrvLow && acwrHigh {
+            verdict = .rest
+            hedged = false
+        } else {
+            switch corroboratedFlagCount {
+            case 0:
+                verdict = .train
+                hedged = false
+            case 1:
+                verdict = .train
+                hedged = true
+            case 2:
+                verdict = .goEasy
+                hedged = false
+            default:
+                verdict = .rest
+                hedged = false
+            }
+        }
+
+        return DayEvaluation(
+            verdict: verdict,
+            reasons: reasons,
+            hedged: hedged,
+            baselineDayCount: baselineDays,
+            snapshot: snapshot,
+            corroboratedFlagCount: corroboratedFlagCount,
+            forceRest: false
+        )
+    }
+
+    private static func baselineDayCount(_ wellness: [WellnessSample], day: Date, calendar: Calendar) -> Int {
+        let days = dailyValues(wellness, day: day, days: Tuning.baselineWindowDays, calendar: calendar) {
+            sample in
+            sample.hrvSDNN ?? sample.restingHeartRate ?? sample.sleepHours
+        }
+        return days.count
+    }
+
+    private static func metricStats(
+        _ wellness: [WellnessSample],
+        day: Date,
+        calendar: Calendar,
+        metric: (WellnessSample) -> Double?
+    ) -> MetricStats? {
+        let values = dailyValues(
+            wellness,
+            day: day,
+            days: Tuning.baselineWindowDays,
+            calendar: calendar,
+            metric: metric
+        ).map(\.value)
+        guard !values.isEmpty else { return nil }
+        let median = median(values)
+        let average = mean(values) ?? median
+        let variance = values.reduce(0) { $0 + pow($1 - average, 2) } / Double(values.count)
+        return MetricStats(median: median, standardDeviation: sqrt(variance), count: values.count)
+    }
+
+    private static func recentMean(
+        _ wellness: [WellnessSample],
+        day: Date,
+        calendar: Calendar,
+        metric: (WellnessSample) -> Double?
+    ) -> Double? {
+        let values = dailyValues(
+            wellness,
+            day: day,
+            days: Tuning.baselineWindowDays,
+            calendar: calendar,
+            metric: metric
+        )
+        .suffix(Tuning.recentMetricDays)
+        .map(\.value)
+        return mean(values)
+    }
+
+    private static func dayValue(
+        _ wellness: [WellnessSample],
+        day: Date,
+        calendar: Calendar,
+        metric: (WellnessSample) -> Double?
+    ) -> Double? {
+        dailyValues(wellness, day: day, days: 1, calendar: calendar, metric: metric).last?.value
+    }
+
+    private static func dailyValues(
+        _ wellness: [WellnessSample],
+        day: Date,
+        days: Int,
+        calendar: Calendar,
+        metric: (WellnessSample) -> Double?
+    ) -> [(date: Date, value: Double)] {
+        guard let start = calendar.date(byAdding: .day, value: -(days - 1), to: day) else { return [] }
+        var grouped: [Date: [Double]] = [:]
+        for sample in wellness {
+            let sampleDay = calendar.startOfDay(for: sample.date)
+            guard sampleDay >= start, sampleDay <= day, let value = metric(sample) else { continue }
+            grouped[sampleDay, default: []].append(value)
+        }
+        return grouped
+            .map { (date: $0.key, value: mean($0.value) ?? 0) }
+            .sorted { $0.date < $1.date }
+    }
+
+    private static func mean(_ values: [Double]) -> Double? {
+        values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
+    }
+
+    private static func median(_ values: [Double]) -> Double {
+        let sorted = values.sorted()
+        let mid = sorted.count / 2
+        if sorted.count.isMultiple(of: 2) {
+            return (sorted[mid - 1] + sorted[mid]) / 2
+        }
+        return sorted[mid]
     }
 
     private static func corroboratingReasons(for checkIns: Set<CheckInSignal>) -> [String] {
         CheckInSignal.allCases
             .filter { $0.role == .corroborator && checkIns.contains($0) }
             .map { "Reported \($0.displayName.lowercased()) (corroborates recovery signals)" }
+    }
+}
+
+private extension ReadinessVerdict {
+    var needsVolumeCut: Bool {
+        self == .goEasy || self == .rest
     }
 }
