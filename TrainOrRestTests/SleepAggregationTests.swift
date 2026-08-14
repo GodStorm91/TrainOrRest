@@ -70,8 +70,9 @@ final class SleepAggregationTests: XCTestCase {
         XCTAssertEqual(hours[calendar.startOfDay(for: date(3, 7))]!, 8.0, accuracy: 0.001)
     }
 
-    func testGarminPreferredOverPhoneEstimates() {
-        // iPhone estimates a longer, overlapping window; only Garmin counts.
+    func testSleepAggregatesAllSourcesWithOverlapMerge() {
+        // HealthKit sleep aggregates all sources; overlapping windows merge,
+        // so Garmin 23:00-06:00 plus iPhone 22:00-08:00 becomes 10h.
         let hours = SleepAggregator.nightlySleepHours(
             intervals: [
                 garmin(date(1, 23), date(2, 6)),
@@ -79,7 +80,7 @@ final class SleepAggregationTests: XCTestCase {
             ],
             calendar: calendar
         )
-        XCTAssertEqual(hours[calendar.startOfDay(for: date(2, 6))]!, 7.0, accuracy: 0.001)
+        XCTAssertEqual(hours[calendar.startOfDay(for: date(2, 6))]!, 10.0, accuracy: 0.001)
     }
 
     func testInvalidAndEmptyIntervalsIgnored() {

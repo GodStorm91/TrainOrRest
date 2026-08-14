@@ -73,6 +73,53 @@ final class SampleMappingTests: XCTestCase {
         XCTAssertEqual(byDay[calendar.startOfDay(for: date(1, 8))], 53)
     }
 
+    func testHRVAndRHRReducersPreferGarminWhenOtherSourcesArePresent() {
+        let hrvSamples = [
+            QuantitySampleSummary(start: date(1, 4), value: 52, sourceName: "Garmin Connect"),
+            QuantitySampleSummary(start: date(1, 3), value: 65, sourceName: "Apple Watch"),
+        ]
+        let rhrSamples = [
+            QuantitySampleSummary(start: date(1, 8), value: 48, sourceName: "Garmin Connect"),
+            QuantitySampleSummary(start: date(1, 21), value: 58, sourceName: "Apple Watch"),
+        ]
+
+        let day = calendar.startOfDay(for: date(1, 4))
+        XCTAssertEqual(WellnessReducer.firstValuePerDay(hrvSamples, calendar: calendar)[day], 52)
+        XCTAssertEqual(WellnessReducer.latestValuePerDay(rhrSamples, calendar: calendar)[day], 48)
+    }
+
+    func testHRVSourceResolutionCapturesAlternateAndDivergence() throws {
+        let samples = [
+            QuantitySampleSummary(start: date(1, 4), value: 52, sourceName: "Garmin Connect"),
+            QuantitySampleSummary(start: date(1, 3), value: 61, sourceName: "Apple Watch"),
+            QuantitySampleSummary(start: date(1, 5), value: 64, sourceName: "iPhone"),
+        ]
+
+        let resolution = try XCTUnwrap(WellnessReducer.hrvSourceResolution(
+            samples: samples,
+            divergenceThreshold: 5
+        ))
+        XCTAssertEqual(resolution.primaryValue, 52)
+        XCTAssertEqual(resolution.primarySource, "Garmin Connect")
+        XCTAssertEqual(resolution.altValue, 61)
+        XCTAssertEqual(resolution.altSource, "Apple Watch")
+        XCTAssertTrue(resolution.diverged)
+    }
+
+    func testHRVSourceResolutionDoesNotDivergeInsideThreshold() throws {
+        let samples = [
+            QuantitySampleSummary(start: date(1, 4), value: 52, sourceName: "Garmin Connect"),
+            QuantitySampleSummary(start: date(1, 3), value: 55, sourceName: "Apple Watch"),
+        ]
+
+        let resolution = try XCTUnwrap(WellnessReducer.hrvSourceResolution(
+            samples: samples,
+            divergenceThreshold: 5
+        ))
+        XCTAssertEqual(resolution.altValue, 55)
+        XCTAssertFalse(resolution.diverged)
+    }
+
     func testReducersEmptyInputProducesEmptyOutput() {
         XCTAssertTrue(WellnessReducer.firstValuePerDay([], calendar: calendar).isEmpty)
         XCTAssertTrue(WellnessReducer.latestValuePerDay([], calendar: calendar).isEmpty)

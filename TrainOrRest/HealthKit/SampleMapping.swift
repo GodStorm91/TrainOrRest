@@ -63,7 +63,7 @@ enum SleepAggregator {
     /// attribute to the wake date, naps to the same day. Overlapping intervals
     /// are merged first so multi-record nights and re-imports never double count.
     static func nightlySleepHours(intervals: [SleepInterval], calendar: Calendar) -> [Date: Double] {
-        let preferred = GarminSource.preferGarmin(intervals, sourceName: \.sourceName)
+        let preferred = intervals
             .filter { $0.end > $0.start }
             .sorted { $0.start < $1.start }
 
@@ -94,25 +94,52 @@ enum SleepStageAggregator {
 
     /// Per-stage hours keyed by wake date. Stages within a source are disjoint,
     /// so durations are summed directly (no overlap merge); `unspecified`
-    /// counts toward light. Source preference matches the total aggregator.
+    /// counts toward light. Cross-source staged nights choose the source with
+    /// the most staged time to avoid mixing conflicting stage labels.
     static func nightlyStageHours(intervals: [SleepInterval], calendar: Calendar) -> [Date: StageHours] {
-        let preferred = GarminSource.preferGarmin(intervals, sourceName: \.sourceName)
-            .filter { $0.end > $0.start }
+        struct Candidate {
+            var sourceName: String
+            var hours: StageHours
+            var total = 0.0
+        }
 
-        var byDay: [Date: StageHours] = [:]
-        for interval in preferred {
+        var candidates: [Date: [String: Candidate]] = [:]
+        for interval in intervals where interval.end > interval.start {
             let day = calendar.startOfDay(for: interval.end)
             let hours = interval.end.timeIntervalSince(interval.start) / 3600
-            var stages = byDay[day] ?? StageHours()
+            var candidate = candidates[day]?[interval.sourceName] ?? Candidate(
+                sourceName: interval.sourceName,
+                hours: StageHours()
+            )
             switch interval.stage {
-            case .deep: stages.deep += hours
-            case .rem: stages.rem += hours
-            case .light, .unspecified: stages.light += hours
+            case .deep: candidate.hours.deep += hours
+            case .rem: candidate.hours.rem += hours
+            case .light, .unspecified: candidate.hours.light += hours
             }
-            byDay[day] = stages
+            candidate.total += hours
+            candidates[day, default: [:]][interval.sourceName] = candidate
+        }
+
+        var byDay: [Date: StageHours] = [:]
+        for (day, sourceCandidates) in candidates {
+            let winner = sourceCandidates.values.sorted {
+                if $0.total == $1.total {
+                    return $0.sourceName < $1.sourceName
+                }
+                return $0.total > $1.total
+            }.first
+            byDay[day] = winner?.hours
         }
         return byDay
     }
+}
+
+struct SourceResolution: Equatable {
+    var primaryValue: Double
+    var primarySource: String
+    var altValue: Double?
+    var altSource: String?
+    var diverged: Bool
 }
 
 enum WellnessReducer {
@@ -126,6 +153,35 @@ enum WellnessReducer {
     /// most recent write for the day is authoritative.
     static func latestValuePerDay(_ samples: [QuantitySampleSummary], calendar: Calendar) -> [Date: Double] {
         reducePerDay(samples, calendar: calendar) { $0.start > $1.start }
+    }
+
+    /// Resolves one day's HRV samples with the same Garmin-first/earliest
+    /// primary rule as `firstValuePerDay`, while retaining the best alternate
+    /// non-Garmin reading for source-conflict UI and readiness confidence.
+    static func hrvSourceResolution(
+        samples: [QuantitySampleSummary],
+        divergenceThreshold: Double
+    ) -> SourceResolution? {
+        guard let primary = GarminSource.preferGarmin(samples, sourceName: \.sourceName)
+            .sorted(by: sampleSort)
+            .first
+        else { return nil }
+
+        let alternate = samples
+            .filter { !$0.sourceName.hasPrefix(GarminSource.namePrefix) && $0.sourceName != primary.sourceName }
+            .sorted(by: sampleSort)
+            .first
+        let diverged = alternate.map {
+            abs(primary.value - $0.value) > divergenceThreshold
+        } ?? false
+
+        return SourceResolution(
+            primaryValue: primary.value,
+            primarySource: primary.sourceName,
+            altValue: alternate?.value,
+            altSource: alternate?.sourceName,
+            diverged: diverged
+        )
     }
 
     private static func reducePerDay(
@@ -144,5 +200,15 @@ enum WellnessReducer {
             }
         }
         return pickByDay.mapValues(\.value)
+    }
+
+    private static func sampleSort(_ lhs: QuantitySampleSummary, _ rhs: QuantitySampleSummary) -> Bool {
+        if lhs.start == rhs.start {
+            if lhs.sourceName == rhs.sourceName {
+                return lhs.value < rhs.value
+            }
+            return lhs.sourceName < rhs.sourceName
+        }
+        return lhs.start < rhs.start
     }
 }

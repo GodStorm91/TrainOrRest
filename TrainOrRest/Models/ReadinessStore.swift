@@ -77,6 +77,10 @@ enum ReadinessStore {
         let checkInHistory = try recentCheckInHistory(in: context, today: today, calendar: calendar)
         let checkIns = todayCheckInSignals(from: checkInHistory, today: today, calendar: calendar)
         let overrides = try recentRuleOverrides(in: context, today: today, calendar: calendar)
+        let day = calendar.startOfDay(for: today)
+        let disputedMetrics: Set<ReadinessRule> = wellnessRows.contains {
+            calendar.isDate($0.date, inSameDayAs: day) && $0.hrvDisputed
+        } ? Set<ReadinessRule>([.hrv]) : []
         let hasStandaloneCheckIn = checkIns.contains { $0.role == .standalone }
         guard !samples.isEmpty || !loads.isEmpty || hasStandaloneCheckIn else { return nil }
 
@@ -87,10 +91,10 @@ enum ReadinessStore {
             calendar: calendar,
             checkIns: checkIns,
             overrides: overrides,
-            checkInHistory: checkInHistory
+            checkInHistory: checkInHistory,
+            disputedMetrics: disputedMetrics
         )
 
-        let day = calendar.startOfDay(for: today)
         var descriptor = FetchDescriptor<DailyReadiness>(predicate: #Predicate { $0.date == day })
         descriptor.fetchLimit = 1
         if let existing = try context.fetch(descriptor).first {

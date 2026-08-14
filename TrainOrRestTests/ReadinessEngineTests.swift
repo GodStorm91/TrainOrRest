@@ -25,17 +25,25 @@ final class ReadinessEngineTests: XCTestCase {
         }
     }
 
+    private func rampingLoads() -> [(date: Date, load: Double)] {
+        (0..<35).map { daysBack in
+            (date: day(daysBack), load: daysBack < 7 ? 120 : 40)
+        }
+    }
+
     private func assess(
         _ wellness: [WellnessSample],
         loads: [(date: Date, load: Double)] = [],
-        checkIns: [CheckInSignal] = []
+        checkIns: [CheckInSignal] = [],
+        disputedMetrics: Set<ReadinessRule> = []
     ) -> ReadinessAssessment {
         ReadinessEngine.assess(
             wellness: wellness,
             loads: loads,
             today: today,
             calendar: calendar,
-            checkIns: checkIns
+            checkIns: checkIns,
+            disputedMetrics: disputedMetrics
         )
     }
 
@@ -122,6 +130,24 @@ final class ReadinessEngineTests: XCTestCase {
         XCTAssertEqual(assessment.verdict, .rest)
         XCTAssertFalse(assessment.hedged)
         XCTAssertEqual(assessment.reasons, ["Reported illness"])
+    }
+
+    func testDisputedHRVDoesNotForceRestWithHighLoad() {
+        let samples = wellness(overrides: [
+            0: (hrv: 54, rhr: nil, sleep: nil),
+            1: (hrv: 54, rhr: nil, sleep: nil),
+            2: (hrv: 54, rhr: nil, sleep: nil)
+        ])
+        let confirmed = assess(samples, loads: rampingLoads())
+        let disputed = assess(samples, loads: rampingLoads(), disputedMetrics: [.hrv])
+
+        XCTAssertEqual(confirmed.verdict, .rest)
+        XCTAssertEqual(disputed.verdict, .train)
+        XCTAssertTrue(disputed.hedged)
+        XCTAssertEqual(disputed.corroboratedFlagCount, 1)
+        XCTAssertEqual(disputed.primaryRule, .load)
+        XCTAssertTrue(disputed.reasons.contains("HRV disputed between sources — not counted"))
+        XCTAssertTrue(disputed.reasons.contains { $0.contains("Training load") })
     }
 
     // MARK: - Missing data

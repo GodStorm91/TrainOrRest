@@ -212,7 +212,10 @@ struct TodayView: View {
             DriverMetric(label: "HRV", value: r?.hrvMean7.map { "\(Int($0))" } ?? "–", unit: "ms",
                          delta: delta(r?.hrvMean7, r?.hrvBaseline ?? r?.hrvMean28, higherIsBetter: true),
                          caption: (r?.hrvBaseline ?? r?.hrvMean28).map { "vs \(Int($0)) ms baseline" } ?? "baseline building",
-                         sparkline: wellnessSeries(\.hrvSDNN), sparkColor: Theme.data),
+                         sourceConflict: hrvSourceConflict,
+                         isDisputed: todayWellness?.hrvDisputed ?? false,
+                         sparkline: wellnessSeries(\.hrvSDNN),
+                         sparkColor: (todayWellness?.hrvDisputed ?? false) ? Theme.warn : Theme.data),
             DriverMetric(label: "Resting HR", value: r?.rhrMean7.map { "\(Int($0))" } ?? "–", unit: "bpm",
                          delta: delta(r?.rhrMean7, r?.rhrBaseline ?? r?.rhrMean28, higherIsBetter: false),
                          caption: (r?.rhrBaseline ?? r?.rhrMean28).map { "vs \(Int($0)) bpm baseline" } ?? "baseline building",
@@ -278,6 +281,28 @@ struct TodayView: View {
 
     private var latestVO2: Double? {
         wellness.first { $0.vo2Max != nil }?.vo2Max
+    }
+
+    private var todayWellness: DailyWellness? {
+        wellness.first { calendar.isDateInToday($0.date) }
+    }
+
+    private var hrvSourceConflict: DriverMetric.SourceConflict? {
+        guard let row = todayWellness,
+              let primaryValue = row.hrvSDNN,
+              let altValue = row.hrvAltValue,
+              let altSource = row.hrvAltSource
+        else { return nil }
+        return DriverMetric.SourceConflict(
+            primarySource: sourceDisplayName(row.hrvPrimarySource ?? "Garmin"),
+            primaryValue: primaryValue,
+            altSource: sourceDisplayName(altSource),
+            altValue: altValue
+        )
+    }
+
+    private func sourceDisplayName(_ sourceName: String) -> String {
+        sourceName.hasPrefix(GarminSource.namePrefix) ? "Garmin" : sourceName
     }
 
     private func toggleCheckIn(_ signal: CheckInSignal) {
@@ -404,10 +429,18 @@ struct DriverMetric: Identifiable {
     var delta: Delta?
     var caption: String
     var badge: (String, Bool)?
+    var sourceConflict: SourceConflict?
+    var isDisputed: Bool = false
     var sparkline: [Double] = []
     var sparkColor: Color = Theme.data
 
     struct Delta { var text: String; var good: Bool }
+    struct SourceConflict {
+        var primarySource: String
+        var primaryValue: Double
+        var altSource: String
+        var altValue: Double
+    }
 }
 
 /// Thin normalized trend line for a driver card. Renders nothing under 2 points.
@@ -437,12 +470,31 @@ struct Sparkline: View {
 
 struct DriverCard: View {
     let metric: DriverMetric
+    @State private var showSourceReceipt = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            HStack {
-                TorEyebrow(metric.label).tracking(1.2)
+            HStack(spacing: 6) {
+                TorEyebrow(metric.label, color: metric.isDisputed ? Theme.warn : Theme.faint).tracking(1.2)
                 Spacer()
+                if metric.sourceConflict != nil {
+                    Button {
+                        showSourceReceipt = true
+                    } label: {
+                        Text("2 sources")
+                            .font(.torHeading(11, .bold))
+                            .foregroundStyle(metric.isDisputed ? Theme.warn : Theme.data)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(
+                                Theme.soft(metric.isDisputed ? Theme.warn : Theme.data),
+                                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityLabel("Show HRV sources")
+                }
                 if let delta = metric.delta {
                     Text(delta.text).font(.torHeading(11, .bold))
                         .foregroundStyle(delta.good ? Theme.good : Theme.warn)
@@ -468,9 +520,35 @@ struct DriverCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14).padding(.vertical, 13)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
-        .accessibilityElement(children: .combine)
+        .background(
+            metric.isDisputed ? Theme.soft(Theme.warn, 0.08) : Theme.card,
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(metric.isDisputed ? Theme.warn.opacity(0.45) : Theme.border, lineWidth: 1)
+        )
+        .sheet(isPresented: $showSourceReceipt) {
+            if let conflict = metric.sourceConflict {
+                ReceiptSheet(
+                    title: "HRV sources",
+                    subtitle: "\(conflict.primarySource) is primary for HRV — change in Settings.",
+                    rows: [
+                        .detail(
+                            conflict.primarySource,
+                            value: String(format: "%.0f ms (used)", conflict.primaryValue),
+                            symbol: "checkmark.circle"
+                        ),
+                        .detail(
+                            conflict.altSource,
+                            value: String(format: "%.0f ms", conflict.altValue),
+                            symbol: "waveform.path.ecg"
+                        )
+                    ]
+                )
+            }
+        }
+        .accessibilityElement(children: metric.sourceConflict == nil ? .combine : .contain)
     }
 }
 

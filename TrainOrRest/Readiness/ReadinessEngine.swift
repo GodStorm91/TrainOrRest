@@ -89,7 +89,8 @@ enum ReadinessEngine {
         calendar: Calendar,
         checkIns: [CheckInSignal] = [],
         overrides: [(date: Date, rule: ReadinessRule)] = [],
-        checkInHistory: [(date: Date, signals: [CheckInSignal])] = []
+        checkInHistory: [(date: Date, signals: [CheckInSignal])] = [],
+        disputedMetrics: Set<ReadinessRule> = []
     ) -> ReadinessAssessment {
         let todaySignals = Set(checkIns)
         let multipliers = ruleMultipliers(overrides: overrides, today: today, calendar: calendar)
@@ -106,7 +107,8 @@ enum ReadinessEngine {
                 calendar: calendar
             ),
             checkInHistory: checkInHistory,
-            multipliers: multipliers
+            multipliers: multipliers,
+            disputedMetrics: disputedMetrics
         )
 
         if current.verdict.needsVolumeCut && !current.forceRest && !current.hasSorenessFlag {
@@ -125,7 +127,8 @@ enum ReadinessEngine {
                         calendar: calendar
                     ),
                     checkInHistory: checkInHistory,
-                    multipliers: multipliers
+                    multipliers: multipliers,
+                    disputedMetrics: calendar.isDate(day, inSameDayAs: today) ? disputedMetrics : []
                 ).corroboratedFlagCount >= 2
             }.count
 
@@ -158,7 +161,8 @@ enum ReadinessEngine {
         calendar: Calendar,
         checkIns: Set<CheckInSignal>,
         checkInHistory: [(date: Date, signals: [CheckInSignal])],
-        multipliers: [ReadinessRule: Double]
+        multipliers: [ReadinessRule: Double],
+        disputedMetrics: Set<ReadinessRule>
     ) -> DayEvaluation {
         let dayStart = calendar.startOfDay(for: day)
         let hrvStats = metricStats(wellness, day: dayStart, calendar: calendar, metric: \.hrvSDNN)
@@ -219,16 +223,22 @@ enum ReadinessEngine {
         var rhrHigh = false
         var sleepShort = false
         var acwrHigh = false
+        var hasDisputedHRV = false
 
         let hrvMultiplier = multipliers[.hrv] ?? 1.0
         if let recentHRV, let hrvStats, hrvStats.count >= Tuning.minBaselineDays, hrvStats.standardDeviation > 0,
            recentHRV < hrvStats.median - hrvMultiplier * hrvStats.standardDeviation {
-            hrvLow = true
-            reasons.append(String(
-                format: "HRV %.0f ms below %.0f ms baseline band",
-                recentHRV,
-                hrvStats.median
-            ))
+            if disputedMetrics.contains(.hrv) {
+                hasDisputedHRV = true
+                reasons.append("HRV disputed between sources — not counted")
+            } else {
+                hrvLow = true
+                reasons.append(String(
+                    format: "HRV %.0f ms below %.0f ms baseline band",
+                    recentHRV,
+                    hrvStats.median
+                ))
+            }
         }
 
         let rhrMultiplier = multipliers[.rhr] ?? 1.0
@@ -277,7 +287,7 @@ enum ReadinessEngine {
         }
 
         let verdict: ReadinessVerdict
-        let hedged: Bool
+        var hedged: Bool
         if hrvLow && acwrHigh {
             verdict = .rest
             hedged = false
@@ -296,6 +306,9 @@ enum ReadinessEngine {
                 verdict = .rest
                 hedged = false
             }
+        }
+        if hasDisputedHRV {
+            hedged = true
         }
 
         let primaryRule = primaryRule(hrvLow: hrvLow, acwrHigh: acwrHigh, rhrHigh: rhrHigh, sleepShort: sleepShort)
