@@ -267,13 +267,20 @@ focus, pressed, disabled, loading (skeleton, not spinner), error.
 
 ---
 
-## 12. Open follow‑ups
+## 12. Status
 
-- Define the exact modifier‑rule table (R1…Rn) and give each a stable ID for receipts.
-- Pick the final cyan data hue and verify sparkline contrast on `card`/`card2`.
-- Snapshot tests: verdict contrast ≥4.5:1; banner layout at AX3/AX5 on iPhone SE.
-- Migrate `PlanUpdateCard` / `PlanDiffView` to the 3‑chip ledger + revision‑pinned diff.
-- Wire the subjective check‑in chips into the readiness engine's two‑signal layer.
+**Implemented & test‑verified (Xcode 27, iPhone 17 sim):**
+- ✅ §5.1 personal‑baseline calibration — 60‑day median ±1 SD, two‑signal confirmation, persistence gate (`ReadinessEngine`).
+- ✅ §5.1.4 override feedback — `RuleOverride` widens a rule's threshold 0.25 SD per two overrides in 14 days; soreness needs 2 consecutive days.
+- ✅ §5.2/§5.3 reversible coach edits — `PlanEdit` journal + 7‑day inverse‑apply revert with a fresh‑diff guard (stale‑diff refusal already existed via `WorkoutReplacementFingerprint`).
+- ✅ §6 source precedence — sleep aggregates all sources; HRV/RHR/runs prefer Garmin; HRV divergence captured as provenance and treated as unconfirmed in the engine, surfaced as a `2 sources` chip → receipt.
+- ✅ Subjective check‑in wired into the two‑signal layer; verdict‑contrast test asserts ≥4.5:1.
+
+**Remaining follow‑ups:**
+- Define an explicit modifier‑rule table (R1…Rn) with stable IDs for receipts (currently rules are implicit in the engine).
+- Banner layout snapshot tests at AX3/AX5 on iPhone SE.
+- The stale‑diff case still surfaces as an error message; DESIGN §5.3's in‑card "Plan changed since this was proposed" re‑diff UX is not yet built.
+- Full event‑sourced "derived week state" was intentionally NOT built; the fingerprint optimistic‑concurrency check delivers the anti‑clobber guarantee at lower risk.
 
 ---
 
