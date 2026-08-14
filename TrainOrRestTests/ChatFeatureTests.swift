@@ -63,7 +63,7 @@ final class ChatFeatureTests: XCTestCase {
         let context = container.mainContext
         try seedGoalOnly(in: context)
 
-        try CoachTools.apply(
+        _ = try CoachTools.apply(
             proposal: PlanAdjustmentProposal(changes: [
                 .init(date: CoachContextBuilder.day(qualityDay, calendar: calendar), action: .downgrade, detail: nil)
             ]),

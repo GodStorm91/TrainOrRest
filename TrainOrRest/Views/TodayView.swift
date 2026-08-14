@@ -298,7 +298,7 @@ struct TodayView: View {
             checkInSaveFailed = true
             return
         }
-        try? ReadinessStore.runDailyPipeline(in: modelContext, today: .now, calendar: calendar)
+        _ = try? ReadinessStore.runDailyPipeline(in: modelContext, today: .now, calendar: calendar)
     }
 }
 
