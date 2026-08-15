@@ -156,24 +156,57 @@ final class CoachChatStore: ObservableObject {
         var applied: [String] = []
 
         for _ in 0..<CoachChatConfig.maxToolRounds {
-            let response = try await client.send(
-                ClaudeRequest(model: model, system: system, tools: [CoachTools.tool], messages: conversation),
-                apiKey: apiKey
+            let request = ClaudeRequest(model: model, system: system, tools: [CoachTools.tool], messages: conversation)
+            let events = try await client.stream(request, apiKey: apiKey)
+            var streamingMessage: ChatMessage?
+            var lastStreamSave = Date.distantPast
+            let streamSaveInterval: TimeInterval = 0.15
+            let assembler = CoachStreamAssembler(
+                onText: { delta in
+                    if streamingMessage == nil {
+                        let message = self.assistantMessage(text: "", groundingSnapshot: groundingSnapshot)
+                        streamingMessage = message
+                        context.insert(message)
+                    }
+                    streamingMessage?.text += delta
+                    let saveTime = Date()
+                    if saveTime.timeIntervalSince(lastStreamSave) >= streamSaveInterval {
+                        lastStreamSave = saveTime
+                        try? context.save()
+                    }
+                }
             )
+            let assembled = try await assembler.assemble(events)
+            if let error = assembled.error {
+                if let streamingMessage {
+                    context.delete(streamingMessage)
+                    try? context.save()
+                }
+                throw CoachTools.ValidationError(error)
+            }
+            let response = assembled.response
 
             // A truncated turn can carry a half-written tool input. Never decode
             // or apply it; a refusal must not be treated as a plan edit either.
             if response.stopReason == "max_tokens" {
+                if let streamingMessage {
+                    context.delete(streamingMessage)
+                    try? context.save()
+                }
                 throw CoachTools.ValidationError(
                     "Claude's reply was cut off before the plan edit was complete. Ask again."
                 )
             }
             if response.stopReason == "refusal" {
                 let text = response.content.textContent
-                context.insert(assistantMessage(
-                    text: text.isEmpty ? "Claude declined to answer that." : text,
-                    groundingSnapshot: groundingSnapshot
-                ))
+                if let streamingMessage {
+                    streamingMessage.text = text.isEmpty ? "Claude declined to answer that." : text
+                } else {
+                    context.insert(assistantMessage(
+                        text: text.isEmpty ? "Claude declined to answer that." : text,
+                        groundingSnapshot: groundingSnapshot
+                    ))
+                }
                 try context.save()
                 return
             }
@@ -184,15 +217,24 @@ final class CoachChatStore: ObservableObject {
             }
             if toolUses.isEmpty {
                 let text = response.content.textContent
-                context.insert(assistantMessage(
-                    text: text.isEmpty ? "I could not produce a response." : text,
-                    appliedAdjustment: applied.isEmpty ? nil : applied.joined(separator: "; "),
-                    groundingSnapshot: groundingSnapshot
-                ))
+                if let streamingMessage {
+                    streamingMessage.text = text.isEmpty ? "I could not produce a response." : text
+                    streamingMessage.appliedAdjustment = applied.isEmpty ? nil : applied.joined(separator: "; ")
+                } else {
+                    context.insert(assistantMessage(
+                        text: text.isEmpty ? "I could not produce a response." : text,
+                        appliedAdjustment: applied.isEmpty ? nil : applied.joined(separator: "; "),
+                        groundingSnapshot: groundingSnapshot
+                    ))
+                }
                 try context.save()
                 return
             }
 
+            if let streamingMessage {
+                context.delete(streamingMessage)
+                try context.save()
+            }
             conversation.append(ClaudeMessageParam(role: "assistant", content: response.content))
             guard toolUses.count == 1 else {
                 conversation.append(ClaudeMessageParam(role: "user", content: toolUses.map {

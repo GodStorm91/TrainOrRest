@@ -11,6 +11,7 @@ enum AnthropicStreamEvent: Equatable {
     case textDelta(index: Int, String)
     case inputJSONDelta(index: Int, String)
     case contentBlockStop(index: Int)
+    case passthroughBlock(index: Int, JSONValue)
     case messageDelta(stopReason: String?)
     case messageStop
     case error(String)
@@ -54,6 +55,8 @@ actor CoachStreamAccumulator {
         case .contentBlockStop(let index):
             guard let block = toolBlocks.removeValue(forKey: index) else { return [] }
             return [decode(block)]
+        case .passthroughBlock:
+            return []
         case .messageDelta(let stopReason):
             self.stopReason = stopReason
             return []
