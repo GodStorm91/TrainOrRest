@@ -18,6 +18,8 @@ struct ReadinessAssessment: Equatable {
     var score: Int? = nil
     /// Human-readable explanation per triggered flag, worst first.
     var reasons: [String]
+    /// Stable deterministic rule identifiers for receipts, worst first.
+    var ruleIDs: [ReadinessRuleID] = []
     /// True when the evidence is soft or not persistent enough to cut volume.
     var hedged: Bool = false
     /// Primary deterministic rule responsible for a visible adjustment.
@@ -80,6 +82,7 @@ enum ReadinessEngine {
         var forceRest: Bool
         var primaryRule: ReadinessRule?
         var hasSorenessFlag: Bool
+        var ruleIDs: [ReadinessRuleID]
     }
 
     static func assess(
@@ -135,6 +138,7 @@ enum ReadinessEngine {
             if persistentDays < 2 {
                 current.verdict = .train
                 current.hedged = true
+                current.ruleIDs.append(.persistenceHold)
             }
         }
 
@@ -146,6 +150,7 @@ enum ReadinessEngine {
             verdict: current.verdict,
             score: score,
             reasons: current.reasons,
+            ruleIDs: current.ruleIDs.uniquePreservingOrder(),
             hedged: current.hedged,
             primaryRule: primaryRule,
             corroboratedFlagCount: current.corroboratedFlagCount,
@@ -200,7 +205,8 @@ enum ReadinessEngine {
                 corroboratedFlagCount: 3,
                 forceRest: true,
                 primaryRule: nil,
-                hasSorenessFlag: false
+                hasSorenessFlag: false,
+                ruleIDs: [.illness]
             )
         }
 
@@ -214,11 +220,13 @@ enum ReadinessEngine {
                 corroboratedFlagCount: 0,
                 forceRest: false,
                 primaryRule: nil,
-                hasSorenessFlag: false
+                hasSorenessFlag: false,
+                ruleIDs: []
             )
         }
 
         var reasons: [String] = []
+        var ruleIDs: [ReadinessRuleID] = []
         var hrvLow = false
         var rhrHigh = false
         var sleepShort = false
@@ -231,6 +239,7 @@ enum ReadinessEngine {
             if disputedMetrics.contains(.hrv) {
                 hasDisputedHRV = true
                 reasons.append("HRV disputed between sources — not counted")
+                ruleIDs.append(.sourceDispute)
             } else {
                 hrvLow = true
                 reasons.append(String(
@@ -238,7 +247,15 @@ enum ReadinessEngine {
                     recentHRV,
                     hrvStats.median
                 ))
+                ruleIDs.append(.hrvLow)
             }
+        } else if hrvMultiplier > 1.0,
+                  let recentHRV,
+                  let hrvStats,
+                  hrvStats.count >= Tuning.minBaselineDays,
+                  hrvStats.standardDeviation > 0,
+                  recentHRV < hrvStats.median - hrvStats.standardDeviation {
+            ruleIDs.append(.overrideWidened)
         }
 
         let rhrMultiplier = multipliers[.rhr] ?? 1.0
@@ -247,6 +264,14 @@ enum ReadinessEngine {
             rhrHigh = true
             let rise = Int((recentRHR - rhrStats.median).rounded())
             reasons.append("Resting HR \(rise) bpm above baseline")
+            ruleIDs.append(.rhrElevated)
+        } else if rhrMultiplier > 1.0,
+                  let recentRHR,
+                  let rhrStats,
+                  rhrStats.count >= Tuning.minBaselineDays,
+                  rhrStats.standardDeviation > 0,
+                  recentRHR > rhrStats.median + max(Tuning.rhrRiseBpm, rhrStats.standardDeviation) {
+            ruleIDs.append(.overrideWidened)
         }
 
         if let sleepLastNight, sleepValues14.count >= Tuning.minBaselineDays {
@@ -255,12 +280,18 @@ enum ReadinessEngine {
             if belowFloor || belowMean {
                 sleepShort = true
                 reasons.append(String(format: "Slept %.1f h last night", sleepLastNight))
+                ruleIDs.append(.shortSleep)
             }
         }
 
         if let acwr, acwr > Tuning.acwrLimit {
             acwrHigh = true
             reasons.append(String(format: "Training load ramping fast (%.2f× your usual)", acwr))
+            ruleIDs.append(.loadRamp)
+        }
+
+        if hrvLow && acwrHigh {
+            ruleIDs.append(.overreaching)
         }
 
         let wearableCount = [hrvLow, rhrHigh, sleepShort, acwrHigh].filter { $0 }.count
@@ -275,6 +306,7 @@ enum ReadinessEngine {
             if hasSorenessFlag {
                 corroboratedFlagCount += 1
                 reasons.append("Reported soreness for 2 consecutive days")
+                ruleIDs.append(.soreness)
             } else {
                 reasons.append("Reported soreness; watching for a second day")
             }
@@ -321,7 +353,8 @@ enum ReadinessEngine {
             corroboratedFlagCount: corroboratedFlagCount,
             forceRest: false,
             primaryRule: primaryRule,
-            hasSorenessFlag: hasSorenessFlag
+            hasSorenessFlag: hasSorenessFlag,
+            ruleIDs: ruleIDs
         )
     }
 
@@ -490,5 +523,12 @@ enum ReadinessEngine {
 private extension ReadinessVerdict {
     var needsVolumeCut: Bool {
         self == .goEasy || self == .rest
+    }
+}
+
+private extension Array where Element: Hashable {
+    func uniquePreservingOrder() -> [Element] {
+        var seen: Set<Element> = []
+        return filter { seen.insert($0).inserted }
     }
 }

@@ -143,7 +143,7 @@ struct VerdictBannerView: View {
                 Button {
                     showsRuleReceipt = true
                 } label: {
-                    Text("Adjusted · rule")
+                    Text(adjustedRuleTagText)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.warn)
                         .padding(.horizontal, 8)
@@ -192,10 +192,18 @@ struct VerdictBannerView: View {
     }
 
     private var ruleAdjustmentRows: [ReceiptSheet.Row] {
-        var rows: [ReceiptSheet.Row] = [
+        var rows = readiness?.ruleIDs.map { id in
+            ReceiptSheet.Row.detail(
+                "Rule \(id.code) · \(id.title)",
+                value: id.detail,
+                symbol: "checkmark.seal"
+            )
+        } ?? []
+
+        rows.append(contentsOf: [
             .detail("HRV band", value: hrvDriver, symbol: "waveform.path.ecg"),
             .detail("Load", value: loadDriver, symbol: "chart.line.uptrend.xyaxis")
-        ]
+        ])
 
         if let workout, hasPlanConflict {
             rows.append(
@@ -211,6 +219,27 @@ struct VerdictBannerView: View {
             .detail("Source", value: "Adjusted by a deterministic local training rule.", symbol: "checkmark.shield")
         )
         return rows
+    }
+
+    private var adjustedRuleTagText: String {
+        guard let code = primaryRuleID?.code ?? readiness?.ruleIDs.first?.code else {
+            return "Adjusted · rule"
+        }
+        return "Adjusted · rule \(code)"
+    }
+
+    private var primaryRuleID: ReadinessRuleID? {
+        guard let primaryRule = readiness?.primaryRule else { return nil }
+        switch primaryRule {
+        case .hrv:
+            return .hrvLow
+        case .rhr:
+            return .rhrElevated
+        case .sleep:
+            return .shortSleep
+        case .load:
+            return .loadRamp
+        }
     }
 
     private var hrvDriver: String {

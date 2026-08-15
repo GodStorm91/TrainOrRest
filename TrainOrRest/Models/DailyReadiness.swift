@@ -10,6 +10,7 @@ final class DailyReadiness {
     var verdictRaw: String
     var score: Int?
     var reasons: [String]
+    var ruleIDsRaw: [String] = []
     var hedged: Bool = false
     var primaryRuleRaw: String?
     var corroboratedFlagCount: Int = 0
@@ -33,6 +34,7 @@ final class DailyReadiness {
         self.verdictRaw = assessment.verdict.rawValue
         self.score = assessment.score
         self.reasons = assessment.reasons
+        self.ruleIDsRaw = assessment.ruleIDs.map(\.rawValue)
         self.hedged = assessment.hedged
         self.primaryRuleRaw = assessment.primaryRule?.rawValue
         self.corroboratedFlagCount = assessment.corroboratedFlagCount
@@ -61,10 +63,15 @@ final class DailyReadiness {
         set { primaryRuleRaw = newValue?.rawValue }
     }
 
+    var ruleIDs: [ReadinessRuleID] {
+        ruleIDsRaw.compactMap(ReadinessRuleID.init(rawValue:))
+    }
+
     func update(from assessment: ReadinessAssessment, computedAt: Date) {
         verdictRaw = assessment.verdict.rawValue
         score = assessment.score
         reasons = assessment.reasons
+        ruleIDsRaw = assessment.ruleIDs.map(\.rawValue)
         hedged = assessment.hedged
         primaryRuleRaw = assessment.primaryRule?.rawValue
         corroboratedFlagCount = assessment.corroboratedFlagCount
