@@ -56,6 +56,20 @@ enum CoachTools {
     static let toolName = "propose_plan_adjustment"
     /// Bounds untrusted batches before any allocation or persistence.
     static let maxChangesPerProposal = 5
+    static let staleReplacementMessage = ReplacementError.staleTargetMessage
+
+    enum ReplacementError: LocalizedError, Equatable {
+        case staleTarget
+
+        static let staleTargetMessage = "That scheduled workout changed before confirmation. Please ask again."
+
+        var errorDescription: String? {
+            switch self {
+            case .staleTarget:
+                return Self.staleTargetMessage
+            }
+        }
+    }
 
     static var tool: ClaudeTool {
         ClaudeTool(
@@ -363,7 +377,7 @@ enum CoachTools {
               existing.status == .planned,
               existing.kind != .race,
               existing.plan === plan else {
-            throw ValidationError("That scheduled workout changed before confirmation. Please ask again.")
+            throw ReplacementError.staleTarget
         }
 
         var spec = try currentPlanSpec(in: context, today: today, calendar: calendar)

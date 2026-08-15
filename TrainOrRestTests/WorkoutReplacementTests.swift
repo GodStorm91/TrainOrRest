@@ -89,12 +89,45 @@ final class WorkoutReplacementTests: XCTestCase {
         XCTAssertTrue(try messages(in: ModelContext(container)).isEmpty)
     }
 
-    func testStaleConfirmationWritesNoAdditionalChanges() throws {
+    func testStaleConfirmationThrowsTypedErrorWritesNothingAndCanRediffCurrentWorkout() throws {
         let container = try makeContainer()
         let context = container.mainContext
         let pending = try pendingReplacement(in: context)
         let existing = try XCTUnwrap(workout(on: occupiedDay, in: context))
+        existing.distanceKm += 1
         existing.details = "Changed after confirmation was offered"
+        let currentDistance = existing.distanceKm
+        let currentKind = try XCTUnwrap(existing.kind)
+        try context.save()
+        let before = try snapshot(in: ModelContext(container))
+
+        XCTAssertThrowsError(try CoachTools.confirmReplacement(
+            pending,
+            in: ModelContext(container),
+            today: today,
+            calendar: calendar
+        )) { error in
+            XCTAssertEqual(error as? CoachTools.ReplacementError, .staleTarget)
+            XCTAssertEqual(error.localizedDescription, CoachTools.staleReplacementMessage)
+        }
+
+        XCTAssertEqual(try snapshot(in: ModelContext(container)), before)
+        XCTAssertTrue(try messages(in: ModelContext(container)).isEmpty)
+        XCTAssertTrue(try planEdits(in: ModelContext(container)).isEmpty)
+
+        let fresh = try rebuildPending(from: pending, in: ModelContext(container))
+        XCTAssertEqual(fresh.existing.kind, currentKind)
+        XCTAssertEqual(fresh.existing.distanceKm, currentDistance, accuracy: 0.001)
+        XCTAssertFalse(fresh.planChangedSinceProposed)
+    }
+
+    func testCoordinatorRestagesFreshDiffWhenPlanChangedSinceProposal() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let pending = try pendingReplacement(in: context)
+        let existing = try XCTUnwrap(workout(on: occupiedDay, in: context))
+        existing.distanceKm += 1.5
+        let currentDistance = existing.distanceKm
         try context.save()
         let before = try snapshot(in: ModelContext(container))
         let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
@@ -102,9 +135,32 @@ final class WorkoutReplacementTests: XCTestCase {
         coordinator.stage(pending)
         coordinator.confirm(pending.id)
 
-        XCTAssertEqual(coordinator.lastError, pending.failureMessage)
+        let restaged = try XCTUnwrap(coordinator.pending)
+        XCTAssertTrue(restaged.planChangedSinceProposed)
+        XCTAssertEqual(restaged.existing.distanceKm, currentDistance, accuracy: 0.001)
+        XCTAssertNil(coordinator.lastError)
         XCTAssertEqual(try snapshot(in: ModelContext(container)), before)
         XCTAssertTrue(try messages(in: ModelContext(container)).isEmpty)
+        XCTAssertTrue(try planEdits(in: ModelContext(container)).isEmpty)
+    }
+
+    func testRebuildReturnsNilWhenStaleTargetBecameIneligible() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let pending = try pendingReplacement(in: context)
+        let existing = try XCTUnwrap(workout(on: occupiedDay, in: context))
+        existing.status = .done
+        try context.save()
+
+        XCTAssertThrowsError(try CoachTools.confirmReplacement(
+            pending,
+            in: ModelContext(container),
+            today: today,
+            calendar: calendar
+        )) { error in
+            XCTAssertEqual(error as? CoachTools.ReplacementError, .staleTarget)
+        }
+        XCTAssertNil(try rebuildPendingOptional(from: pending, in: ModelContext(container)))
     }
 
     private func pendingReplacement(in context: ModelContext) throws -> PendingWorkoutReplacement {
@@ -114,8 +170,41 @@ final class WorkoutReplacementTests: XCTestCase {
                 role: "work", targetType: "distance_km", targetValue: 5, paceZone: "easy"
             )])]
         )
+        return try pendingReplacement(workout: workout, date: occupiedDay, in: context)
+    }
+
+    private func rebuildPending(
+        from pending: PendingWorkoutReplacement,
+        in context: ModelContext
+    ) throws -> PendingWorkoutReplacement {
+        try XCTUnwrap(try rebuildPendingOptional(from: pending, in: context))
+    }
+
+    private func rebuildPendingOptional(
+        from pending: PendingWorkoutReplacement,
+        in context: ModelContext
+    ) throws -> PendingWorkoutReplacement? {
+        try CoachTools.pendingReplacement(
+            for: PlanAdjustmentProposal(changes: [.init(
+                date: CoachContextBuilder.day(pending.date, calendar: calendar),
+                action: .create,
+                detail: nil,
+                workout: pending.payload
+            )]),
+            in: context,
+            today: today,
+            calendar: calendar,
+            language: .en
+        )
+    }
+
+    private func pendingReplacement(
+        workout: PlanAdjustmentProposal.CreateWorkout,
+        date: Date,
+        in context: ModelContext
+    ) throws -> PendingWorkoutReplacement {
         let proposal = PlanAdjustmentProposal(changes: [.init(
-            date: CoachContextBuilder.day(occupiedDay, calendar: calendar),
+            date: CoachContextBuilder.day(date, calendar: calendar),
             action: .create, detail: nil, workout: workout
         )])
         return try XCTUnwrap(try CoachTools.pendingReplacement(
@@ -150,6 +239,10 @@ final class WorkoutReplacementTests: XCTestCase {
 
     private func messages(in context: ModelContext) throws -> [ChatMessage] {
         try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+    }
+
+    private func planEdits(in context: ModelContext) throws -> [PlanEdit] {
+        try context.fetch(FetchDescriptor<PlanEdit>(sortBy: [SortDescriptor(\.appliedAt)]))
     }
 
     private func snapshot(in context: ModelContext) throws -> [Row] {

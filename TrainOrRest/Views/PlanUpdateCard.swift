@@ -56,6 +56,7 @@ struct PlanUpdateCard: View {
             VStack(alignment: .leading, spacing: 12) {
                 titleRow
                 ledgerRow
+                planChangedBanner
                 diffRow
 
                 Rectangle().fill(Theme.line).frame(height: 1)
@@ -100,6 +101,31 @@ struct PlanUpdateCard: View {
             ledgerChip("Awaits you", symbol: "person", tint: Theme.dim)
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var planChangedBanner: some View {
+        if pending.planChangedSinceProposed {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.warn)
+                    .accessibilityHidden(true)
+
+                Text("Plan changed since this was proposed — review the updated change.")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(Theme.text)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                Theme.soft(Theme.warn, 0.16),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .accessibilityLabel("Plan changed since this was proposed. Review the updated change.")
+        }
     }
 
     private func ledgerChip(_ title: String, symbol: String, tint: Color) -> some View {

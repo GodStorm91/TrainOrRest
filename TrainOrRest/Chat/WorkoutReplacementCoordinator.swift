@@ -65,6 +65,7 @@ struct PendingWorkoutReplacement: Identifiable, Equatable {
     let appliedSummary: String
     let successMessage: String
     let failureMessage: String
+    let planChangedSinceProposed: Bool
 
     init(
         expected: WorkoutReplacementFingerprint,
@@ -76,7 +77,8 @@ struct PendingWorkoutReplacement: Identifiable, Equatable {
         volumeDeltaKm: Double,
         appliedSummary: String,
         successMessage: String,
-        failureMessage: String
+        failureMessage: String,
+        planChangedSinceProposed: Bool = false
     ) {
         id = UUID()
         self.expected = expected
@@ -89,6 +91,23 @@ struct PendingWorkoutReplacement: Identifiable, Equatable {
         self.appliedSummary = appliedSummary
         self.successMessage = successMessage
         self.failureMessage = failureMessage
+        self.planChangedSinceProposed = planChangedSinceProposed
+    }
+
+    func withPlanChangedSinceProposed(_ changed: Bool) -> PendingWorkoutReplacement {
+        PendingWorkoutReplacement(
+            expected: expected,
+            date: date,
+            payload: payload,
+            presentation: presentation,
+            existing: existing,
+            proposed: proposed,
+            volumeDeltaKm: volumeDeltaKm,
+            appliedSummary: appliedSummary,
+            successMessage: successMessage,
+            failureMessage: failureMessage,
+            planChangedSinceProposed: changed
+        )
     }
 }
 
@@ -141,8 +160,37 @@ final class WorkoutReplacementCoordinator: ObservableObject {
                 calendar: calendar
             )
             NotificationCenter.default.post(name: .planDidChange, object: nil)
+        } catch CoachTools.ReplacementError.staleTarget {
+            restageChangedPlanReplacement(from: replacement)
         } catch {
             lastError = replacement.failureMessage
+        }
+    }
+
+    private func restageChangedPlanReplacement(from replacement: PendingWorkoutReplacement) {
+        do {
+            let context = ModelContext(container)
+            context.autosaveEnabled = false
+            let proposal = PlanAdjustmentProposal(changes: [.init(
+                date: CoachContextBuilder.day(replacement.date, calendar: calendar),
+                action: .create,
+                detail: nil,
+                workout: replacement.payload
+            )])
+            guard let fresh = try CoachTools.pendingReplacement(
+                for: proposal,
+                in: context,
+                today: now(),
+                calendar: calendar,
+                language: .en
+            ) else {
+                lastError = "That day is no longer available — ask the coach again."
+                return
+            }
+            pending = fresh.withPlanChangedSinceProposed(true)
+            lastError = nil
+        } catch {
+            lastError = "That day is no longer available — ask the coach again."
         }
     }
 }
