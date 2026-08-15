@@ -275,12 +275,12 @@ focus, pressed, disabled, loading (skeleton, not spinner), error.
 - ✅ §5.2/§5.3 reversible coach edits — `PlanEdit` journal + 7‑day inverse‑apply revert with a fresh‑diff guard (stale‑diff refusal already existed via `WorkoutReplacementFingerprint`).
 - ✅ §6 source precedence — sleep aggregates all sources; HRV/RHR/runs prefer Garmin; HRV divergence captured as provenance and treated as unconfirmed in the engine, surfaced as a `2 sources` chip → receipt.
 - ✅ Subjective check‑in wired into the two‑signal layer; verdict‑contrast test asserts ≥4.5:1.
+- ✅ Explicit readiness rule catalog `ReadinessRuleID` R1–R10 (HRV=R4, illness=R7), attached to each assessment and cited in the banner receipt ("Rule Rn · …").
+- ✅ Banner Dynamic Type layout tests at AX3/AX5 on iPhone SE width (`VerdictBannerLayoutTests`): content wraps, never overflows 320pt.
+- ✅ §5.3 stale coach proposals re‑diff in‑card ("Plan changed since this was proposed") instead of dead‑ending on an error.
 
-**Remaining follow‑ups:**
-- Define an explicit modifier‑rule table (R1…Rn) with stable IDs for receipts (currently rules are implicit in the engine).
-- Banner layout snapshot tests at AX3/AX5 on iPhone SE.
-- The stale‑diff case still surfaces as an error message; DESIGN §5.3's in‑card "Plan changed since this was proposed" re‑diff UX is not yet built.
-- Full event‑sourced "derived week state" was intentionally NOT built; the fingerprint optimistic‑concurrency check delivers the anti‑clobber guarantee at lower risk.
+**Intentional non‑goals:**
+- Full event‑sourced "derived week state" was intentionally NOT built; the `WorkoutReplacementFingerprint` optimistic‑concurrency check plus the `PlanEdit` revert journal deliver the anti‑clobber + reversibility guarantees at far lower risk.
 
 ---
 
