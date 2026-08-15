@@ -25,6 +25,8 @@ targets:
     info:
       path: TrainOrRest/Info.plist
       properties:
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "2"
         NSHealthShareUsageDescription: >-
           TrainOrRest reads your Garmin workouts and wellness data from Apple
           Health to build and adapt your training plan.
