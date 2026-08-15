@@ -27,19 +27,31 @@ final class CoachChatStore: ObservableObject {
         text: String,
         model: String,
         attachments: [CoachContextAttachment] = [],
+        evidence: EvidenceSelection? = nil,
+        groundingSnapshot: GroundingSnapshot? = nil,
         in context: ModelContext
     ) async {
         guard let apiKey = try? KeychainStore.load(), !apiKey.isEmpty else {
             lastError = "Add your Anthropic API key in Settings first."
             return
         }
-        await send(text: text, model: model, attachments: attachments, apiKey: apiKey, in: context)
+        await send(
+            text: text,
+            model: model,
+            attachments: attachments,
+            evidence: evidence,
+            groundingSnapshot: groundingSnapshot,
+            apiKey: apiKey,
+            in: context
+        )
     }
 
     func send(
         text: String,
         model: String,
         attachments: [CoachContextAttachment] = [],
+        evidence: EvidenceSelection? = nil,
+        groundingSnapshot: GroundingSnapshot? = nil,
         apiKey: String,
         in context: ModelContext
     ) async {
@@ -50,6 +62,22 @@ final class CoachChatStore: ObservableObject {
             return
         }
         let today = now()
+        let snapshot: GroundingSnapshot
+        do {
+            if let groundingSnapshot {
+                snapshot = groundingSnapshot
+            } else {
+                snapshot = try CoachGrounding.snapshot(
+                    evidence: evidence ?? EvidenceSelection(attachments: attachments),
+                    in: context,
+                    today: today,
+                    calendar: calendar
+                )
+            }
+        } catch {
+            lastError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            return
+        }
         isSending = true
         lastError = nil
         context.insert(ChatMessage(
@@ -66,11 +94,18 @@ final class CoachChatStore: ObservableObject {
         try? context.save()
 
         do {
-            try await runLoop(apiKey: apiKey, model: model, attachments: attachments, today: today, in: context)
+            try await runLoop(
+                apiKey: apiKey,
+                model: model,
+                attachments: attachments,
+                groundingSnapshot: snapshot,
+                today: today,
+                in: context
+            )
         } catch {
             let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             lastError = message
-            context.insert(ChatMessage(role: .assistant, text: message, date: .now))
+            context.insert(assistantMessage(text: message, groundingSnapshot: snapshot))
             try? context.save()
         }
         isSending = false
@@ -95,6 +130,7 @@ final class CoachChatStore: ObservableObject {
         apiKey: String,
         model: String,
         attachments: [CoachContextAttachment],
+        groundingSnapshot: GroundingSnapshot,
         today: Date,
         in context: ModelContext
     ) async throws {
@@ -134,10 +170,9 @@ final class CoachChatStore: ObservableObject {
             }
             if response.stopReason == "refusal" {
                 let text = response.content.textContent
-                context.insert(ChatMessage(
-                    role: .assistant,
+                context.insert(assistantMessage(
                     text: text.isEmpty ? "Claude declined to answer that." : text,
-                    date: .now
+                    groundingSnapshot: groundingSnapshot
                 ))
                 try context.save()
                 return
@@ -149,11 +184,10 @@ final class CoachChatStore: ObservableObject {
             }
             if toolUses.isEmpty {
                 let text = response.content.textContent
-                context.insert(ChatMessage(
-                    role: .assistant,
+                context.insert(assistantMessage(
                     text: text.isEmpty ? "I could not produce a response." : text,
-                    date: .now,
-                    appliedAdjustment: applied.isEmpty ? nil : applied.joined(separator: "; ")
+                    appliedAdjustment: applied.isEmpty ? nil : applied.joined(separator: "; "),
+                    groundingSnapshot: groundingSnapshot
                 ))
                 try context.save()
                 return
@@ -212,8 +246,23 @@ final class CoachChatStore: ObservableObject {
         }
 
         let fallback = "I could not safely finish the plan adjustment in three tool rounds."
-        context.insert(ChatMessage(role: .assistant, text: fallback, date: .now))
+        context.insert(assistantMessage(text: fallback, groundingSnapshot: groundingSnapshot))
         try context.save()
+    }
+
+    private func assistantMessage(
+        text: String,
+        appliedAdjustment: String? = nil,
+        groundingSnapshot: GroundingSnapshot
+    ) -> ChatMessage {
+        ChatMessage(
+            role: .assistant,
+            text: text,
+            date: .now,
+            appliedAdjustment: appliedAdjustment,
+            groundingFootnote: groundingSnapshot.footnoteLine,
+            groundingSummary: groundingSnapshot.summary
+        )
     }
 
     private func messageHistory(in context: ModelContext) throws -> [ClaudeMessageParam] {
@@ -221,6 +270,33 @@ final class CoachChatStore: ObservableObject {
         descriptor.fetchLimit = CoachChatConfig.historyLimit
         return try context.fetch(descriptor).reversed().map {
             ClaudeMessageParam(role: $0.role.rawValue, content: [.text($0.text)])
+        }
+    }
+}
+
+private extension EvidenceSelection {
+    init(attachments: [CoachContextAttachment]) {
+        self.init(
+            readinessSnapshot: true,
+            weekPlan: true,
+            workout: attachments.compactMap(\.workoutSelection).first,
+            hasPhoto: attachments.contains { attachment in
+                if case .image = attachment { return true }
+                return false
+            }
+        )
+    }
+}
+
+private extension CoachContextAttachment {
+    var workoutSelection: WorkoutContextSelection? {
+        switch self {
+        case .plannedWorkout(let uuid):
+            return .planned(uuid)
+        case .completedActivity(let uuid):
+            return .completed(uuid)
+        case .health, .image:
+            return nil
         }
     }
 }

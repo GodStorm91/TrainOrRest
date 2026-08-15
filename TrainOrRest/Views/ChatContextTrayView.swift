@@ -1,3 +1,5 @@
+import CoreImage
+import ImageIO
 import PhotosUI
 import SwiftUI
 import UIKit
@@ -8,14 +10,16 @@ enum WorkoutContextSelection: Equatable {
 }
 
 struct ChatContextTrayView: View {
-    @Binding var includeHealthContext: Bool
-    @Binding var selectedWorkoutContext: WorkoutContextSelection?
+    @Binding var evidence: EvidenceSelection
     @Binding var selectedPhotoItem: PhotosPickerItem?
     @Binding var selectedImageAttachment: CoachImageAttachment?
     @Binding var selectedImage: UIImage?
 
     let plannedWorkouts: [PlannedWorkout]
     let completedActivities: [CompletedActivity]
+    let onReviewEvidence: () -> Void
+
+    private static let ciContext = CIContext()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -23,15 +27,30 @@ struct ChatContextTrayView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ContextChip(
-                        title: "Health",
-                        detail: includeHealthContext ? "on" : "off",
+                        title: "Readiness snapshot",
+                        detail: evidence.readinessSnapshot ? "on" : "off",
                         systemImage: "heart.text.square",
-                        isSelected: includeHealthContext
+                        isSelected: evidence.readinessSnapshot
                     ) {
-                        includeHealthContext.toggle()
+                        evidence.readinessSnapshot.toggle()
+                    }
+                    ContextChip(
+                        title: "This week plan",
+                        detail: evidence.weekPlan ? "on" : "off",
+                        systemImage: "calendar",
+                        isSelected: evidence.weekPlan
+                    ) {
+                        evidence.weekPlan.toggle()
                     }
                     workoutMenu
                     imagePicker
+                    ContextChip(
+                        title: "Evidence",
+                        detail: "review",
+                        systemImage: "doc.text.magnifyingglass",
+                        isSelected: true,
+                        action: onReviewEvidence
+                    )
                 }
                 .padding(.vertical, 1)
             }
@@ -41,7 +60,7 @@ struct ChatContextTrayView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Label("Context", systemImage: "paperclip")
+            Label("Evidence", systemImage: "paperclip")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.dim)
             Spacer()
@@ -53,16 +72,16 @@ struct ChatContextTrayView: View {
 
     private var workoutMenu: some View {
         Menu {
-            if selectedWorkoutContext != nil {
+            if evidence.workout != nil {
                 Button("Remove workout context", role: .destructive) {
-                    selectedWorkoutContext = nil
+                    evidence.workout = nil
                 }
             }
             if !upcomingWorkouts.isEmpty {
                 Section("Planned Workouts") {
                     ForEach(upcomingWorkouts, id: \.uuid) { workout in
                         Button(workoutLabel(workout)) {
-                            selectedWorkoutContext = .planned(workout.uuid)
+                            evidence.workout = .planned(workout.uuid)
                         }
                     }
                 }
@@ -71,7 +90,7 @@ struct ChatContextTrayView: View {
                 Section("Recent Runs") {
                     ForEach(Array(completedActivities.prefix(6)), id: \.hkUUID) { activity in
                         Button(activityLabel(activity)) {
-                            selectedWorkoutContext = .completed(activity.hkUUID)
+                            evidence.workout = .completed(activity.hkUUID)
                         }
                     }
                 }
@@ -81,7 +100,7 @@ struct ChatContextTrayView: View {
                 title: "Workout",
                 detail: workoutContextDetail,
                 systemImage: "figure.run",
-                isSelected: selectedWorkoutContext != nil
+                isSelected: evidence.workout != nil
             )
         }
     }
@@ -92,7 +111,7 @@ struct ChatContextTrayView: View {
                 title: "Image",
                 detail: selectedImageAttachment == nil ? "add" : "ready",
                 systemImage: "photo",
-                isSelected: selectedImageAttachment != nil
+                isSelected: evidence.hasPhoto
             )
         }
         .onChange(of: selectedPhotoItem) { _, item in
@@ -141,7 +160,7 @@ struct ChatContextTrayView: View {
     }
 
     private var workoutContextDetail: String {
-        switch selectedWorkoutContext {
+        switch evidence.workout {
         case .planned(let uuid):
             guard let workout = plannedWorkouts.first(where: { $0.uuid == uuid }) else { return "selected" }
             return workout.kind?.displayName ?? "planned"
@@ -178,6 +197,7 @@ struct ChatContextTrayView: View {
                 filename: "training-context.jpg"
             )
             selectedImage = image
+            evidence.hasPhoto = true
         }
     }
 
@@ -185,18 +205,22 @@ struct ChatContextTrayView: View {
         selectedPhotoItem = nil
         selectedImageAttachment = nil
         selectedImage = nil
+        evidence.hasPhoto = false
     }
 
     private func compressedImageData(from data: Data) -> Data? {
-        guard let image = UIImage(data: data) else { return nil }
+        guard var image = CIImage(data: data, options: [.applyOrientationProperty: true]) else { return nil }
         let maxSide: CGFloat = 1280
-        let largestSide = max(image.size.width, image.size.height)
+        let largestSide = max(image.extent.width, image.extent.height)
         let scale = largestSide > maxSide ? maxSide / largestSide : 1
-        let targetSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
-        let renderer = UIGraphicsImageRenderer(size: targetSize)
-        let rendered = renderer.image { _ in
-            image.draw(in: CGRect(origin: .zero, size: targetSize))
-        }
-        return rendered.jpegData(compressionQuality: 0.78)
+        image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let options: [CIImageRepresentationOption: Any] = [
+            CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): 0.78
+        ]
+        return Self.ciContext.jpegRepresentation(
+            of: image,
+            colorSpace: CGColorSpaceCreateDeviceRGB(),
+            options: options
+        )
     }
 }

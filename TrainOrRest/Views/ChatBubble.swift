@@ -27,6 +27,7 @@ struct CoachAvatar: View {
 
 struct ChatBubble: View {
     let message: ChatMessage
+    @State private var showsGroundingSummary = false
 
     private var isUser: Bool { message.role == .user }
 
@@ -48,12 +49,24 @@ struct ChatBubble: View {
                     appliedBadge(applied)
                         .padding(.top, 1)
                 }
+                if !isUser, let footnote = message.groundingFootnote, let summary = message.groundingSummary {
+                    groundingFootnote(footnote, summary: summary)
+                }
             }
             if !isUser {
                 Spacer(minLength: 40)
             }
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+        .sheet(isPresented: $showsGroundingSummary) {
+            ReceiptSheet(
+                title: "Evidence",
+                subtitle: message.groundingFootnote,
+                rows: [
+                    .detail("Grounding summary", value: message.groundingSummary ?? "", symbol: "doc.text.magnifyingglass")
+                ]
+            )
+        }
     }
 
     private var bubbleShape: UnevenRoundedRectangle {
@@ -139,5 +152,26 @@ struct ChatBubble: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(Theme.good.opacity(0.3), lineWidth: 1)
         )
+    }
+
+    private func groundingFootnote(_ footnote: String, summary: String) -> some View {
+        Button {
+            showsGroundingSummary = true
+        } label: {
+            Label {
+                Text(footnote)
+                    .font(.caption)
+                    .foregroundStyle(Theme.faint)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.caption)
+                    .foregroundStyle(Theme.faint)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Review evidence. \(footnote)")
     }
 }

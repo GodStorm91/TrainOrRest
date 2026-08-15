@@ -13,11 +13,12 @@ struct ChatView: View {
     @EnvironmentObject private var replacementCoordinator: WorkoutReplacementCoordinator
     @State private var draft = ""
     @State private var hasAPIKey = false
-    @State private var includeHealthContext = true
-    @State private var selectedWorkoutContext: WorkoutContextSelection?
+    @State private var evidence = EvidenceSelection()
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var selectedImageAttachment: CoachImageAttachment?
     @State private var selectedImage: UIImage?
+    @State private var evidenceReview: EvidenceReviewPresentation?
+    @AppStorage("coachEvidenceReviewed") private var coachEvidenceReviewed = false
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
 
     private let calendar = Calendar.current
@@ -62,8 +63,23 @@ struct ChatView: View {
                     .foregroundStyle(.white)
                     .padding(8)
                     .background(Theme.bad, in: Capsule())
-                    .padding(.top, 4)
+                .padding(.top, 4)
             }
+        }
+        .sheet(item: $evidenceReview) { review in
+            GroundingReviewSheet(
+                snapshot: review.snapshot,
+                requiresConfirmation: review.pendingSend != nil,
+                onCancel: { evidenceReview = nil },
+                onConfirm: {
+                    coachEvidenceReviewed = true
+                    let pending = review.pendingSend
+                    evidenceReview = nil
+                    if let pending {
+                        performSend(pending)
+                    }
+                }
+            )
         }
     }
 
@@ -148,13 +164,13 @@ struct ChatView: View {
     private var chatFooter: some View {
         VStack(alignment: .leading, spacing: 8) {
             ChatContextTrayView(
-                includeHealthContext: $includeHealthContext,
-                selectedWorkoutContext: $selectedWorkoutContext,
+                evidence: $evidence,
                 selectedPhotoItem: $selectedPhotoItem,
                 selectedImageAttachment: $selectedImageAttachment,
                 selectedImage: $selectedImage,
                 plannedWorkouts: plannedWorkouts,
-                completedActivities: completedActivities
+                completedActivities: completedActivities,
+                onReviewEvidence: { presentEvidenceReview(confirming: nil) }
             )
             // A staged swap takes over the suggestion slot: it needs a decision
             // before anything else can be asked.
@@ -268,11 +284,51 @@ struct ChatView: View {
     private func send() {
         let text = draft
         let attachments = currentAttachments
+        let pending = PendingCoachSend(text: text, attachments: attachments, evidence: evidence)
+        guard coachEvidenceReviewed else {
+            presentEvidenceReview(confirming: pending)
+            return
+        }
+        performSend(pending)
+    }
+
+    private func performSend(_ pending: PendingCoachSend) {
+        let reviewedSnapshot = pending.reviewedSnapshot
         draft = ""
         Task {
-            await chatStore.send(text: text, model: model, attachments: attachments, in: modelContext)
-            selectedWorkoutContext = nil
+            await chatStore.send(
+                text: pending.text,
+                model: model,
+                attachments: pending.attachments,
+                evidence: pending.evidence,
+                groundingSnapshot: reviewedSnapshot,
+                in: modelContext
+            )
+            evidence.workout = nil
             clearImageAttachment()
+        }
+    }
+
+    private func presentEvidenceReview(confirming pending: PendingCoachSend?) {
+        let selectedEvidence = pending?.evidence ?? evidence
+        do {
+            let snapshot = try CoachGrounding.snapshot(
+                evidence: selectedEvidence,
+                in: modelContext,
+                today: Date(),
+                calendar: calendar
+            )
+            let pendingWithSnapshot = pending.map {
+                PendingCoachSend(
+                    text: $0.text,
+                    attachments: $0.attachments,
+                    evidence: $0.evidence,
+                    reviewedSnapshot: snapshot
+                )
+            }
+            evidenceReview = EvidenceReviewPresentation(snapshot: snapshot, pendingSend: pendingWithSnapshot)
+        } catch {
+            chatStore.lastError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 
@@ -282,10 +338,10 @@ struct ChatView: View {
 
     private var currentAttachments: [CoachContextAttachment] {
         var attachments: [CoachContextAttachment] = []
-        if includeHealthContext {
+        if evidence.readinessSnapshot {
             attachments.append(.health)
         }
-        switch selectedWorkoutContext {
+        switch evidence.workout {
         case .planned(let uuid):
             attachments.append(.plannedWorkout(uuid))
         case .completed(let uuid):
@@ -303,5 +359,80 @@ struct ChatView: View {
         selectedPhotoItem = nil
         selectedImageAttachment = nil
         selectedImage = nil
+        evidence.hasPhoto = false
+    }
+}
+
+private struct PendingCoachSend: Identifiable {
+    let id = UUID()
+    let text: String
+    let attachments: [CoachContextAttachment]
+    let evidence: EvidenceSelection
+    var reviewedSnapshot: GroundingSnapshot? = nil
+}
+
+private struct EvidenceReviewPresentation: Identifiable {
+    let id = UUID()
+    let snapshot: GroundingSnapshot
+    let pendingSend: PendingCoachSend?
+}
+
+private struct GroundingReviewSheet: View {
+    let snapshot: GroundingSnapshot
+    let requiresConfirmation: Bool
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Evidence Review")
+                            .font(.system(.title2, design: .rounded).weight(.semibold))
+                            .foregroundStyle(Theme.text)
+                        Text(snapshot.footnoteLine)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.dim)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    TorCard(padding: 14, cornerRadius: 16) {
+                        Text(snapshot.summary)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.text)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if requiresConfirmation {
+                        Button(action: onConfirm) {
+                            Label("Use Evidence and Send", systemImage: "paperplane.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                    }
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .background(Theme.bg.ignoresSafeArea())
+            .toolbar {
+                if requiresConfirmation {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel", action: onCancel)
+                    }
+                }
+                if !requiresConfirmation {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done", action: onConfirm)
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(Theme.bg)
     }
 }
