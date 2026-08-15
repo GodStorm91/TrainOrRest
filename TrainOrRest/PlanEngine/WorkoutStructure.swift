@@ -38,6 +38,14 @@ struct WorkoutStepGroup: Codable, Equatable {
 enum WorkoutStructure {
     static let fallbackEasyPaceSecondsPerKm: Double = 360
 
+    /// Default easy pace band used when a run step has no fitness-derived pace
+    /// (e.g. an easy/long run built while current fitness was unavailable).
+    /// Keeps pushed workouts from reaching the watch with distance but no pace.
+    static let fallbackEasyBand = PaceBand(
+        fastSecondsPerKm: fallbackEasyPaceSecondsPerKm,
+        slowSecondsPerKm: fallbackEasyPaceSecondsPerKm + 30
+    )
+
     static func run(distanceKm: Double, paceBand: PaceBand?) -> [WorkoutStepGroup] {
         [
             WorkoutStepGroup(steps: [
