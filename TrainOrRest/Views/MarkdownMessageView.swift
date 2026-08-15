@@ -16,6 +16,7 @@ enum MarkdownTone {
 struct MarkdownMessageView: View {
     let text: String
     var tone: MarkdownTone = .standard
+    var allowsRuleTokens = true
 
     private var blocks: [MarkdownBlock] {
         MarkdownBlockParser.parse(text)
@@ -34,21 +35,21 @@ struct MarkdownMessageView: View {
     private func blockView(_ block: MarkdownBlock) -> some View {
         switch block {
         case .heading(let level, let text):
-            MarkdownInlineText(text)
+            MarkdownInlineText(text, allowsRuleTokens: allowsRuleTokens)
                 .font(level == 1 ? .headline : .subheadline.weight(.semibold))
                 .padding(.top, level == 1 ? 2 : 0)
         case .paragraph(let text):
-            MarkdownInlineText(text)
+            MarkdownInlineText(text, allowsRuleTokens: allowsRuleTokens)
                 .font(.body)
         case .listItem(let text):
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("•")
                     .font(.body.weight(.semibold))
-                MarkdownInlineText(text)
+                MarkdownInlineText(text, allowsRuleTokens: allowsRuleTokens)
                     .font(.body)
             }
         case .quote(let text):
-            MarkdownInlineText(text)
+            MarkdownInlineText(text, allowsRuleTokens: allowsRuleTokens)
                 .font(.callout)
                 .foregroundStyle(tone.secondary)
                 .padding(8)
@@ -62,30 +63,52 @@ struct MarkdownMessageView: View {
             }
             .background(tone.fill, in: RoundedRectangle(cornerRadius: 8))
         case .table(let table):
-            MarkdownTableView(table: table, tone: tone)
+            MarkdownTableView(table: table, tone: tone, allowsRuleTokens: allowsRuleTokens)
         }
     }
 }
 
 private struct MarkdownInlineText: View {
     let text: String
+    let allowsRuleTokens: Bool
+    @State private var selectedRuleID: ReadinessRuleID?
 
-    init(_ text: String) {
+    init(_ text: String, allowsRuleTokens: Bool = true) {
         self.text = text
+        self.allowsRuleTokens = allowsRuleTokens
     }
 
     var body: some View {
-        if let attributed = try? AttributedString(markdown: text) {
-            Text(attributed)
-        } else {
-            Text(text)
+        Text(attributedText)
+            .tint(Theme.accent)
+            .environment(\.openURL, OpenURLAction { url in
+                guard let ruleID = RuleTokenURL.ruleID(from: url) else {
+                    return .systemAction
+                }
+                selectedRuleID = ruleID
+                return .handled
+            })
+            .sheet(item: $selectedRuleID) { ruleID in
+                RuleDefinitionSheet(ruleID: ruleID)
+            }
+    }
+
+    private var attributedText: AttributedString {
+        guard allowsRuleTokens else {
+            return Self.markdown(text)
         }
+        return RuleAttributedStringBuilder.attributedString(from: text)
+    }
+
+    private static func markdown(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text)) ?? AttributedString(text)
     }
 }
 
 private struct MarkdownTableView: View {
     let table: MarkdownTable
     var tone: MarkdownTone = .standard
+    var allowsRuleTokens = true
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: true) {
@@ -120,7 +143,7 @@ private struct MarkdownTableView: View {
     }
 
     private func tableCell(_ text: String, isHeader: Bool) -> some View {
-        MarkdownInlineText(text)
+        MarkdownInlineText(text, allowsRuleTokens: allowsRuleTokens)
             .font(isHeader ? .caption.weight(.semibold) : .caption)
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -136,5 +159,58 @@ private struct MarkdownTableView: View {
                     .fill(tone.stroke)
                     .frame(width: 1)
             }
+    }
+}
+
+private enum RuleAttributedStringBuilder {
+    static func attributedString(from text: String) -> AttributedString {
+        let spans = RuleTokenizer.tokens(in: text)
+        guard !spans.isEmpty else {
+            return markdown(text)
+        }
+
+        var output = AttributedString()
+        var cursor = text.startIndex
+
+        for span in spans {
+            guard let range = Range(NSRange(location: span.lowerBound, length: span.upperBound - span.lowerBound), in: text) else {
+                continue
+            }
+            if cursor < range.lowerBound {
+                output += markdown(String(text[cursor..<range.lowerBound]))
+            }
+
+            var token = AttributedString(span.code)
+            token.link = RuleTokenURL.url(for: span.ruleID)
+            token.foregroundColor = Theme.accent
+            token.backgroundColor = Theme.accent.opacity(0.14)
+            token.font = .system(.caption, design: .monospaced).weight(.semibold)
+            output += token
+            cursor = range.upperBound
+        }
+
+        if cursor < text.endIndex {
+            output += markdown(String(text[cursor..<text.endIndex]))
+        }
+
+        return output
+    }
+
+    private static func markdown(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text)) ?? AttributedString(text)
+    }
+}
+
+private struct RuleDefinitionSheet: View {
+    let ruleID: ReadinessRuleID
+
+    var body: some View {
+        ReceiptSheet(
+            title: "Rule \(ruleID.code)",
+            subtitle: ruleID.title,
+            rows: [
+                .detail("Definition", value: ruleID.detail, symbol: "checkmark.seal")
+            ]
+        )
     }
 }

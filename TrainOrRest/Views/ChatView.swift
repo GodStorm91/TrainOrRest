@@ -8,6 +8,7 @@ struct ChatView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \ChatMessage.date) private var messages: [ChatMessage]
     @Query(sort: \PlannedWorkout.date) private var plannedWorkouts: [PlannedWorkout]
+    @Query(sort: \DailyReadiness.date, order: .reverse) private var readinessDays: [DailyReadiness]
     @Query(sort: \CompletedActivity.date, order: .reverse) private var completedActivities: [CompletedActivity]
     @EnvironmentObject private var chatStore: CoachChatStore
     @EnvironmentObject private var replacementCoordinator: WorkoutReplacementCoordinator
@@ -29,6 +30,7 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            CoachTodayEngineHeader(readiness: todayReadiness)
             if !hasAPIKey {
                 missingKeyView
             } else if messages.isEmpty {
@@ -90,14 +92,11 @@ struct ChatView: View {
                 Text("Coach")
                     .font(.torHeading(17, .bold))
                     .foregroundStyle(Theme.text)
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(Theme.good)
-                        .frame(width: 6, height: 6)
-                    Text(language.coachStatus)
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(Theme.dim)
-                }
+                Text("Explains & proposes · never edits your plan.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.dim)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
             }
             Text(language.flag)
                 .font(.system(size: 15))
@@ -266,6 +265,10 @@ struct ChatView: View {
             recentRunWasHard: recentIsHard,
             todayWorkoutKind: plannedWorkouts.first { calendar.isDateInToday($0.date) }?.kind
         )
+    }
+
+    private var todayReadiness: DailyReadiness? {
+        readinessDays.first { calendar.isDateInToday($0.date) }
     }
 
     /// A run counts as "recent" when it finished within the last two days.

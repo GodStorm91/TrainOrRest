@@ -82,9 +82,9 @@ struct ChatBubble: View {
     @ViewBuilder
     private var messageBody: some View {
         if isUser {
-            MarkdownMessageView(text: message.text, tone: .onAccent)
+            MarkdownMessageView(text: message.text, tone: .onAccent, allowsRuleTokens: false)
         } else {
-            MarkdownMessageView(text: message.text, tone: .standard)
+            MarkdownMessageView(text: message.text, tone: .standard, allowsRuleTokens: true)
                 .textSelection(.enabled)
         }
     }
