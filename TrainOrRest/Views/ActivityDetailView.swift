@@ -1,12 +1,21 @@
+import SwiftData
 import SwiftUI
 
 struct ActivityDetailView: View {
     let activity: CompletedActivity
+    @Query(sort: \PlannedWorkout.date) private var plannedWorkouts: [PlannedWorkout]
+
+    private let calendar = Calendar.current
 
     var body: some View {
         List {
             Section {
                 RunDetailSummary(activity: activity)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                    .listRowBackground(Color.clear)
+            }
+            Section {
+                RunReviewCard(activity: activity, plannedWorkout: matchedWorkout, compact: false)
                     .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
                     .listRowBackground(Color.clear)
             }
@@ -26,6 +35,89 @@ struct ActivityDetailView: View {
         }
         .navigationTitle(activity.date.formatted(.dateTime.month(.abbreviated).day()))
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var matchedWorkout: PlannedWorkout? {
+        if let exact = plannedWorkouts.first(where: { $0.matchedActivityUUID == activity.hkUUID }) {
+            return exact
+        }
+        return plannedWorkouts.first {
+            calendar.isDate($0.date, inSameDayAs: activity.date)
+        }
+    }
+}
+
+struct RunReviewCard: View {
+    let activity: CompletedActivity
+    let plannedWorkout: PlannedWorkout?
+    var compact = true
+
+    private var review: RunReview {
+        RunReview.make(
+            activityDistanceMeters: activity.distanceMeters,
+            activityDurationSeconds: activity.durationSeconds,
+            activityPaceSecondsPerKm: activity.avgPaceSecondsPerKm,
+            avgHeartRate: activity.avgHeartRate,
+            plannedDistanceKm: plannedWorkout?.distanceKm,
+            plannedPaceBand: plannedWorkout?.paceBand,
+            plannedDurationSeconds: plannedWorkout?.expectedDurationSeconds
+        )
+    }
+
+    private var accent: Color {
+        switch review.verdict {
+        case .onPlan: Theme.good
+        case .overcooked: Theme.warn
+        case .undercooked: Theme.data
+        case .unmatched: Theme.accent
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: review.verdict.symbolName)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .frame(width: 36, height: 36)
+                    .background(TrainingVisualStyle.tint(accent, opacity: 0.18), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    TorEyebrow("Post-run review").tracking(1.5)
+                    Text(review.verdict.title)
+                        .font(.torHeading(compact ? 16 : 18, .bold))
+                        .foregroundStyle(Theme.text)
+                }
+                Spacer()
+            }
+
+            if let plannedWorkout {
+                Text("Matched to \(plannedWorkout.kind?.displayName ?? plannedWorkout.kindRaw) · \(Formatters.kilometers(plannedWorkout.distanceKm * 1000))")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.dim)
+            } else {
+                Text("No planned workout matched yet")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.dim)
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(Array(review.bullets.prefix(compact ? 3 : review.bullets.count)), id: \.self) { bullet in
+                    Label(bullet, systemImage: "smallcircle.filled.circle")
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(Theme.dim)
+                }
+            }
+
+            Text(review.recoveryNote)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.text)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(TrainingVisualStyle.tint(accent, opacity: 0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .padding(14)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(TrainingVisualStyle.tint(accent, opacity: 0.35), lineWidth: 1))
     }
 }
 

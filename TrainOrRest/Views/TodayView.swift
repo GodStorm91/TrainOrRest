@@ -12,6 +12,7 @@ struct TodayView: View {
     @Query(sort: \DailyCheckIn.date, order: .reverse) private var checkIns: [DailyCheckIn]
     @Query(sort: \DailyWellness.date, order: .reverse) private var wellness: [DailyWellness]
     @Query(sort: \PlannedWorkout.date) private var plannedWorkouts: [PlannedWorkout]
+    @Query(sort: \CompletedActivity.date, order: .reverse) private var completedActivities: [CompletedActivity]
     @Query private var syncStates: [SyncState]
     @Query private var goals: [Goal]
 
@@ -27,6 +28,9 @@ struct TodayView: View {
                     greeting
                     heroCard
                     checkInCard
+                    if let latestTodayActivity {
+                        latestRunReviewCard(latestTodayActivity)
+                    }
                     if goals.isEmpty {
                         setGoalCard
                     } else if let workout = todayWorkout {
@@ -143,6 +147,26 @@ struct TodayView: View {
         var parts = [Formatters.kilometers(workout.distanceKm * 1000)]
         if let band = workout.paceBand { parts.append(Formatters.paceBand(band)) }
         return parts.joined(separator: " · ")
+    }
+
+    private func latestRunReviewCard(_ activity: CompletedActivity) -> some View {
+        NavigationLink {
+            ActivityDetailView(activity: activity)
+        } label: {
+            RunReviewCard(activity: activity, plannedWorkout: matchedWorkout(for: activity))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var latestTodayActivity: CompletedActivity? {
+        completedActivities.first { calendar.isDate($0.date, inSameDayAs: .now) }
+    }
+
+    private func matchedWorkout(for activity: CompletedActivity) -> PlannedWorkout? {
+        if let exact = plannedWorkouts.first(where: { $0.matchedActivityUUID == activity.hkUUID }) {
+            return exact
+        }
+        return plannedWorkouts.first { calendar.isDate($0.date, inSameDayAs: activity.date) }
     }
 
     private var setGoalCard: some View {
