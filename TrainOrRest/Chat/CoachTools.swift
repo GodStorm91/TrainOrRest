@@ -13,6 +13,62 @@ struct PlanAdjustmentProposal: Codable, Equatable {
         var action: Action
         var detail: String? = nil
         var workout: CreateWorkout? = nil
+
+        enum CodingKeys: String, CodingKey {
+            case date, action, detail, workout, kind, blocks
+        }
+
+        init(date: String, action: Action, detail: String? = nil, workout: CreateWorkout? = nil) {
+            self.date = date
+            self.action = action
+            self.detail = detail
+            self.workout = workout
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            date = try container.decode(String.self, forKey: .date)
+            action = try container.decode(Action.self, forKey: .action)
+            detail = try container.decodeIfPresent(String.self, forKey: .detail)
+            workout = try? container.decodeIfPresent(CreateWorkout.self, forKey: .workout)
+
+            // Model outputs sometimes flatten a create payload as
+            // { action:create, workout:"Easy", blocks:[...] } or
+            // { action:create, kind:"easy", blocks:[...] }. Normalize that
+            // obvious shape so the user sees a real confirmation card instead
+            // of a low-level JSON "missing data" failure. Still leave truly
+            // incomplete creates nil so Swift validation blocks persistence.
+            if action == .create, workout == nil,
+               let blocks = try? container.decodeIfPresent([CreateWorkout.Block].self, forKey: .blocks),
+               let kind = Self.decodeCreateKind(from: container) {
+                workout = CreateWorkout(kind: kind, blocks: blocks)
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(date, forKey: .date)
+            try container.encode(action, forKey: .action)
+            try container.encodeIfPresent(detail, forKey: .detail)
+            try container.encodeIfPresent(workout, forKey: .workout)
+        }
+
+        private struct WorkoutKindOnly: Decodable {
+            var kind: String
+        }
+
+        private static func decodeCreateKind(from container: KeyedDecodingContainer<CodingKeys>) -> String? {
+            let raw = (try? container.decodeIfPresent(String.self, forKey: .kind))
+                ?? (try? container.decodeIfPresent(String.self, forKey: .workout))
+                ?? (try? container.decodeIfPresent(WorkoutKindOnly.self, forKey: .workout))?.kind
+            guard let raw else { return nil }
+            let lowercased = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if lowercased.contains("interval") { return "intervals" }
+            if lowercased.contains("tempo") { return "tempo" }
+            if lowercased.contains("long") { return "long" }
+            if lowercased.contains("easy") || lowercased.contains("recovery") { return "easy" }
+            return lowercased
+        }
     }
 
     /// A structured workout the coach asked the app to build. Only shape and

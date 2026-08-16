@@ -570,6 +570,50 @@ final class ChatFeatureTests: XCTestCase {
         return nil
     }
 
+    func testChatStoreStagesFlattenedCreatePayloadWithoutRetry() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedEveryDayPlan(in: context)
+        let saturday = PlanEngineTestSupport.date(2026, 1, 10, hour: 0)
+        XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [
+                .toolUse(id: "toolu_flat", name: CoachTools.toolName, input: .object([
+                    "changes": .array([.object([
+                        "date": .string(CoachContextBuilder.day(saturday, calendar: calendar)),
+                        "action": .string("create"),
+                        "workout": .string("Easy"),
+                        "blocks": .array([.object([
+                            "repeat_count": .number(1),
+                            "steps": .array([.object([
+                                "role": .string("work"),
+                                "target_type": .string("distance_km"),
+                                "target_value": .number(5),
+                                "pace_zone": .string("easy")
+                            ])])
+                        ])])
+                    ])])
+                ]))
+            ], stopReason: "tool_use")
+        ])
+        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
+        let store = CoachChatStore(
+            client: client,
+            calendar: calendar,
+            now: { self.today },
+            replacementCoordinator: coordinator
+        )
+
+        await store.send(text: "Create easy on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
+
+        XCTAssertEqual(client.requests.count, 1)
+        let pending = try XCTUnwrap(coordinator.pendingProposal)
+        XCTAssertEqual(pending.summary, "Created easy on 2026-01-10")
+        XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        XCTAssertFalse(messages.map(\.text).joined(separator: "\n").contains("could not safely"))
+    }
+
     func testChatStoreDoesNotPersistToolSchemaConfirmationAfterRejectedPlanEdit() async throws {
         let container = try makeContainer()
         let context = container.mainContext

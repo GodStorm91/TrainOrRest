@@ -99,6 +99,20 @@ final class CoachToolContractTests: XCTestCase {
         XCTAssertEqual(workout.blocks[0].steps[1].targetValue, 5)
     }
 
+
+    func testFlattenedCreatePayloadDecodesFromWorkoutStringAndBlocks() throws {
+        let json = """
+        {"changes":[{"date":"2026-07-11","action":"create","workout":"Easy","blocks":[{"repeat_count":1,"steps":[{"role":"work","target_type":"distance_km","target_value":5,"pace_zone":"easy"}]}]}]}
+        """.data(using: .utf8)!
+        let proposal = try JSONDecoder().decode(PlanAdjustmentProposal.self, from: json)
+        let workout = try XCTUnwrap(proposal.changes.first?.workout)
+
+        XCTAssertEqual(workout.kind, "easy")
+        XCTAssertEqual(workout.blocks.count, 1)
+        XCTAssertEqual(workout.blocks[0].repeatCount, 1)
+        XCTAssertEqual(workout.blocks[0].steps.first?.targetValue, 5)
+    }
+
     func testExactIntervalPayloadDecodesRepeatsAndDurationRecovery() throws {
         let json = """
         {"changes":[{"date":"2026-07-11","action":"create","workout":{"kind":"intervals","blocks":[{"repeat_count":1,"steps":[{"role":"warm_up","target_type":"distance_km","target_value":2,"pace_zone":"easy"}]},{"repeat_count":5,"steps":[{"role":"work","target_type":"distance_km","target_value":1,"pace_zone":"interval"},{"role":"recovery","target_type":"duration_seconds","target_value":150,"pace_zone":"easy"}]},{"repeat_count":1,"steps":[{"role":"cool_down","target_type":"distance_km","target_value":2,"pace_zone":"easy"}]}]}}]}
