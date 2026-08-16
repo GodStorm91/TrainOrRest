@@ -472,6 +472,104 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(created.distanceKm, 5, accuracy: 0.001)
     }
 
+    func testCoachCanCreateOnRestDayAndMoveFourEasyWorkoutsInOneProposal() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedGoalOnly(in: context)
+        let goal = try XCTUnwrap(try PlanStore.activeGoal(in: context)?.spec)
+        let existing = try context.fetch(FetchDescriptor<PlannedWorkout>(sortBy: [SortDescriptor(\.date)]))
+        let occupied = Set(existing.map { CoachContextBuilder.day($0.date, calendar: calendar) })
+
+        let candidateFreeDays = freeDays(from: today, before: goal.raceDate, occupied: occupied)
+        let createTarget = try XCTUnwrap(candidateFreeDays.first)
+        var usedTargets = Set([CoachContextBuilder.day(createTarget, calendar: calendar)])
+        let movablePairs = existing.compactMap { workout -> (PlannedWorkout, Date)? in
+            guard workout.date >= today, workout.kind == .easy else { return nil }
+            guard let target = freeDay(inSameWeekAs: workout.date, occupied: occupied, usedTargets: usedTargets) else { return nil }
+            usedTargets.insert(CoachContextBuilder.day(target, calendar: calendar))
+            return (workout, target)
+        }.prefix(4)
+        XCTAssertEqual(movablePairs.count, 4, "fixture needs four same-week easy moves for max-size plan edit coverage")
+
+        let workout = PlanAdjustmentProposal.CreateWorkout(
+            kind: "easy",
+            blocks: [.init(repeatCount: 1, steps: [.init(
+                role: "work",
+                targetType: "distance_km",
+                targetValue: 1,
+                paceZone: "easy"
+            )])]
+        )
+        var changes: [PlanAdjustmentProposal.Change] = [
+            .init(
+                date: CoachContextBuilder.day(createTarget, calendar: calendar),
+                action: .create,
+                workout: workout
+            )
+        ]
+        for (source, target) in movablePairs {
+            changes.append(.init(
+                date: CoachContextBuilder.day(source.date, calendar: calendar),
+                action: .move,
+                detail: CoachContextBuilder.day(target, calendar: calendar)
+            ))
+        }
+        XCTAssertEqual(changes.count, CoachTools.maxChangesPerProposal)
+
+        let staged = try CoachTools.validateForConfirmation(
+            proposal: .init(changes: changes),
+            in: context,
+            today: today,
+            calendar: calendar
+        )
+        XCTAssertTrue(staged.summary.contains("Created easy on \(CoachContextBuilder.day(createTarget, calendar: calendar))"))
+        XCTAssertNil(try plannedWorkouts(on: createTarget, in: context).first, "preflight must not persist")
+        for (_, target) in movablePairs {
+            XCTAssertNil(try plannedWorkouts(on: target, in: context).first, "preflight must not persist moves")
+        }
+
+        let applied = try CoachTools.apply(
+            proposal: .init(changes: changes),
+            in: context,
+            today: today,
+            calendar: calendar
+        )
+        XCTAssertEqual(applied.summary, staged.summary)
+        let created = try XCTUnwrap(try plannedWorkouts(on: createTarget, in: context).first)
+        XCTAssertEqual(created.kind, .easy)
+        XCTAssertEqual(created.distanceKm, 1, accuracy: 0.001)
+        for (source, _) in movablePairs {
+            XCTAssertNil(try plannedWorkouts(on: source.date, in: context).first)
+        }
+        for (_, target) in movablePairs {
+            XCTAssertNotNil(try plannedWorkouts(on: target, in: context).first)
+        }
+    }
+
+    private func freeDays(from start: Date, before end: Date, occupied: Set<String>) -> [Date] {
+        var days: [Date] = []
+        var cursor = calendar.startOfDay(for: start)
+        let endDay = calendar.startOfDay(for: end)
+        while cursor < endDay {
+            let key = CoachContextBuilder.day(cursor, calendar: calendar)
+            if !occupied.contains(key) { days.append(cursor) }
+            guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+            cursor = next
+        }
+        return days
+    }
+
+    private func freeDay(inSameWeekAs source: Date, occupied: Set<String>, usedTargets: Set<String>) -> Date? {
+        let weekStart = PlanGenerator.mondayOfWeek(containing: source, calendar: calendar)
+        for offset in 0..<7 {
+            guard let candidate = calendar.date(byAdding: .day, value: offset, to: weekStart) else { continue }
+            guard !calendar.isDate(candidate, inSameDayAs: source) else { continue }
+            let key = CoachContextBuilder.day(candidate, calendar: calendar)
+            if !occupied.contains(key), !usedTargets.contains(key) { return candidate }
+        }
+        return nil
+    }
+
     func testChatStoreDoesNotPersistToolSchemaConfirmationAfterRejectedPlanEdit() async throws {
         let container = try makeContainer()
         let context = container.mainContext
