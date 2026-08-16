@@ -65,7 +65,7 @@ final class CoachChatStore: ObservableObject {
     ) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        guard replacementCoordinator?.pending == nil else {
+        guard replacementCoordinator?.hasPendingDecision != true else {
             lastError = CoachLanguage.current.replacementPendingMessage
             return
         }
@@ -300,14 +300,18 @@ final class CoachChatStore: ObservableObject {
                     return
                 }
 
-                let result = try CoachTools.apply(
-                    proposal: proposal, in: context, today: today, calendar: calendar
-                )
-                applied.append(result.summary)
-                NotificationCenter.default.post(name: .planDidChange, object: nil)
-                conversation.append(ClaudeMessageParam(role: "user", content: [
-                    .toolResult(toolUseID: toolUse.0, content: "Applied: \(result.summary)", isError: false)
-                ]))
+                guard let replacementCoordinator else {
+                    throw CoachTools.ValidationError("Plan update confirmation is unavailable.")
+                }
+                let summary = CoachTools.summary(for: proposal)
+                context.insert(assistantMessage(
+                    text: "I prepared this calendar update. Review it below before I save it: \(summary)",
+                    groundingSnapshot: groundingSnapshot,
+                    threadID: threadID
+                ))
+                try context.save()
+                replacementCoordinator.stage(proposal, summary: summary, threadID: threadID)
+                return
             } catch {
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 lastToolRejection = message

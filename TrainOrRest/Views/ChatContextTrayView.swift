@@ -64,7 +64,7 @@ struct ChatContextTrayView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.dim)
             Spacer()
-            Label("Validated before plan changes", systemImage: "checkmark.shield")
+            Label("Evidence checked", systemImage: "checkmark.shield")
                 .font(.caption2)
                 .foregroundStyle(Theme.faint)
         }

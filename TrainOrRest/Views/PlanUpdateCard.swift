@@ -244,3 +244,84 @@ struct PlanUpdateCard: View {
         .buttonStyle(.plain)
     }
 }
+
+struct PlanProposalCard: View {
+    let pending: PendingPlanProposal
+    let language: CoachLanguage
+    let onApply: () -> Void
+    let onKeep: () -> Void
+
+    var body: some View {
+        TorCard(padding: 14, cornerRadius: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 7) {
+                    Image(systemName: "calendar.badge.checkmark")
+                        .font(.system(size: 11, weight: .bold))
+                    Text("CALENDAR UPDATE")
+                        .font(.torLabel(11, .bold))
+                        .tracking(1.4)
+                }
+                .foregroundStyle(Theme.accent)
+
+                HStack(spacing: 6) {
+                    chip("Proposed", symbol: "sparkles", tint: Theme.accent)
+                    chip("Needs approval", symbol: "person.crop.circle.badge.checkmark", tint: Theme.good)
+                    chip("Pushes intervals.icu", symbol: "arrow.triangle.2.circlepath", tint: Theme.dim)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+
+                Text(pending.summary)
+                    .font(.torHeading(15, .semibold))
+                    .foregroundStyle(Theme.text)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("Nothing is saved to Calendar until you apply it. After applying, TrainOrRest will trigger the intervals.icu sync if watch push is enabled.")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(Theme.faint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 8) {
+                    Button(action: onKeep) {
+                        Text("Keep current plan")
+                            .font(.torHeading(13, .semibold))
+                            .foregroundStyle(Theme.text)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: onApply) {
+                        Label(language.applyChangesLabel, systemImage: "checkmark")
+                            .font(.torHeading(13, .bold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(Theme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Theme.accent.opacity(0.55), lineWidth: 1)
+        )
+    }
+
+    private func chip(_ title: String, symbol: String, tint: Color) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: symbol)
+                .font(.caption.weight(.semibold))
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, minHeight: 36)
+        .background(Theme.soft(tint), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}

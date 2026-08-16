@@ -204,21 +204,27 @@ final class ChatFeatureTests: XCTestCase {
             ], stopReason: "tool_use"),
             ClaudeResponse(content: [.text("I downgraded Wednesday to easy.")], stopReason: "end_turn")
         ])
-        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
+        let store = CoachChatStore(
+            client: client,
+            calendar: calendar,
+            now: { self.today },
+            replacementCoordinator: coordinator
+        )
 
         await store.send(text: "Make Wednesday easier.", model: "claude-test", apiKey: "test-key", in: context)
 
+        XCTAssertNotNil(coordinator.pendingProposal)
+        XCTAssertEqual(client.requests.count, 1)
+        XCTAssertFalse(try XCTUnwrap(try plannedWorkouts(on: qualityDay, in: context).first).manuallyOverridden)
+
+        let pending = try XCTUnwrap(coordinator.pendingProposal)
+        coordinator.confirmProposal(pending.id)
+
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
-        XCTAssertEqual(messages.map(\.role), [.user, .assistant])
-        XCTAssertEqual(messages.last?.text, "I downgraded Wednesday to easy.")
+        XCTAssertEqual(messages.map(\.role), [.user, .assistant, .assistant])
         XCTAssertEqual(messages.last?.appliedAdjustment, "Downgraded 2026-01-07 to easy")
-        XCTAssertEqual(client.requests.count, 2)
-        XCTAssertTrue(client.requests[1].messages.last?.content.contains {
-            if case .toolResult(_, let content, false) = $0 {
-                return content.contains("Applied: Downgraded 2026-01-07 to easy")
-            }
-            return false
-        } ?? false)
+        XCTAssertTrue(try XCTUnwrap(try plannedWorkouts(on: qualityDay, in: context).first).manuallyOverridden)
     }
 
     func testChatStoreSendsAttachedContextAndImage() async throws {
@@ -283,24 +289,30 @@ final class ChatFeatureTests: XCTestCase {
             ], stopReason: "tool_use"),
             ClaudeResponse(content: [.text("Added a 5 km easy run on Saturday.")], stopReason: "end_turn")
         ])
-        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
+        let store = CoachChatStore(
+            client: client,
+            calendar: calendar,
+            now: { self.today },
+            replacementCoordinator: coordinator
+        )
 
         await store.send(text: "Add an easy run on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
+
+        XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
+        let pending = try XCTUnwrap(coordinator.pendingProposal)
+        XCTAssertTrue(pending.summary.contains("Create easy on 2026-01-10"))
+        XCTAssertEqual(client.requests.count, 1)
+
+        coordinator.confirmProposal(pending.id)
 
         let created = try XCTUnwrap(try plannedWorkouts(on: saturday, in: context).first)
         XCTAssertEqual(created.kind, .easy)
         XCTAssertEqual(created.distanceKm, 5, accuracy: 0.001)
         XCTAssertTrue(created.manuallyOverridden)
-        XCTAssertEqual(client.requests.count, 2)
 
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertEqual(messages.last?.appliedAdjustment, "Created easy on 2026-01-10")
-
-        // The assistant turn replays every block, thinking first, before the result.
-        let replayed = try XCTUnwrap(client.requests[1].messages.dropLast().last)
-        XCTAssertEqual(replayed.role, "assistant")
-        XCTAssertEqual(replayed.content.count, 2)
-        if case .passthrough = replayed.content[0] {} else { XCTFail("thinking block was dropped") }
     }
 
     func testTransientConnectionFailureIsNotPersistedAsAssistantMessage() async throws {

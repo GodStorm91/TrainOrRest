@@ -376,6 +376,14 @@ struct ChatView: View {
                     }
                 )
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else if let pending = replacementCoordinator.pendingProposal, !replacementCoordinator.isConfirming {
+                PlanProposalCard(
+                    pending: pending,
+                    language: language,
+                    onApply: { replacementCoordinator.confirmProposal(pending.id) },
+                    onKeep: { replacementCoordinator.cancel() }
+                )
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
             } else if !messages.isEmpty, !chatStore.isSending {
                 CoachAskNextStrip(prompts: suggestionPrompts, label: language.askNextLabel) { draft = $0 }
             }
@@ -391,6 +399,7 @@ struct ChatView: View {
         .padding(.bottom, bottomNavigation.map { _ in 4 } ?? 8)
         .background(.clear)
         .animation(.easeOut(duration: 0.2), value: replacementCoordinator.pending)
+        .animation(.easeOut(duration: 0.2), value: replacementCoordinator.pendingProposal)
     }
 
     private var composer: some View {
@@ -417,7 +426,7 @@ struct ChatView: View {
                 .tint(Theme.accent)
                 .lineLimit(1...5)
                 .padding(.vertical, 12)
-                .disabled(replacementCoordinator.pending != nil || replacementCoordinator.isConfirming)
+                .disabled(replacementCoordinator.hasPendingDecision || replacementCoordinator.isConfirming)
 
             Button { draft = "What should I do today?" } label: {
                 Image(systemName: "bookmark")
@@ -456,7 +465,7 @@ struct ChatView: View {
     private var isSendDisabled: Bool {
         draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || chatStore.isSending
-            || replacementCoordinator.pending != nil
+            || replacementCoordinator.hasPendingDecision
             || replacementCoordinator.isConfirming
     }
 

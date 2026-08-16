@@ -15,6 +15,7 @@ struct PlanCalendarView: View {
     @Query(sort: \PlanEdit.appliedAt, order: .reverse) private var planEdits: [PlanEdit]
     @Query private var goals: [Goal]
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var pushService: WorkoutPushService
 
     @State private var mode: Mode = .month
     @State private var monthAnchor: Date = .now
@@ -22,12 +23,14 @@ struct PlanCalendarView: View {
     @State private var weekScrollToken = 0
     @State private var isEditingGoal = false
     @State private var revertError: String?
+    @State private var forceSyncStatus: String?
 
     private let calendar = Calendar.current
 
     var body: some View {
         VStack(spacing: 0) {
             topBar
+            ForceIntervalsSyncStatusView(status: forceSyncStatus)
             RecentCoachChangesView(
                 edits: recentCoachEdits,
                 error: revertError,
@@ -39,6 +42,16 @@ struct PlanCalendarView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    forceSyncIntervals()
+                } label: {
+                    if pushService.isPushing {
+                        ProgressView()
+                    } else {
+                        Label("Sync intervals.icu", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                }
+                .disabled(pushService.isPushing)
                 Button("Today", systemImage: "calendar") { goToToday() }
                 Button {
                     isEditingGoal = true
@@ -128,12 +141,51 @@ struct PlanCalendarView: View {
         weekScrollToken += 1
     }
 
+
+    private func forceSyncIntervals() {
+        forceSyncStatus = "Syncing planned workouts to intervals.icu…"
+        Task {
+            await pushService.reconcile()
+            await MainActor.run {
+                if let error = pushService.lastPushError {
+                    forceSyncStatus = "intervals.icu sync failed: \(error)"
+                } else if let lastPushAt = pushService.lastPushAt {
+                    forceSyncStatus = "intervals.icu synced \(lastPushAt.formatted(date: .abbreviated, time: .shortened))"
+                } else {
+                    forceSyncStatus = "intervals.icu sync skipped. Enable Watch push in Profile first."
+                }
+            }
+        }
+    }
+
     private func revert(_ edit: PlanEdit) {
         do {
             try PlanEditStore.revert(edit.id, in: modelContext, today: .now, calendar: calendar)
             revertError = nil
         } catch {
             revertError = error.localizedDescription
+        }
+    }
+}
+
+private struct ForceIntervalsSyncStatusView: View {
+    var status: String?
+
+    var body: some View {
+        if let status {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+                Text(status)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Theme.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Theme.card)
         }
     }
 }

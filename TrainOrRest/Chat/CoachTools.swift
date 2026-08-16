@@ -188,6 +188,24 @@ enum CoachTools {
 
     // MARK: - Apply
 
+    static func summary(for proposal: PlanAdjustmentProposal) -> String {
+        proposal.changes.map { change in
+            switch change.action {
+            case .create:
+                let kind = change.workout?.kind ?? "workout"
+                return "Create \(kind) on \(change.date)"
+            case .rest:
+                return "Rest on \(change.date)"
+            case .downgrade:
+                return "Downgrade \(change.date)"
+            case .move:
+                return "Move \(change.date) to \(change.detail ?? "another day")"
+            case .swap:
+                return "Swap \(change.date) with \(change.detail ?? "another day")"
+            }
+        }.joined(separator: "; ")
+    }
+
     static func apply(
         proposal: PlanAdjustmentProposal,
         in context: ModelContext,

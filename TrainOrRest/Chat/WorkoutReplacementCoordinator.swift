@@ -111,9 +111,24 @@ struct PendingWorkoutReplacement: Identifiable, Equatable {
     }
 }
 
+struct PendingPlanProposal: Identifiable, Equatable {
+    let id: UUID
+    let proposal: PlanAdjustmentProposal
+    let summary: String
+    let threadID: UUID?
+
+    init(proposal: PlanAdjustmentProposal, summary: String, threadID: UUID?) {
+        self.id = UUID()
+        self.proposal = proposal
+        self.summary = summary
+        self.threadID = threadID
+    }
+}
+
 @MainActor
 final class WorkoutReplacementCoordinator: ObservableObject {
     @Published private(set) var pending: PendingWorkoutReplacement?
+    @Published private(set) var pendingProposal: PendingPlanProposal?
     @Published private(set) var isConfirming = false
     @Published private(set) var lastError: String?
 
@@ -131,15 +146,26 @@ final class WorkoutReplacementCoordinator: ObservableObject {
         self.now = now
     }
 
+    var hasPendingDecision: Bool {
+        pending != nil || pendingProposal != nil
+    }
+
     func stage(_ replacement: PendingWorkoutReplacement) {
-        guard pending == nil, !isConfirming else { return }
+        guard !hasPendingDecision, !isConfirming else { return }
         pending = replacement
+        lastError = nil
+    }
+
+    func stage(_ proposal: PlanAdjustmentProposal, summary: String, threadID: UUID?) {
+        guard !hasPendingDecision, !isConfirming else { return }
+        pendingProposal = PendingPlanProposal(proposal: proposal, summary: summary, threadID: threadID)
         lastError = nil
     }
 
     func cancel() {
         guard !isConfirming else { return }
         pending = nil
+        pendingProposal = nil
         lastError = nil
     }
 
@@ -164,6 +190,36 @@ final class WorkoutReplacementCoordinator: ObservableObject {
             restageChangedPlanReplacement(from: replacement)
         } catch {
             lastError = replacement.failureMessage
+        }
+    }
+
+    func confirmProposal(_ id: UUID) {
+        guard let pendingProposal, pendingProposal.id == id, !isConfirming else { return }
+
+        self.pendingProposal = nil
+        isConfirming = true
+        defer { isConfirming = false }
+
+        do {
+            let context = ModelContext(container)
+            context.autosaveEnabled = false
+            let result = try CoachTools.apply(
+                proposal: pendingProposal.proposal,
+                in: context,
+                today: now(),
+                calendar: calendar
+            )
+            context.insert(ChatMessage(
+                role: .assistant,
+                text: "Applied: \(result.summary)",
+                date: .now,
+                appliedAdjustment: result.summary,
+                threadID: pendingProposal.threadID
+            ))
+            try context.save()
+            NotificationCenter.default.post(name: .planDidChange, object: nil)
+        } catch {
+            lastError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 
