@@ -45,7 +45,7 @@ struct RootTabView: View {
         case .chat:
             NavigationStack {
                 ChatView(
-                    bottomNavigation: isKeyboardVisible ? nil : AnyView(
+                    bottomNavigation: AnyView(
                         TorTabDock(selection: $selection, namespace: dockNamespace)
                     )
                 )

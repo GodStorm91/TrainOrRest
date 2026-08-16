@@ -650,57 +650,83 @@ private struct ChatHistorySheet: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                if threads.isEmpty {
-                    ContentUnavailableView("No chats yet", systemImage: "message", description: Text("Your coach conversations will show up here."))
-                        .listRowBackground(Color.clear)
-                } else {
-                    ForEach(threads) { thread in
-                        Button {
-                            onSelect(thread.uuid)
-                            dismiss()
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: thread.uuid == activeThreadID ? "message.fill" : "message")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(Theme.accent)
-                                    .frame(width: 28, height: 28)
-                                    .background(Theme.accent.opacity(0.12), in: Circle())
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(title(for: thread))
-                                        .font(.body.weight(.semibold))
-                                        .foregroundStyle(Theme.text)
-                                        .lineLimit(1)
-                                    Text(relativeDate(for: thread.updatedAt))
-                                        .font(.caption)
-                                        .foregroundStyle(Theme.dim)
-                                }
-                                Spacer()
-                                if thread.uuid == activeThreadID {
-                                    Image(systemName: "checkmark")
-                                        .font(.caption.weight(.bold))
-                                        .foregroundStyle(Theme.good)
-                                } else {
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption.weight(.bold))
-                                        .foregroundStyle(Theme.dim)
-                                }
-                            }
-                            .contentShape(Rectangle())
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    if threads.isEmpty {
+                        ContentUnavailableView(
+                            "No chats yet",
+                            systemImage: "message",
+                            description: Text("Your coach conversations will show up here.")
+                        )
+                        .foregroundStyle(Theme.text, Theme.dim)
+                        .frame(maxWidth: .infinity, minHeight: 220)
+                    } else {
+                        ForEach(threads) { thread in
+                            chatRow(thread)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 28)
             }
-            .scrollContentBackground(.hidden)
-            .background(Color(hex: 0x07070C))
+            .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Chats")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
+                        .font(.body.weight(.semibold))
                 }
             }
         }
+        .presentationBackground(Theme.bg)
+        .presentationDragIndicator(.visible)
+    }
+
+    private func chatRow(_ thread: ChatThread) -> some View {
+        Button {
+            onSelect(thread.uuid)
+            dismiss()
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: thread.uuid == activeThreadID ? "message.fill" : "message")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 30, height: 30)
+                    .background(Theme.accent.opacity(0.12), in: Circle())
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title(for: thread))
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                        .lineLimit(1)
+                    Text(relativeDate(for: thread.updatedAt))
+                        .font(.caption)
+                        .foregroundStyle(Theme.dim)
+                }
+
+                Spacer(minLength: 8)
+
+                if thread.uuid == activeThreadID {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Theme.good)
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Theme.faint)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private func title(for thread: ChatThread) -> String {
