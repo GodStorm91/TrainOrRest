@@ -382,6 +382,44 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(messages.last?.appliedAdjustment, "Created easy on 2026-01-10")
     }
 
+    func testCoachMoveCanTargetNormalRestDay() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedGoalOnly(in: context)
+        let source = PlanEngineTestSupport.date(2026, 1, 5, hour: 0) // Monday, generated workout day
+        let target = PlanEngineTestSupport.date(2026, 1, 6, hour: 0) // Tuesday, not in availableDays
+        let plan = try XCTUnwrap(try PlanStore.activePlan(in: context))
+        let originalTargets = plan.weekTargetVolumesKm
+        let sourceWorkout = try XCTUnwrap(try plannedWorkouts(on: source, in: context).first)
+        XCTAssertNil(try plannedWorkouts(on: target, in: context).first)
+
+        let proposal = PlanAdjustmentProposal(changes: [
+            .init(
+                date: CoachContextBuilder.day(source, calendar: calendar),
+                action: .move,
+                detail: CoachContextBuilder.day(target, calendar: calendar)
+            )
+        ])
+
+        let staged = try CoachTools.validateForConfirmation(
+            proposal: proposal,
+            in: context,
+            today: today,
+            calendar: calendar
+        )
+        XCTAssertEqual(staged.summary, "Moved 2026-01-05 to 2026-01-06")
+        XCTAssertNotNil(try plannedWorkouts(on: source, in: context).first, "preflight must not persist")
+
+        let applied = try CoachTools.apply(proposal: proposal, in: context, today: today, calendar: calendar)
+        XCTAssertEqual(applied.summary, "Moved 2026-01-05 to 2026-01-06")
+        XCTAssertNil(try plannedWorkouts(on: source, in: context).first)
+        let moved = try XCTUnwrap(try plannedWorkouts(on: target, in: context).first)
+        XCTAssertEqual(moved.kind, sourceWorkout.kind)
+        XCTAssertEqual(moved.distanceKm, sourceWorkout.distanceKm, accuracy: 0.001)
+        XCTAssertTrue(moved.manuallyOverridden)
+        XCTAssertEqual(plan.weekTargetVolumesKm, originalTargets)
+    }
+
     func testChatStoreRejectsUnapplyablePlanCardBeforeUserCanConfirm() async throws {
         let container = try makeContainer()
         let context = container.mainContext

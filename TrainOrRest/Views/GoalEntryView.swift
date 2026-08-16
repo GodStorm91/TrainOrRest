@@ -48,14 +48,14 @@ struct GoalEntryView: View {
                 }
             }
             .confirmationDialog(
-                "Regenerate Future Workouts?",
+                "Overwrite current plan?",
                 isPresented: $isConfirmingRegeneration,
                 titleVisibility: .visible
             ) {
-                Button("Regenerate Plan", role: .destructive, action: save)
+                Button("Overwrite Plan", role: .destructive, action: save)
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Changing this goal replaces future planned workouts. Completed and manually changed workouts stay in your history.")
+                Text("This deletes the affected old plan and writes the new one. Completed runs stay in your history.")
             }
             .task { load() }
         }

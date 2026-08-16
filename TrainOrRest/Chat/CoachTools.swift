@@ -109,11 +109,11 @@ enum CoachTools {
                 "action": .object([
                     "type": .string("string"),
                     "enum": .array(["swap", "downgrade", "rest", "move", "create"].map(JSONValue.string)),
-                    "description": .string("create adds a new workout on a free date; move uses date as the existing source workout day and detail as the empty target day; swap/rest/downgrade edit the workout already on date")
+                    "description": .string("create adds a new workout on a free date, including an explicit rest/unavailable day; move uses date as the existing source workout day and detail as the empty target day; swap/rest/downgrade edit the workout already on date")
                 ]),
                 "detail": .object([
                     "type": .string("string"),
-                    "description": .string("Target date as YYYY-MM-DD; required for swap and move, forbidden otherwise. For move, this is the destination day, not another existing workout.")
+                    "description": .string("Target date as YYYY-MM-DD; required for swap and move, forbidden otherwise. For move, this is the destination day, not another existing workout, and it may be a rest/unavailable day.")
                 ]),
                 "workout": workoutSchema
             ]),
@@ -259,9 +259,6 @@ enum CoachTools {
             }
             guard date != raceDay else { throw ValidationError("Race day cannot hold another workout.") }
             guard date < raceDay else { throw ValidationError("\(change.date) is after race day.") }
-            guard spec.goal.availableDays.contains(PlanGenerator.weekday(of: date, calendar: calendar)) else {
-                throw ValidationError("\(change.date) is not one of the user's running days.")
-            }
             guard proposedCreateDates.insert(date).inserted else {
                 throw ValidationError("Two workouts proposed for \(change.date).")
             }
@@ -363,9 +360,6 @@ enum CoachTools {
             }
             guard date != raceDay else { throw ValidationError("Race day cannot hold another workout.") }
             guard date < raceDay else { throw ValidationError("\(change.date) is after race day.") }
-            guard spec.goal.availableDays.contains(PlanGenerator.weekday(of: date, calendar: calendar)) else {
-                throw ValidationError("\(change.date) is not one of the user's running days.")
-            }
             guard proposedCreateDates.insert(date).inserted else {
                 throw ValidationError("Two workouts proposed for \(change.date).")
             }
@@ -456,9 +450,6 @@ enum CoachTools {
         let raceDay = calendar.startOfDay(for: goal.raceDate)
         guard date > todayStart else { return nil }
         guard date != raceDay, date < raceDay else { return nil }
-        guard goal.availableDays.contains(PlanGenerator.weekday(of: date, calendar: calendar)) else {
-            return nil
-        }
 
         var spec = try currentPlanSpec(in: context, today: today, calendar: calendar)
         let baseline = spec
@@ -533,8 +524,7 @@ enum CoachTools {
             throw ValidationError("The active plan is no longer available.")
         }
         let raceDay = calendar.startOfDay(for: goal.raceDate)
-        guard pending.date < raceDay,
-              goal.availableDays.contains(PlanGenerator.weekday(of: pending.date, calendar: calendar)) else {
+        guard pending.date < raceDay else {
             throw ValidationError("That date is no longer available for a workout.")
         }
         let rows = try context.fetch(FetchDescriptor<PlannedWorkout>())
@@ -674,9 +664,6 @@ enum CoachTools {
             guard date >= dayStart else { throw ValidationError("Cannot create a workout in the past.") }
             guard date != raceDay else { throw ValidationError("Race day cannot hold another workout.") }
             guard date < raceDay else { throw ValidationError("\(change.date) is after race day.") }
-            guard goal.availableDays.contains(PlanGenerator.weekday(of: date, calendar: calendar)) else {
-                throw ValidationError("\(change.date) is not one of the user's running days.")
-            }
             guard proposedDates.insert(date).inserted else {
                 throw ValidationError("Two workouts proposed for \(change.date).")
             }
@@ -787,6 +774,12 @@ enum CoachTools {
         )
         return PlanValidator.validate(candidate, calendar: calendar, peakCapKm: peakCapKm)
             .compactMap { issue in
+                // Manual coach edits are allowed to intentionally put a one-off
+                // workout on a normal rest/unavailable day. Availability guides
+                // generated plans; it should not block an explicit user move or
+                // create. Keep the harder guards: collisions, race day, past,
+                // volume caps, distance validity and hard-session spacing.
+                guard issue.kind != .workoutOnUnavailableDay else { return nil }
                 guard let match = remainingBaselineIssues.firstIndex(of: issue) else { return issue }
                 remainingBaselineIssues.remove(at: match)
                 return nil
@@ -943,6 +936,7 @@ enum CoachTools {
             context.delete(row)
         }
         guard let plan = try PlanStore.activePlan(in: context) else { return }
+        plan.weekTargetVolumesKm = spec.weeks.map(\.targetVolumeKm)
         for week in spec.weeks {
             for workout in week.workouts where workout.date >= dayStart {
                 let row = PlannedWorkout(spec: workout, weekIndex: week.index, phase: week.phase)

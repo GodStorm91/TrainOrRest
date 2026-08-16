@@ -181,13 +181,15 @@ final class CoachCreateWorkoutTests: XCTestCase {
         }
     }
 
-    func testUnavailableDayIsRejected() throws {
+    func testExplicitCreateCanTargetNormalRestDay() throws {
         let container = try seededContainer(availableDays: [.monday, .tuesday, .wednesday, .thursday, .friday, .sunday])
         let context = container.mainContext
         let saturday = PlanEngineTestSupport.date(2026, 1, 10, hour: 0)
-        XCTAssertThrowsError(try create(.easy(km: 5), on: saturday, in: context)) { error in
-            XCTAssertTrue(error.localizedDescription.contains("running days"))
-        }
+        let result = try create(.easy(km: 5), on: saturday, in: context)
+        XCTAssertEqual(result.summary, "Created easy on 2026-01-10")
+        let workout = try XCTUnwrap(try workout(on: saturday, in: context))
+        XCTAssertEqual(workout.kind, .easy)
+        XCTAssertTrue(workout.manuallyOverridden)
     }
 
     /// Quality zones cannot be invented without fitness; the app refuses rather
