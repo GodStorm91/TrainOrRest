@@ -9,6 +9,8 @@ enum CoachContextBuilder {
         var lines: [String] = [
             "You are TrainOrRest, a cautious running coach. Explain decisions from the user's actual data.",
             "Use plan tools only for schedule changes. Never claim a plan edit was applied unless a tool result confirms it.",
+            "When the user wants to update the training calendar, call the plan tool instead of giving CSV/import instructions. The app will ask the user to confirm before saving the proposed change.",
+            "If Watch push is configured, confirmed calendar edits are synced by the app to intervals.icu automatically after the user taps Apply changes. You cannot browse the user's intervals.icu account or manually upload files yourself, but do not say TrainOrRest lacks intervals.icu access when Watch push is configured.",
             "Today is \(day(today, calendar: calendar)) (\(weekdayName(today, calendar: calendar))). Timezone: \(calendar.timeZone.identifier).",
             "Every tool date must be an absolute local calendar date formatted YYYY-MM-DD. Resolve relative wording like 'tomorrow' or 'Saturday' against today's date yourself; never pass relative text to a tool.",
             "You may create easy, long, tempo, and interval workouts. A race distance or target time can be context for a training request: for example, ‘create a workout to help me run a half marathon under 1:50’ means create a safe non-race workout, not a goal change or race workout. Use the stated training day; if no day is stated, ask which day to schedule it. You cannot create or edit a race workout, and you cannot change the goal."
@@ -17,6 +19,7 @@ enum CoachContextBuilder {
         let goal = try PlanStore.activeGoal(in: context)?.spec
         let fitness = try PlanStore.currentFitness(in: context, today: today, calendar: calendar)
         lines += personalSettingsSection()
+        lines += watchPushSection()
         lines += goalSection(goal: goal, fitness: fitness, today: today, calendar: calendar)
         lines += try planSection(in: context, today: today, calendar: calendar)
         lines += try activitySection(in: context, today: today, calendar: calendar)
@@ -31,6 +34,24 @@ enum CoachContextBuilder {
         let settings = PersonalCoachSettings.current
         guard !settings.isEmpty else { return ["Personal coach settings: none set."] }
         return ["Personal coach settings. Use this stable user profile/preferences on every reply unless the user overrides it in the current message:\n\(settings)"]
+    }
+
+    private static func watchPushSection() -> [String] {
+        let enabled = UserDefaults.standard.bool(forKey: WorkoutPushSettings.enabledKey)
+        let athleteID = UserDefaults.standard.string(forKey: WorkoutPushSettings.athleteIDKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let hasKey = ((try? KeychainStore.load(account: KeychainStore.intervalsICUAccount)) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty == false
+        let status: String
+        if enabled, !athleteID.isEmpty, hasKey {
+            status = "configured. Confirmed calendar edits sync to intervals.icu automatically after the user taps Apply changes."
+        } else if enabled {
+            status = "enabled but incomplete. Ask the user to finish Athlete ID/API key in Profile before expecting intervals.icu delivery."
+        } else {
+            status = "disabled. Calendar edits stay local until Watch push is enabled in Profile or the user uses Sync intervals.icu manually after configuration."
+        }
+        return ["Watch push / intervals.icu: \(status)"]
     }
 
     private static func goalSection(
