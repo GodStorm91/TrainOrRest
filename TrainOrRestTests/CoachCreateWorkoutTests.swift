@@ -156,7 +156,6 @@ final class CoachCreateWorkoutTests: XCTestCase {
             ("outside plan", [change(.easy(km: 5), on: PlanEngineTestSupport.date(2026, 3, 6, hour: 0))]),
             ("hard sessions too close", [change(.tempo(workKm: 3), on: saturday)]),
             ("duplicate date in batch", [change(.easy(km: 5), on: freeDay), change(.easy(km: 4), on: freeDay)]),
-            ("mixed batch", [change(.easy(km: 5), on: freeDay), .init(date: "2026-01-07", action: .rest, detail: nil, workout: nil)]),
             ("race kind", [change(.raw(kind: "race"), on: freeDay)]),
             ("both targets on one step", [change(.malformedStep, on: freeDay)]),
             ("unknown pace zone", [change(.raw(kind: "easy", zone: "sprint"), on: freeDay)]),

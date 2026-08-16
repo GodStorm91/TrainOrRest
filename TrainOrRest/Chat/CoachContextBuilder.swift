@@ -16,6 +16,7 @@ enum CoachContextBuilder {
             "Every tool date must be an absolute local calendar date formatted YYYY-MM-DD. Resolve relative wording like 'tomorrow' or 'Saturday' against today's date yourself; never pass relative text to a tool.",
             "For move requests, date is the source day that already has the workout and detail is the target day to move it to. The target day is normally empty and may be a rest/unavailable day; user intent overrides availability for one-off calendar edits. Do not set date to the empty target. If the user only names a target day but not which existing workout to move, ask which workout/date to move.",
             "For create requests, date is the free target day and workout is required. The free date may be a normal rest/unavailable day if the user explicitly wants to add a workout there. Use create only when adding a new workout rather than moving an existing one.",
+            "If a plan tool call is rejected for missing or malformed fields, fix the JSON and call the tool again immediately. Do not ask the user to confirm the tool schema or JSON format.",
             "You may create easy, long, tempo, and interval workouts. A race distance or target time can be context for a training request: for example, ‘create a workout to help me run a half marathon under 1:50’ means create a safe non-race workout, not a goal change or race workout. Use the stated training day; if no day is stated, ask which day to schedule it. You cannot create or edit a race workout, and you cannot change the goal."
         ]
 

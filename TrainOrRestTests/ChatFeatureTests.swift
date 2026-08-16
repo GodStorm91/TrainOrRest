@@ -420,6 +420,112 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(plan.weekTargetVolumesKm, originalTargets)
     }
 
+    func testCoachCanCreateAndMoveInOneProposal() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedGoalOnly(in: context)
+        let source = PlanEngineTestSupport.date(2026, 1, 5, hour: 0)
+        let moveTarget = PlanEngineTestSupport.date(2026, 1, 6, hour: 0)
+        let createTarget = PlanEngineTestSupport.date(2026, 1, 10, hour: 0)
+        XCTAssertNotNil(try plannedWorkouts(on: source, in: context).first)
+        XCTAssertNil(try plannedWorkouts(on: moveTarget, in: context).first)
+        XCTAssertNil(try plannedWorkouts(on: createTarget, in: context).first)
+
+        let workout = PlanAdjustmentProposal.CreateWorkout(
+            kind: "easy",
+            blocks: [.init(repeatCount: 1, steps: [.init(
+                role: "work",
+                targetType: "distance_km",
+                targetValue: 5,
+                paceZone: "easy"
+            )])]
+        )
+        let proposal = PlanAdjustmentProposal(changes: [
+            .init(
+                date: CoachContextBuilder.day(createTarget, calendar: calendar),
+                action: .create,
+                workout: workout
+            ),
+            .init(
+                date: CoachContextBuilder.day(source, calendar: calendar),
+                action: .move,
+                detail: CoachContextBuilder.day(moveTarget, calendar: calendar)
+            )
+        ])
+
+        let staged = try CoachTools.validateForConfirmation(
+            proposal: proposal,
+            in: context,
+            today: today,
+            calendar: calendar
+        )
+        XCTAssertEqual(staged.summary, "Moved 2026-01-05 to 2026-01-06; Created easy on 2026-01-10")
+        XCTAssertNil(try plannedWorkouts(on: moveTarget, in: context).first, "preflight must not persist")
+        XCTAssertNil(try plannedWorkouts(on: createTarget, in: context).first, "preflight must not persist")
+
+        let applied = try CoachTools.apply(proposal: proposal, in: context, today: today, calendar: calendar)
+        XCTAssertEqual(applied.summary, staged.summary)
+        XCTAssertNil(try plannedWorkouts(on: source, in: context).first)
+        XCTAssertNotNil(try plannedWorkouts(on: moveTarget, in: context).first)
+        let created = try XCTUnwrap(try plannedWorkouts(on: createTarget, in: context).first)
+        XCTAssertEqual(created.kind, .easy)
+        XCTAssertEqual(created.distanceKm, 5, accuracy: 0.001)
+    }
+
+    func testChatStoreDoesNotPersistToolSchemaConfirmationAfterRejectedPlanEdit() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedEveryDayPlan(in: context)
+        let saturday = PlanEngineTestSupport.date(2026, 1, 10, hour: 0)
+        XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [
+                .toolUse(id: "toolu_bad", name: CoachTools.toolName, input: .object([
+                    "changes": .array([.object([
+                        "date": .string(CoachContextBuilder.day(saturday, calendar: calendar)),
+                        "action": .string("create"),
+                        "workout": .string("Easy")
+                    ])])
+                ]))
+            ], stopReason: "tool_use"),
+            ClaudeResponse(content: [.text("Bạn có thể xác nhận lại giúp mình rằng cấu trúc trên đã đúng theo yêu cầu của plan_adjustment tool và mình sẽ gửi lại bằng đúng JSON/định dạng mà tool yêu cầu.")], stopReason: "end_turn"),
+            ClaudeResponse(content: [
+                .toolUse(id: "toolu_good", name: CoachTools.toolName, input: .object([
+                    "changes": .array([.object([
+                        "date": .string(CoachContextBuilder.day(saturday, calendar: calendar)),
+                        "action": .string("create"),
+                        "workout": .object([
+                            "kind": .string("easy"),
+                            "blocks": .array([.object([
+                                "repeat_count": .number(1),
+                                "steps": .array([.object([
+                                    "role": .string("work"),
+                                    "target_type": .string("distance_km"),
+                                    "target_value": .number(5),
+                                    "pace_zone": .string("easy")
+                                ])])
+                            ])])
+                        ])
+                    ])])
+                ]))
+            ], stopReason: "tool_use")
+        ])
+        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
+        let store = CoachChatStore(
+            client: client,
+            calendar: calendar,
+            now: { self.today },
+            replacementCoordinator: coordinator
+        )
+
+        await store.send(text: "Create easy on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
+
+        XCTAssertEqual(client.requests.count, 3)
+        XCTAssertNotNil(coordinator.pendingProposal)
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        XCTAssertFalse(messages.map(\.text).joined(separator: "\n").contains("Bạn có thể xác nhận"))
+    }
+
     func testChatStoreRejectsUnapplyablePlanCardBeforeUserCanConfirm() async throws {
         let container = try makeContainer()
         let context = container.mainContext

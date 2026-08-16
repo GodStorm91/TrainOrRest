@@ -243,6 +243,19 @@ final class CoachChatStore: ObservableObject {
             }
             if toolUses.isEmpty {
                 let text = response.content.textContent
+                if lastToolRejection != nil, Self.containsPlanToolRetryDetour(text) {
+                    if let streamingMessage {
+                        context.delete(streamingMessage)
+                        try context.save()
+                    }
+                    let retryMessage = "Plan edits must be submitted with \(CoachTools.toolName). Fix the rejected JSON and call the tool again; do not ask the user to confirm the tool schema."
+                    lastToolRejection = retryMessage
+                    conversation.append(ClaudeMessageParam(
+                        role: "user",
+                        content: [.text("Rejected: \(retryMessage)")]
+                    ))
+                    continue
+                }
                 if Self.containsCalendarImportDetour(text) {
                     if let streamingMessage {
                         context.delete(streamingMessage)
@@ -363,6 +376,28 @@ final class CoachChatStore: ObservableObject {
     }
 
     private static let calendarImportDetourMessage = "Training schedule changes must update TrainOrRest Calendar through the plan tool, then sync intervals.icu from the app. Do not provide ICS/iCalendar/import instructions."
+
+    private static func containsPlanToolRetryDetour(_ text: String) -> Bool {
+        let lowercased = text.lowercased()
+        let schemaNeedles = [
+            "plan_adjustment",
+            "tool",
+            "json",
+            "schema",
+            "format",
+            "định dạng",
+            "cấu trúc"
+        ]
+        let confirmationNeedles = [
+            "confirm",
+            "confirmation",
+            "xác nhận",
+            "cho mình biết",
+            "bạn có thể"
+        ]
+        return schemaNeedles.contains { lowercased.contains($0) }
+            && confirmationNeedles.contains { lowercased.contains($0) }
+    }
 
     private static func containsCalendarImportDetour(_ text: String) -> Bool {
         let lowercased = text.lowercased()

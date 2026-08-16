@@ -242,11 +242,6 @@ enum CoachTools {
         for change in proposal.changes where change.action != .create {
             let date = try parseDay(change.date, calendar: calendar)
             guard date >= dayStart else { throw ValidationError("Cannot edit past workouts.") }
-            if !creates.isEmpty {
-                guard change.action == .rest, date == dayStart else {
-                    throw ValidationError("Creating a workout can only be combined with resting today. Submit other plan edits separately.")
-                }
-            }
             editedDates.insert(date)
             summaries.append(try apply(change, date: date, paces: paces, to: &spec, calendar: calendar))
         }
@@ -343,11 +338,6 @@ enum CoachTools {
         for change in proposal.changes where change.action != .create {
             let date = try parseDay(change.date, calendar: calendar)
             guard date >= dayStart else { throw ValidationError("Cannot edit past workouts.") }
-            if !creates.isEmpty {
-                guard change.action == .rest, date == dayStart else {
-                    throw ValidationError("Creating a workout can only be combined with resting today. Submit other plan edits separately.")
-                }
-            }
             editedDates.insert(date)
             summaries.append(try apply(change, date: date, paces: paces, to: &spec, calendar: calendar))
         }
