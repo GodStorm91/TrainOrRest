@@ -301,6 +301,108 @@ enum CoachTools {
         return AppliedAdjustment(summary: summaries.joined(separator: "; "))
     }
 
+    /// Read-only preflight for proposals that will be shown behind an Apply
+    /// button. The card should only appear for a proposal that can actually be
+    /// committed right now; otherwise the chat loop can reject it and ask the
+    /// model for a corrected tool call instead of making the user tap into a
+    /// toast error.
+    static func validateForConfirmation(
+        proposal: PlanAdjustmentProposal,
+        in context: ModelContext,
+        today: Date,
+        calendar: Calendar
+    ) throws -> AppliedAdjustment {
+        guard !proposal.changes.isEmpty else { throw ValidationError("No changes proposed.") }
+        guard proposal.changes.count <= maxChangesPerProposal else {
+            throw ValidationError("At most \(maxChangesPerProposal) changes per proposal.")
+        }
+        for change in proposal.changes { try validateFields(change) }
+
+        let creates = proposal.changes.filter { $0.action == .create }
+        if creates.count == proposal.changes.count {
+            let candidatePlan = try createCandidates(
+                creates,
+                in: context,
+                today: today,
+                calendar: calendar
+            )
+            let summary = candidatePlan.candidates
+                .map { "Created \($0.built.kind.rawValue) on \(CoachContextBuilder.day($0.date, calendar: calendar))" }
+                .joined(separator: "; ")
+            return AppliedAdjustment(summary: summary)
+        }
+
+        var spec = try currentPlanSpec(in: context, today: today, calendar: calendar)
+        let baseline = spec
+        let fitness = try PlanStore.currentFitness(in: context, today: today, calendar: calendar)
+        let paces = fitness.map { VDOTTable.trainingPaces(vdot: $0.vdot) }
+        let dayStart = calendar.startOfDay(for: today)
+        let raceDay = calendar.startOfDay(for: spec.goal.raceDate)
+
+        var summaries: [String] = []
+        var proposedCreateDates: Set<Date> = []
+        var editedDates: Set<Date> = []
+
+        for change in proposal.changes where change.action != .create {
+            let date = try parseDay(change.date, calendar: calendar)
+            guard date >= dayStart else { throw ValidationError("Cannot edit past workouts.") }
+            if !creates.isEmpty {
+                guard change.action == .rest, date == dayStart else {
+                    throw ValidationError("Creating a workout can only be combined with resting today. Submit other plan edits separately.")
+                }
+            }
+            editedDates.insert(date)
+            summaries.append(try apply(change, date: date, paces: paces, to: &spec, calendar: calendar))
+        }
+
+        for change in proposal.changes where change.action == .create {
+            let date = try parseDay(change.date, calendar: calendar)
+            guard date >= dayStart else { throw ValidationError("Cannot create a workout in the past.") }
+            guard !editedDates.contains(date) else {
+                throw ValidationError("Create the replacement workout on a different date, or ask to replace the workout explicitly.")
+            }
+            guard date != raceDay else { throw ValidationError("Race day cannot hold another workout.") }
+            guard date < raceDay else { throw ValidationError("\(change.date) is after race day.") }
+            guard spec.goal.availableDays.contains(PlanGenerator.weekday(of: date, calendar: calendar)) else {
+                throw ValidationError("\(change.date) is not one of the user's running days.")
+            }
+            guard proposedCreateDates.insert(date).inserted else {
+                throw ValidationError("Two workouts proposed for \(change.date).")
+            }
+            guard locate(date, in: spec) == nil else {
+                throw ValidationError("\(change.date) already has a workout.")
+            }
+            guard let weekIndex = weekIndex(for: date, in: spec, calendar: calendar) else {
+                throw ValidationError("\(change.date) is outside the training plan.")
+            }
+            guard let payload = change.workout else { throw ValidationError("create requires a workout.") }
+            let built = try WorkoutFactory.build(try recipe(from: payload), paces: paces)
+            var week = spec.weeks[weekIndex]
+            week.workouts.append(PlannedWorkoutSpec(
+                date: date,
+                kind: built.kind,
+                distanceKm: built.distanceKm,
+                paceBand: built.paceBand,
+                details: built.details,
+                structure: built.structure
+            ))
+            week.workouts.sort { $0.date < $1.date }
+            week.targetVolumeKm = PlanGenerator.rounded(week.targetVolumeKm + built.distanceKm)
+            spec.weeks[weekIndex] = week
+            summaries.append("Created \(built.kind.rawValue) on \(change.date)")
+        }
+
+        let peakCap = fitness.map { max($0.weeklyVolumeKm * 1.35, $0.longestRecentRunKm * 2) }
+        let issues = introducedValidationIssues(
+            in: spec, comparedTo: baseline, calendar: calendar, peakCapKm: peakCap
+        )
+        guard issues.isEmpty else {
+            throw ValidationError(issues.map(\.message).joined(separator: "; "))
+        }
+
+        return AppliedAdjustment(summary: summaries.joined(separator: "; "))
+    }
+
     /// Action-dependent field rules. The JSON Schema cannot express these, so
     /// Swift stays authoritative.
     private static func validateFields(_ change: PlanAdjustmentProposal.Change) throws {
@@ -516,12 +618,43 @@ enum CoachTools {
 
     /// Creates are validated as a whole batch against a copied plan, then
     /// inserted as new rows only. Existing workouts are never rewritten.
+    private struct CreateCandidatePlan {
+        var plan: TrainingPlan
+        var spec: TrainingPlanSpec
+        var candidates: [Candidate]
+    }
+
     private static func applyCreates(
         _ changes: [PlanAdjustmentProposal.Change],
         in context: ModelContext,
         today: Date,
         calendar: Calendar
     ) throws -> AppliedAdjustment {
+        let candidatePlan = try createCandidates(
+            changes,
+            in: context,
+            today: today,
+            calendar: calendar
+        )
+        try insert(
+            candidatePlan.candidates,
+            into: candidatePlan.plan,
+            spec: candidatePlan.spec,
+            in: context,
+            calendar: calendar
+        )
+        let summary = candidatePlan.candidates
+            .map { "Created \($0.built.kind.rawValue) on \(CoachContextBuilder.day($0.date, calendar: calendar))" }
+            .joined(separator: "; ")
+        return AppliedAdjustment(summary: summary)
+    }
+
+    private static func createCandidates(
+        _ changes: [PlanAdjustmentProposal.Change],
+        in context: ModelContext,
+        today: Date,
+        calendar: Calendar
+    ) throws -> CreateCandidatePlan {
         guard let goal = try PlanStore.activeGoal(in: context)?.spec,
               let plan = try PlanStore.activePlan(in: context) else {
             throw ValidationError("No active plan.")
@@ -583,11 +716,7 @@ enum CoachTools {
             throw ValidationError(issues.map(\.message).joined(separator: "; "))
         }
 
-        try insert(candidates, into: plan, spec: spec, in: context, calendar: calendar)
-        let summary = candidates
-            .map { "Created \($0.built.kind.rawValue) on \(CoachContextBuilder.day($0.date, calendar: calendar))" }
-            .joined(separator: "; ")
-        return AppliedAdjustment(summary: summary)
+        return CreateCandidatePlan(plan: plan, spec: spec, candidates: candidates)
     }
 
     /// Targeted persistence: insert the new rows and update only the affected

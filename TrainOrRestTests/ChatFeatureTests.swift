@@ -336,7 +336,7 @@ final class ChatFeatureTests: XCTestCase {
 
         XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
         let pending = try XCTUnwrap(coordinator.pendingProposal)
-        XCTAssertTrue(pending.summary.contains("Create easy on 2026-01-10"))
+        XCTAssertTrue(pending.summary.contains("Created easy on 2026-01-10"))
         XCTAssertEqual(client.requests.count, 1)
 
         coordinator.confirmProposal(pending.id)
@@ -348,6 +348,90 @@ final class ChatFeatureTests: XCTestCase {
 
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertEqual(messages.last?.appliedAdjustment, "Created easy on 2026-01-10")
+    }
+
+    func testChatStoreRejectsUnapplyablePlanCardBeforeUserCanConfirm() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedEveryDayPlan(in: context)
+        let saturday = PlanEngineTestSupport.date(2026, 1, 10, hour: 0) // free day
+        XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
+        let workout = PlanAdjustmentProposal.CreateWorkout(
+            kind: "easy",
+            blocks: [.init(repeatCount: 1, steps: [.init(
+                role: "work",
+                targetType: "distance_km",
+                targetValue: 5,
+                paceZone: "easy"
+            )])]
+        )
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [
+                .toolUse(id: "toolu_bad", name: CoachTools.toolName, input: .object([
+                    "changes": .array([.object([
+                        "date": .string(CoachContextBuilder.day(saturday, calendar: calendar)),
+                        "action": .string("rest")
+                    ])])
+                ]))
+            ], stopReason: "tool_use"),
+            ClaudeResponse(content: [
+                .toolUse(id: "toolu_good", name: CoachTools.toolName, input: .object([
+                    "changes": .array([.object([
+                        "date": .string(CoachContextBuilder.day(saturday, calendar: calendar)),
+                        "action": .string("create"),
+                        "workout": .object([
+                            "kind": .string(workout.kind),
+                            "blocks": .array([.object([
+                                "repeat_count": .number(1),
+                                "steps": .array([.object([
+                                    "role": .string("work"),
+                                    "target_type": .string("distance_km"),
+                                    "target_value": .number(5),
+                                    "pace_zone": .string("easy")
+                                ])])
+                            ])])
+                        ])
+                    ])])
+                ]))
+            ], stopReason: "tool_use")
+        ])
+        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
+        let store = CoachChatStore(
+            client: client,
+            calendar: calendar,
+            now: { self.today },
+            replacementCoordinator: coordinator
+        )
+
+        await store.send(text: "Make Saturday a run day.", model: "claude-test", apiKey: "test-key", in: context)
+
+        XCTAssertEqual(client.requests.count, 2)
+        let pending = try XCTUnwrap(coordinator.pendingProposal)
+        XCTAssertEqual(pending.summary, "Created easy on 2026-01-10")
+        XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        XCTAssertEqual(messages.map(\.role), [.user, .assistant])
+        XCTAssertFalse(messages.map(\.text).joined(separator: "\n").contains("No workout on 2026-01-10"))
+    }
+
+    func testValidateForConfirmationDoesNotPersistAndRejectsMissingWorkoutEdit() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedEveryDayPlan(in: context)
+        let saturday = PlanEngineTestSupport.date(2026, 1, 10, hour: 0)
+        XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
+
+        XCTAssertThrowsError(try CoachTools.validateForConfirmation(
+            proposal: PlanAdjustmentProposal(changes: [
+                .init(date: CoachContextBuilder.day(saturday, calendar: calendar), action: .rest)
+            ]),
+            in: context,
+            today: today,
+            calendar: calendar
+        )) { error in
+            XCTAssertEqual(error.localizedDescription, "No workout on 2026-01-10.")
+        }
+        XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
     }
 
     func testTransientConnectionFailureIsNotPersistedAsAssistantMessage() async throws {

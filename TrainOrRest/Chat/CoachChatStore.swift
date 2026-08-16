@@ -315,7 +315,13 @@ final class CoachChatStore: ObservableObject {
                 guard let replacementCoordinator else {
                     throw CoachTools.ValidationError("Plan update confirmation is unavailable.")
                 }
-                let summary = CoachTools.summary(for: proposal)
+                let validated = try CoachTools.validateForConfirmation(
+                    proposal: proposal,
+                    in: context,
+                    today: today,
+                    calendar: calendar
+                )
+                let summary = validated.summary.isEmpty ? CoachTools.summary(for: proposal) : validated.summary
                 context.insert(assistantMessage(
                     text: "I prepared this calendar update. Review it below before I save it: \(summary)",
                     groundingSnapshot: groundingSnapshot,
