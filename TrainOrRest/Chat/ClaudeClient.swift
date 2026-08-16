@@ -40,23 +40,25 @@ extension ClaudeServicing {
 
 enum CoachChatConfig {
     static let defaultModel = "claude-sonnet-5"
+    static let defaultOpenAIModel = "gpt-5-nano"
     static let anthropicVersion = "2023-06-01"
     static let historyLimit = 20
-    static let maxToolRounds = 3
+    static let maxToolRounds = 5
     /// Headroom for adaptive thinking plus a structured tool call. Too low and
     /// the model stops mid-`tool_use`, leaving an input we must never execute.
     static let maxOutputTokens = 4_096
 }
 
-enum ClaudeClientError: LocalizedError {
-    case badKey, rateLimited, offline, invalidResponse, api(String)
+enum ClaudeClientError: LocalizedError, Equatable {
+    case badKey, rateLimited, offline, connectionLost, invalidResponse, api(String)
 
     var errorDescription: String? {
         switch self {
         case .badKey: "Your Anthropic API key was rejected. Check it in Settings."
-        case .rateLimited: "Claude is rate limited right now. Try again shortly."
+        case .rateLimited: "The coach provider is rate limited right now. Try again shortly."
         case .offline: "No network connection. Your chat history is safe."
-        case .invalidResponse: "Claude returned an unexpected response."
+        case .connectionLost: "Connection to the coach provider dropped mid-reply. Try again; your chat history is safe."
+        case .invalidResponse: "The coach provider returned an unexpected response."
         case .api(let message): message
         }
     }
@@ -131,54 +133,101 @@ final class ClaudeClient: ClaudeServicing {
             }
         } catch let error as ClaudeClientError {
             throw error
-        } catch let error as URLError where error.code == .notConnectedToInternet {
-            throw ClaudeClientError.offline
+        } catch let error as URLError {
+            throw Self.clientError(for: error)
         }
     }
 
     func stream(_ request: ClaudeRequest, apiKey: String) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error> {
+        let urlRequest = try makeStreamingRequest(request, apiKey: apiKey)
+
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                var attempt = 0
+                var yieldedContent = false
+                let maxAttempts = 2
+
+                while !Task.isCancelled {
+                    attempt += 1
+                    do {
+                        let didYieldContent = try await streamOnce(
+                            urlRequest,
+                            continuation: continuation
+                        )
+                        yieldedContent = yieldedContent || didYieldContent
+                        continuation.finish()
+                        return
+                    } catch let error as ClaudeClientError {
+                        continuation.finish(throwing: error)
+                        return
+                    } catch let error as URLError {
+                        let mapped = Self.clientError(for: error)
+                        if mapped == .connectionLost, !yieldedContent, attempt < maxAttempts {
+                            continue
+                        }
+                        continuation.finish(throwing: mapped)
+                        return
+                    } catch {
+                        continuation.finish(throwing: error)
+                        return
+                    }
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    private func makeStreamingRequest(_ request: ClaudeRequest, apiKey: String) throws -> URLRequest {
         var urlRequest = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         urlRequest.setValue(CoachChatConfig.anthropicVersion, forHTTPHeaderField: "anthropic-version")
         urlRequest.setValue("application/json", forHTTPHeaderField: "content-type")
+        urlRequest.timeoutInterval = 120
         urlRequest.httpBody = try JSONEncoder().encode(StreamingClaudeRequest(request: request))
+        return urlRequest
+    }
 
-        return AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    let (bytes, response) = try await session.bytes(for: urlRequest)
-                    guard let http = response as? HTTPURLResponse else { throw ClaudeClientError.invalidResponse }
-                    switch http.statusCode {
-                    case 200..<300:
-                        break
-                    case 401, 403:
-                        throw ClaudeClientError.badKey
-                    case 429:
-                        throw ClaudeClientError.rateLimited
-                    default:
-                        throw ClaudeClientError.api("Claude API error \(http.statusCode).")
-                    }
+    private func streamOnce(
+        _ urlRequest: URLRequest,
+        continuation: AsyncThrowingStream<AnthropicStreamEvent, Error>.Continuation
+    ) async throws -> Bool {
+        let (bytes, response) = try await session.bytes(for: urlRequest)
+        guard let http = response as? HTTPURLResponse else { throw ClaudeClientError.invalidResponse }
+        switch http.statusCode {
+        case 200..<300:
+            break
+        case 401, 403:
+            throw ClaudeClientError.badKey
+        case 429:
+            throw ClaudeClientError.rateLimited
+        default:
+            throw ClaudeClientError.api("Claude API error \(http.statusCode).")
+        }
 
-                    var parser = AnthropicSSEParser()
-                    for try await line in bytes.lines {
-                        for event in parser.feed(line + "\n") {
-                            continuation.yield(event)
-                        }
-                    }
-                    for event in parser.finish() {
-                        continuation.yield(event)
-                    }
-                    continuation.finish()
-                } catch let error as ClaudeClientError {
-                    continuation.finish(throwing: error)
-                } catch let error as URLError where error.code == .notConnectedToInternet {
-                    continuation.finish(throwing: ClaudeClientError.offline)
-                } catch {
-                    continuation.finish(throwing: error)
-                }
+        var didYieldContent = false
+        var parser = AnthropicSSEParser()
+        for try await line in bytes.lines {
+            for event in parser.feed(line + "\n") {
+                if event.isResponseContent { didYieldContent = true }
+                continuation.yield(event)
             }
-            continuation.onTermination = { _ in task.cancel() }
+        }
+        for event in parser.finish() {
+            if event.isResponseContent { didYieldContent = true }
+            continuation.yield(event)
+        }
+        return didYieldContent
+    }
+
+    private static func clientError(for error: URLError) -> ClaudeClientError {
+        switch error.code {
+        case .notConnectedToInternet:
+            return .offline
+        case .networkConnectionLost, .timedOut:
+            return .connectionLost
+        default:
+            return .api(error.localizedDescription)
         }
     }
 
@@ -187,6 +236,17 @@ final class ClaudeClient: ClaudeServicing {
               let error = object["error"] as? [String: Any],
               let message = error["message"] as? String else { return nil }
         return message
+    }
+}
+
+private extension AnthropicStreamEvent {
+    var isResponseContent: Bool {
+        switch self {
+        case .contentBlockStart, .textDelta, .inputJSONDelta, .contentBlockStop, .passthroughBlock:
+            return true
+        case .messageStart, .messageDelta, .messageStop, .ping, .error:
+            return false
+        }
     }
 }
 

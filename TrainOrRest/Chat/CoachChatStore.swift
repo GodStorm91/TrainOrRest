@@ -6,18 +6,22 @@ final class CoachChatStore: ObservableObject {
     @Published private(set) var isSending = false
     @Published var lastError: String?
 
-    private let client: ClaudeServicing
+    private let anthropicClient: ClaudeServicing
+    private let openAIClient: ClaudeServicing
     private let calendar: Calendar
     private let now: () -> Date
     private let replacementCoordinator: WorkoutReplacementCoordinator?
 
     init(
-        client: ClaudeServicing = ClaudeClient(),
+        client: ClaudeServicing? = nil,
+        anthropicClient: ClaudeServicing = ClaudeClient(),
+        openAIClient: ClaudeServicing = OpenAIClient(),
         calendar: Calendar = .current,
         now: @escaping () -> Date = { .now },
         replacementCoordinator: WorkoutReplacementCoordinator? = nil
     ) {
-        self.client = client
+        self.anthropicClient = client ?? anthropicClient
+        self.openAIClient = client ?? openAIClient
         self.calendar = calendar
         self.now = now
         self.replacementCoordinator = replacementCoordinator
@@ -29,10 +33,12 @@ final class CoachChatStore: ObservableObject {
         attachments: [CoachContextAttachment] = [],
         evidence: EvidenceSelection? = nil,
         groundingSnapshot: GroundingSnapshot? = nil,
+        threadID: UUID? = nil,
         in context: ModelContext
     ) async {
-        guard let apiKey = try? KeychainStore.load(), !apiKey.isEmpty else {
-            lastError = "Add your Anthropic API key in Settings first."
+        let account = CoachModelProvider.apiKeyAccount(for: model)
+        guard let apiKey = try? KeychainStore.load(account: account), !apiKey.isEmpty else {
+            lastError = "Add your \(CoachModelProvider.displayName(for: model)) API key in Settings first."
             return
         }
         await send(
@@ -42,6 +48,7 @@ final class CoachChatStore: ObservableObject {
             evidence: evidence,
             groundingSnapshot: groundingSnapshot,
             apiKey: apiKey,
+            threadID: threadID,
             in: context
         )
     }
@@ -53,6 +60,7 @@ final class CoachChatStore: ObservableObject {
         evidence: EvidenceSelection? = nil,
         groundingSnapshot: GroundingSnapshot? = nil,
         apiKey: String,
+        threadID: UUID? = nil,
         in context: ModelContext
     ) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -89,8 +97,10 @@ final class CoachChatStore: ObservableObject {
                 today: today,
                 calendar: calendar
             ),
-            date: .now
+            date: .now,
+            threadID: threadID
         ))
+        updateThread(threadID, titleFrom: trimmed, in: context)
         try? context.save()
 
         do {
@@ -100,13 +110,16 @@ final class CoachChatStore: ObservableObject {
                 attachments: attachments,
                 groundingSnapshot: snapshot,
                 today: today,
+                threadID: threadID,
                 in: context
             )
         } catch {
             let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             lastError = message
-            context.insert(assistantMessage(text: message, groundingSnapshot: snapshot))
-            try? context.save()
+            if shouldPersistFailure(error) {
+                context.insert(assistantMessage(text: message, groundingSnapshot: snapshot, threadID: threadID))
+                try? context.save()
+            }
         }
         isSending = false
     }
@@ -119,7 +132,7 @@ final class CoachChatStore: ObservableObject {
             messages: [ClaudeMessageParam(role: "user", content: [.text("Say OK.")])]
         )
         do {
-            _ = try await client.send(request, apiKey: apiKey)
+            _ = try await CoachModelProvider.client(for: model, anthropicClient: anthropicClient, openAIClient: openAIClient).send(request, apiKey: apiKey)
             return "Connection OK"
         } catch {
             return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -132,6 +145,7 @@ final class CoachChatStore: ObservableObject {
         attachments: [CoachContextAttachment],
         groundingSnapshot: GroundingSnapshot,
         today: Date,
+        threadID: UUID?,
         in context: ModelContext
     ) async throws {
         var system = try CoachContextBuilder.build(in: context, today: today, calendar: calendar)
@@ -139,7 +153,7 @@ final class CoachChatStore: ObservableObject {
         if !directive.isEmpty {
             system += "\n\n\(directive)"
         }
-        var conversation = try messageHistory(in: context)
+        var conversation = try messageHistory(threadID: threadID, in: context)
         if !attachments.isEmpty, var last = conversation.last, last.role == "user" {
             let text = last.content.textContent
                 .components(separatedBy: "\n\nAttached:")
@@ -154,9 +168,11 @@ final class CoachChatStore: ObservableObject {
             conversation[conversation.count - 1] = last
         }
         var applied: [String] = []
+        var lastToolRejection: String?
 
         for _ in 0..<CoachChatConfig.maxToolRounds {
             let request = ClaudeRequest(model: model, system: system, tools: [CoachTools.tool], messages: conversation)
+            let client = CoachModelProvider.client(for: model, anthropicClient: anthropicClient, openAIClient: openAIClient)
             let events = try await client.stream(request, apiKey: apiKey)
             var streamingMessage: ChatMessage?
             var lastStreamSave = Date.distantPast
@@ -164,7 +180,7 @@ final class CoachChatStore: ObservableObject {
             let assembler = CoachStreamAssembler(
                 onText: { delta in
                     if streamingMessage == nil {
-                        let message = self.assistantMessage(text: "", groundingSnapshot: groundingSnapshot)
+                        let message = self.assistantMessage(text: "", groundingSnapshot: groundingSnapshot, threadID: threadID)
                         streamingMessage = message
                         context.insert(message)
                     }
@@ -176,7 +192,16 @@ final class CoachChatStore: ObservableObject {
                     }
                 }
             )
-            let assembled = try await assembler.assemble(events)
+            let assembled: AssembledResponse
+            do {
+                assembled = try await assembler.assemble(events)
+            } catch {
+                if let streamingMessage {
+                    context.delete(streamingMessage)
+                    try? context.save()
+                }
+                throw error
+            }
             if let error = assembled.error {
                 if let streamingMessage {
                     context.delete(streamingMessage)
@@ -204,7 +229,8 @@ final class CoachChatStore: ObservableObject {
                 } else {
                     context.insert(assistantMessage(
                         text: text.isEmpty ? "Claude declined to answer that." : text,
-                        groundingSnapshot: groundingSnapshot
+                        groundingSnapshot: groundingSnapshot,
+                        threadID: threadID
                     ))
                 }
                 try context.save()
@@ -224,7 +250,8 @@ final class CoachChatStore: ObservableObject {
                     context.insert(assistantMessage(
                         text: text.isEmpty ? "I could not produce a response." : text,
                         appliedAdjustment: applied.isEmpty ? nil : applied.joined(separator: "; "),
-                        groundingSnapshot: groundingSnapshot
+                        groundingSnapshot: groundingSnapshot,
+                        threadID: threadID
                     ))
                 }
                 try context.save()
@@ -237,6 +264,7 @@ final class CoachChatStore: ObservableObject {
             }
             conversation.append(ClaudeMessageParam(role: "assistant", content: response.content))
             guard toolUses.count == 1 else {
+                lastToolRejection = "Submit one plan adjustment at a time."
                 conversation.append(ClaudeMessageParam(role: "user", content: toolUses.map {
                     .toolResult(
                         toolUseID: $0.0,
@@ -249,6 +277,7 @@ final class CoachChatStore: ObservableObject {
 
             let toolUse = toolUses[0]
             guard toolUse.1 == CoachTools.toolName else {
+                lastToolRejection = "Unknown coach tool."
                 conversation.append(ClaudeMessageParam(role: "user", content: [
                     .toolResult(toolUseID: toolUse.0, content: "Unknown tool.", isError: true)
                 ]))
@@ -281,21 +310,51 @@ final class CoachChatStore: ObservableObject {
                 ]))
             } catch {
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                lastToolRejection = message
                 conversation.append(ClaudeMessageParam(role: "user", content: [
                     .toolResult(toolUseID: toolUse.0, content: "Rejected: \(message)", isError: true)
                 ]))
             }
         }
 
-        let fallback = "I could not safely finish the plan adjustment in three tool rounds."
-        context.insert(assistantMessage(text: fallback, groundingSnapshot: groundingSnapshot))
+        if !applied.isEmpty {
+            context.insert(assistantMessage(
+                text: "Applied: \(applied.joined(separator: "; "))",
+                appliedAdjustment: applied.joined(separator: "; "),
+                groundingSnapshot: groundingSnapshot,
+                threadID: threadID
+            ))
+        } else if let lastToolRejection {
+            context.insert(assistantMessage(
+                text: "I could not safely apply that plan change. Last validation error: \(lastToolRejection)",
+                groundingSnapshot: groundingSnapshot,
+                threadID: threadID
+            ))
+        } else {
+            context.insert(assistantMessage(
+                text: "I could not safely finish the plan adjustment. Please try one specific change at a time.",
+                groundingSnapshot: groundingSnapshot,
+                threadID: threadID
+            ))
+        }
         try context.save()
+    }
+
+    private func shouldPersistFailure(_ error: Error) -> Bool {
+        guard let clientError = error as? ClaudeClientError else { return true }
+        switch clientError {
+        case .offline, .connectionLost, .rateLimited, .badKey, .invalidResponse:
+            return false
+        case .api:
+            return true
+        }
     }
 
     private func assistantMessage(
         text: String,
         appliedAdjustment: String? = nil,
-        groundingSnapshot: GroundingSnapshot
+        groundingSnapshot: GroundingSnapshot,
+        threadID: UUID? = nil
     ) -> ChatMessage {
         ChatMessage(
             role: .assistant,
@@ -303,16 +362,60 @@ final class CoachChatStore: ObservableObject {
             date: .now,
             appliedAdjustment: appliedAdjustment,
             groundingFootnote: groundingSnapshot.footnoteLine,
-            groundingSummary: groundingSnapshot.summary
+            groundingSummary: groundingSnapshot.summary,
+            threadID: threadID
         )
     }
 
-    private func messageHistory(in context: ModelContext) throws -> [ClaudeMessageParam] {
+    private func messageHistory(threadID: UUID?, in context: ModelContext) throws -> [ClaudeMessageParam] {
         var descriptor = FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date, order: .reverse)])
-        descriptor.fetchLimit = CoachChatConfig.historyLimit
-        return try context.fetch(descriptor).reversed().map {
-            ClaudeMessageParam(role: $0.role.rawValue, content: [.text($0.text)])
+        descriptor.fetchLimit = CoachChatConfig.historyLimit * 4
+        return try context.fetch(descriptor)
+            .filter { $0.threadID == threadID }
+            .prefix(CoachChatConfig.historyLimit)
+            .reversed()
+            .map { ClaudeMessageParam(role: $0.role.rawValue, content: [.text($0.text)]) }
+    }
+
+    private func updateThread(_ threadID: UUID?, titleFrom text: String, in context: ModelContext) {
+        guard let threadID else { return }
+        var descriptor = FetchDescriptor<ChatThread>()
+        descriptor.fetchLimit = 100
+        guard let thread = (try? context.fetch(descriptor))?.first(where: { $0.uuid == threadID }) else { return }
+        if thread.title == "New chat" || thread.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            thread.title = Self.threadTitle(from: text)
         }
+        thread.updatedAt = now()
+    }
+
+    private static func threadTitle(from text: String) -> String {
+        let clean = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return "New chat" }
+        return String(clean.prefix(48))
+    }
+}
+
+enum CoachModelProvider {
+    static func isOpenAIModel(_ model: String) -> Bool {
+        model.hasPrefix("gpt-") || model.hasPrefix("o")
+    }
+
+    static func apiKeyAccount(for model: String) -> String {
+        isOpenAIModel(model) ? KeychainStore.openAIAPIKeyAccount : KeychainStore.apiKeyAccount
+    }
+
+    static func displayName(for model: String) -> String {
+        isOpenAIModel(model) ? "OpenAI" : "Anthropic"
+    }
+
+    static func client(
+        for model: String,
+        anthropicClient: ClaudeServicing,
+        openAIClient: ClaudeServicing
+    ) -> ClaudeServicing {
+        isOpenAIModel(model) ? openAIClient : anthropicClient
     }
 }
 

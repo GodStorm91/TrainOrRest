@@ -22,7 +22,7 @@ struct TrainOrRestApp: App {
                 for: CompletedActivity.self, DailyWellness.self, SyncState.self,
                 Goal.self, TrainingPlan.self, PlannedWorkout.self,
                 DailyReadiness.self, DailyCheckIn.self, RuleOverride.self,
-                PlanSnapshot.self, ChatMessage.self, PlanEdit.self
+                PlanSnapshot.self, ChatThread.self, ChatMessage.self, PlanEdit.self
             )
         } catch {
             fatalError("Failed to create SwiftData container: \(error)")
@@ -101,6 +101,11 @@ struct TrainOrRestApp: App {
 struct RootView: View {
     @EnvironmentObject private var engine: SyncEngine
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.system.rawValue
+
+    private var appearance: AppAppearance {
+        AppAppearance(rawValue: appearanceRaw) ?? .system
+    }
 
     private enum AuthorizationStage {
         case checking
@@ -129,7 +134,7 @@ struct RootView: View {
                 RootTabView()
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(appearance.colorScheme)
         .task { await determineStage() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, stage == .ready {

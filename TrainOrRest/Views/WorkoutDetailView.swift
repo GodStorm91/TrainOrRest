@@ -68,6 +68,7 @@ struct WorkoutDetailView: View {
             if status != .done {
                 workout.matchedActivityUUID = nil
             }
+            NotificationCenter.default.post(name: .planDidChange, object: nil)
         }
         .tint(tint)
         .disabled(workout.status == status)

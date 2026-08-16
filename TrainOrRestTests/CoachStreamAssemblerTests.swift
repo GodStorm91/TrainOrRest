@@ -45,6 +45,49 @@ final class CoachStreamAssemblerTests: XCTestCase {
         XCTAssertNil(assembled.error)
     }
 
+
+    func testIgnoresOrphanedContentBlockStop() async throws {
+        let assembled = try await CoachStreamAssembler().assemble(stream([
+            .messageStart,
+            .contentBlockStop(index: 0),
+            .messageDelta(stopReason: "end_turn"),
+            .messageStop
+        ]))
+
+        XCTAssertEqual(assembled.response, ClaudeResponse(content: [], stopReason: "end_turn"))
+        XCTAssertNil(assembled.error)
+    }
+
+    func testRecoversTextDeltaWithoutContentBlockStart() async throws {
+        var deltas: [String] = []
+        let assembled = try await CoachStreamAssembler { delta in
+            deltas.append(delta)
+        }.assemble(stream([
+            .messageStart,
+            .textDelta(index: 0, "Recovered text."),
+            .contentBlockStop(index: 0),
+            .messageDelta(stopReason: "end_turn"),
+            .messageStop
+        ]))
+
+        XCTAssertEqual(assembled.response, ClaudeResponse(content: [.text("Recovered text.")], stopReason: "end_turn"))
+        XCTAssertNil(assembled.error)
+        XCTAssertEqual(deltas, ["Recovered text."])
+    }
+
+    func testKeepsUnclosedTextAtStreamEnd() async throws {
+        let assembled = try await CoachStreamAssembler().assemble(stream([
+            .messageStart,
+            .contentBlockStart(index: 0, kind: .text),
+            .textDelta(index: 0, "Partial but useful."),
+            .messageDelta(stopReason: "end_turn"),
+            .messageStop
+        ]))
+
+        XCTAssertEqual(assembled.response, ClaudeResponse(content: [.text("Partial but useful.")], stopReason: "end_turn"))
+        XCTAssertNil(assembled.error)
+    }
+
     func testPropagatesMaxTokensStopReason() async throws {
         let assembled = try await CoachStreamAssembler().assemble(stream([
             .messageStart,

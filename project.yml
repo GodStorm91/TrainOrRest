@@ -26,10 +26,18 @@ targets:
       path: TrainOrRest/Info.plist
       properties:
         CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "2"
+        CFBundleVersion: "202608161511"
         NSHealthShareUsageDescription: >-
           TrainOrRest reads your Garmin workouts and wellness data from Apple
           Health to build and adapt your training plan.
+        NSHealthUpdateUsageDescription: >-
+          TrainOrRest writes selected workout and training data to Apple Health
+          only when you choose to sync it, so your health record stays complete.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         UILaunchScreen: {}
         ITSAppUsesNonExemptEncryption: false
         UIBackgroundModes: [fetch]

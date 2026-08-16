@@ -44,23 +44,34 @@ struct CoachStreamAssembler {
                     openBlocks[index] = .tool(ToolBlock(id: id, name: name))
                 }
             case .textDelta(let index, let text):
-                guard case .text(var block)? = openBlocks[index] else {
-                    streamError = "Received text for an unopened content block."
-                    continue
+                let block: TextBlock
+                if case .text(let existing)? = openBlocks[index] {
+                    block = existing
+                } else {
+                    // Real SSE streams can occasionally arrive without a
+                    // matching content_block_start in our local state, usually
+                    // after transport retries or shape drift. Text is safe to
+                    // preserve, so recover instead of surfacing an internal
+                    // state-machine error to the user.
+                    block = TextBlock()
                 }
-                block.text += text
-                openBlocks[index] = .text(block)
+                var updated = block
+                updated.text += text
+                openBlocks[index] = .text(updated)
                 await onText(text)
             case .inputJSONDelta(let index, let fragment):
                 guard case .tool(var block)? = openBlocks[index] else {
-                    streamError = "Received tool input for an unopened content block."
+                    // Without the tool start frame we do not know which schema
+                    // to decode. Drop the orphaned fragment and let the model
+                    // complete the turn with text or a clean retry.
                     continue
                 }
                 block.inputJSON += fragment
                 openBlocks[index] = .tool(block)
             case .contentBlockStop(let index):
                 guard let block = openBlocks.removeValue(forKey: index) else {
-                    streamError = "Stopped an unopened content block."
+                    // Duplicate or orphaned stop frames are harmless. Treat them
+                    // as transport noise, not as chat-visible assistant errors.
                     continue
                 }
                 switch block {
@@ -80,13 +91,24 @@ struct CoachStreamAssembler {
                 stopReason = reason
             case .messageStop:
                 break
+            case .ping:
+                continue
             case .error(let message):
                 streamError = message
             }
         }
 
         if !openBlocks.isEmpty {
-            streamError = "Stream ended before all content blocks finished."
+            for (index, block) in openBlocks {
+                switch block {
+                case .text(let textBlock):
+                    if !textBlock.text.isEmpty {
+                        blocks[index] = .text(textBlock.text)
+                    }
+                case .tool:
+                    streamError = "Claude's reply was cut off before the tool result finished. Ask again."
+                }
+            }
         }
 
         let response = ClaudeResponse(

@@ -16,6 +16,7 @@ enum CoachContextBuilder {
 
         let goal = try PlanStore.activeGoal(in: context)?.spec
         let fitness = try PlanStore.currentFitness(in: context, today: today, calendar: calendar)
+        lines += personalSettingsSection()
         lines += goalSection(goal: goal, fitness: fitness, today: today, calendar: calendar)
         lines += try planSection(in: context, today: today, calendar: calendar)
         lines += try activitySection(in: context, today: today, calendar: calendar)
@@ -24,6 +25,12 @@ enum CoachContextBuilder {
 
         let text = lines.joined(separator: "\n")
         return text.count <= maxCharacters ? text : String(text.prefix(maxCharacters))
+    }
+
+    private static func personalSettingsSection() -> [String] {
+        let settings = PersonalCoachSettings.current
+        guard !settings.isEmpty else { return ["Personal coach settings: none set."] }
+        return ["Personal coach settings. Use this stable user profile/preferences on every reply unless the user overrides it in the current message:\n\(settings)"]
     }
 
     private static func goalSection(

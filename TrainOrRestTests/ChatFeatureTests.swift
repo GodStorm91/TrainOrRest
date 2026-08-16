@@ -35,6 +35,31 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertTrue(text.contains("if no day is stated, ask which day to schedule it"))
     }
 
+    func testCoachContextIncludesPersonalSettingsFromUserDefaults() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        UserDefaults.standard.set("37", forKey: PersonalCoachSettings.ageKey)
+        UserDefaults.standard.set("170", forKey: PersonalCoachSettings.heightCmKey)
+        UserDefaults.standard.set("62.5", forKey: PersonalCoachSettings.weightKgKey)
+        UserDefaults.standard.set("Diet: vegetarian\nInjury: recovering from flu", forKey: PersonalCoachSettings.storageKey)
+        defer {
+            UserDefaults.standard.removeObject(forKey: PersonalCoachSettings.ageKey)
+            UserDefaults.standard.removeObject(forKey: PersonalCoachSettings.heightCmKey)
+            UserDefaults.standard.removeObject(forKey: PersonalCoachSettings.weightKgKey)
+            UserDefaults.standard.removeObject(forKey: PersonalCoachSettings.storageKey)
+        }
+
+        let text = try CoachContextBuilder.build(in: context, today: today, calendar: calendar)
+
+        XCTAssertTrue(text.contains("Personal coach settings."))
+        XCTAssertTrue(text.contains("Age: 37 years"))
+        XCTAssertTrue(text.contains("Height: 170 cm"))
+        XCTAssertTrue(text.contains("Weight: 62.5 kg"))
+        XCTAssertTrue(text.contains("Diet: vegetarian"))
+        XCTAssertTrue(text.contains("recovering from flu"))
+    }
+
     func testToolDowngradeAppliesToPersistedPlan() throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -123,6 +148,43 @@ final class ChatFeatureTests: XCTestCase {
         )) { error in
             XCTAssertEqual(error.localizedDescription, "Cannot edit past workouts.")
         }
+    }
+
+    func testPlanAdjustmentCanRestOneDayAndCreateWorkoutOnFreeDay() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedEveryDayPlan(in: context)
+        let freeDay = PlanEngineTestSupport.date(2026, 1, 10, hour: 0)
+        let beforeToday = try plannedWorkouts(on: today, in: context)
+        XCTAssertFalse(beforeToday.isEmpty)
+        XCTAssertTrue(try plannedWorkouts(on: freeDay, in: context).isEmpty)
+
+        let workout = PlanAdjustmentProposal.CreateWorkout(
+            kind: "easy",
+            blocks: [.init(repeatCount: 1, steps: [.init(
+                role: "work",
+                targetType: "distance_km",
+                targetValue: 8,
+                paceZone: "easy"
+            )])]
+        )
+
+        let result = try CoachTools.apply(
+            proposal: PlanAdjustmentProposal(changes: [
+                .init(date: CoachContextBuilder.day(today, calendar: calendar), action: .rest),
+                .init(date: CoachContextBuilder.day(freeDay, calendar: calendar), action: .create, workout: workout)
+            ]),
+            in: context,
+            today: today,
+            calendar: calendar
+        )
+
+        XCTAssertTrue(result.summary.contains("Rested 2026-01-05"))
+        XCTAssertTrue(result.summary.contains("Created easy on 2026-01-10"))
+        XCTAssertTrue(try plannedWorkouts(on: today, in: context).isEmpty)
+        let created = try XCTUnwrap(try plannedWorkouts(on: freeDay, in: context).first)
+        XCTAssertEqual(created.kind, .easy)
+        XCTAssertEqual(created.distanceKm, 8, accuracy: 0.001)
     }
 
     func testChatStoreRunsToolLoopAndPersistsAppliedAdjustment() async throws {
@@ -241,6 +303,20 @@ final class ChatFeatureTests: XCTestCase {
         if case .passthrough = replayed.content[0] {} else { XCTFail("thinking block was dropped") }
     }
 
+    func testTransientConnectionFailureIsNotPersistedAsAssistantMessage() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(error: ClaudeClientError.connectionLost)
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(text: "Create a long run tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
+
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        XCTAssertEqual(messages.map(\.role), [.user])
+        XCTAssertEqual(store.lastError, ClaudeClientError.connectionLost.errorDescription)
+    }
+
     /// A truncated turn may carry a half-written tool input: never execute it.
     func testChatStoreRefusesToApplyTruncatedToolCall() async throws {
         let container = try makeContainer()
@@ -265,7 +341,7 @@ final class ChatFeatureTests: XCTestCase {
         let schema = Schema([
             CompletedActivity.self, DailyWellness.self, SyncState.self,
             Goal.self, TrainingPlan.self, PlannedWorkout.self,
-            DailyReadiness.self, DailyCheckIn.self, PlanSnapshot.self, ChatMessage.self
+            DailyReadiness.self, DailyCheckIn.self, PlanSnapshot.self, ChatThread.self, ChatMessage.self
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: [configuration])
@@ -340,14 +416,17 @@ final class ChatFeatureTests: XCTestCase {
 @MainActor
 private final class MockClaudeClient: ClaudeServicing {
     private var responses: [ClaudeResponse]
+    private let error: Error?
     private(set) var requests: [ClaudeRequest] = []
 
-    init(responses: [ClaudeResponse]) {
+    init(responses: [ClaudeResponse] = [], error: Error? = nil) {
         self.responses = responses
+        self.error = error
     }
 
     func send(_ request: ClaudeRequest, apiKey: String) async throws -> ClaudeResponse {
         requests.append(request)
+        if let error { throw error }
         return responses.removeFirst()
     }
 }

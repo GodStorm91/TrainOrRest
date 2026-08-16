@@ -201,10 +201,7 @@ enum CoachTools {
         for change in proposal.changes { try validateFields(change) }
 
         let creates = proposal.changes.filter { $0.action == .create }
-        if !creates.isEmpty {
-            guard creates.count == proposal.changes.count else {
-                throw ValidationError("Creating a workout cannot be combined with other changes.")
-            }
+        if creates.count == proposal.changes.count {
             return try applyCreates(creates, in: context, today: today, calendar: calendar)
         }
 
@@ -212,14 +209,63 @@ enum CoachTools {
         let baseline = spec
         let fitness = try PlanStore.currentFitness(in: context, today: today, calendar: calendar)
         let paces = fitness.map { VDOTTable.trainingPaces(vdot: $0.vdot) }
+        let dayStart = calendar.startOfDay(for: today)
+        let raceDay = calendar.startOfDay(for: spec.goal.raceDate)
 
         var summaries: [String] = []
-        for change in proposal.changes {
+        var proposedCreateDates: Set<Date> = []
+        var editedDates: Set<Date> = []
+
+        // Apply non-create edits first, so a request like "make today rest and
+        // add an easy run tomorrow" can be represented naturally as one safe
+        // proposal. The final candidate plan is still validated as a whole.
+        for change in proposal.changes where change.action != .create {
             let date = try parseDay(change.date, calendar: calendar)
-            guard date >= calendar.startOfDay(for: today) else {
-                throw ValidationError("Cannot edit past workouts.")
+            guard date >= dayStart else { throw ValidationError("Cannot edit past workouts.") }
+            if !creates.isEmpty {
+                guard change.action == .rest, date == dayStart else {
+                    throw ValidationError("Creating a workout can only be combined with resting today. Submit other plan edits separately.")
+                }
             }
+            editedDates.insert(date)
             summaries.append(try apply(change, date: date, paces: paces, to: &spec, calendar: calendar))
+        }
+
+        for change in proposal.changes where change.action == .create {
+            let date = try parseDay(change.date, calendar: calendar)
+            guard date >= dayStart else { throw ValidationError("Cannot create a workout in the past.") }
+            guard !editedDates.contains(date) else {
+                throw ValidationError("Create the replacement workout on a different date, or ask to replace the workout explicitly.")
+            }
+            guard date != raceDay else { throw ValidationError("Race day cannot hold another workout.") }
+            guard date < raceDay else { throw ValidationError("\(change.date) is after race day.") }
+            guard spec.goal.availableDays.contains(PlanGenerator.weekday(of: date, calendar: calendar)) else {
+                throw ValidationError("\(change.date) is not one of the user's running days.")
+            }
+            guard proposedCreateDates.insert(date).inserted else {
+                throw ValidationError("Two workouts proposed for \(change.date).")
+            }
+            guard locate(date, in: spec) == nil else {
+                throw ValidationError("\(change.date) already has a workout.")
+            }
+            guard let weekIndex = weekIndex(for: date, in: spec, calendar: calendar) else {
+                throw ValidationError("\(change.date) is outside the training plan.")
+            }
+            guard let payload = change.workout else { throw ValidationError("create requires a workout.") }
+            let built = try WorkoutFactory.build(try recipe(from: payload), paces: paces)
+            var week = spec.weeks[weekIndex]
+            week.workouts.append(PlannedWorkoutSpec(
+                date: date,
+                kind: built.kind,
+                distanceKm: built.distanceKm,
+                paceBand: built.paceBand,
+                details: built.details,
+                structure: built.structure
+            ))
+            week.workouts.sort { $0.date < $1.date }
+            week.targetVolumeKm = PlanGenerator.rounded(week.targetVolumeKm + built.distanceKm)
+            spec.weeks[weekIndex] = week
+            summaries.append("Created \(built.kind.rawValue) on \(change.date)")
         }
 
         let peakCap = fitness.map { max($0.weeklyVolumeKm * 1.35, $0.longestRecentRunKm * 2) }

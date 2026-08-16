@@ -14,6 +14,7 @@ enum AnthropicStreamEvent: Equatable {
     case passthroughBlock(index: Int, JSONValue)
     case messageDelta(stopReason: String?)
     case messageStop
+    case ping
     case error(String)
 }
 
@@ -66,6 +67,8 @@ actor CoachStreamAccumulator {
                 return [.messageStopped]
             }
             return [.messageDone(stopReason: stopReason)]
+        case .ping:
+            return []
         case .error(let message):
             return [.messageError(message)]
         }

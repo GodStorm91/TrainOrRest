@@ -3,6 +3,8 @@ import Security
 
 enum KeychainStore {
     static let apiKeyAccount = "anthropic-api-key"
+    static let openAIAPIKeyAccount = "openai-api-key"
+    static let intervalsICUAccount = "intervals-icu-api-key"
 
     enum StoreError: Error {
         case unexpectedStatus(OSStatus)

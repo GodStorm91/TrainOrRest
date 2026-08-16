@@ -207,7 +207,7 @@ final class VerdictBannerLayoutTests: XCTestCase {
         let schema = Schema([
             CompletedActivity.self, DailyWellness.self, SyncState.self, Goal.self,
             TrainingPlan.self, PlannedWorkout.self, DailyReadiness.self, DailyCheckIn.self,
-            RuleOverride.self, PlanSnapshot.self, ChatMessage.self, PlanEdit.self
+            RuleOverride.self, PlanSnapshot.self, ChatThread.self, ChatMessage.self, PlanEdit.self
         ])
         return try ModelContainer(
             for: schema,

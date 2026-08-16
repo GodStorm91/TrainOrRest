@@ -65,7 +65,7 @@ final class ReadinessStoreTests: XCTestCase {
         let schema = Schema([
             CompletedActivity.self, DailyWellness.self, SyncState.self,
             Goal.self, TrainingPlan.self, PlannedWorkout.self,
-            DailyReadiness.self, DailyCheckIn.self, RuleOverride.self, PlanSnapshot.self, ChatMessage.self
+            DailyReadiness.self, DailyCheckIn.self, RuleOverride.self, PlanSnapshot.self, ChatThread.self, ChatMessage.self
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: [configuration])

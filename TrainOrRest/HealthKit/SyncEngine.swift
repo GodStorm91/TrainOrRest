@@ -26,12 +26,19 @@ final class SyncEngine: ObservableObject {
     private let modelContext: ModelContext
     private var resyncRequested = false
     private let calendar: Calendar
+    private let pushService: WorkoutPushService?
     private let logger = Logger(subsystem: "com.khanhnguyen.TrainOrRest", category: "sync")
 
-    init(health: HealthKitService, modelContext: ModelContext, calendar: Calendar = .current) {
+    init(
+        health: HealthKitService,
+        modelContext: ModelContext,
+        calendar: Calendar = .current,
+        pushService: WorkoutPushService? = nil
+    ) {
         self.health = health
         self.modelContext = modelContext
         self.calendar = calendar
+        self.pushService = pushService
     }
 
     /// Registers observer queries so Garmin Connect writes trigger a sync
@@ -80,6 +87,7 @@ final class SyncEngine: ObservableObject {
             } catch {
                 logger.error("Readiness pipeline failed: \(error, privacy: .public)")
             }
+            await pushService?.reconcile()
             logger.info("Sync completed at \(Date.now, privacy: .public)")
         } catch {
             lastError = error.localizedDescription

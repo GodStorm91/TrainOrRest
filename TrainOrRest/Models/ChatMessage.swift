@@ -13,6 +13,7 @@ final class ChatMessage {
     var appliedAdjustment: String?
     var groundingFootnote: String?
     var groundingSummary: String?
+    var threadID: UUID?
 
     init(
         role: ChatRole,
@@ -20,7 +21,8 @@ final class ChatMessage {
         date: Date,
         appliedAdjustment: String? = nil,
         groundingFootnote: String? = nil,
-        groundingSummary: String? = nil
+        groundingSummary: String? = nil,
+        threadID: UUID? = nil
     ) {
         self.roleRaw = role.rawValue
         self.text = text
@@ -28,6 +30,7 @@ final class ChatMessage {
         self.appliedAdjustment = appliedAdjustment
         self.groundingFootnote = groundingFootnote
         self.groundingSummary = groundingSummary
+        self.threadID = threadID
     }
 
     var role: ChatRole {

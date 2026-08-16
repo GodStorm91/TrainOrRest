@@ -132,7 +132,7 @@ final class GroundingSnapshotTests: XCTestCase {
         let schema = Schema([
             CompletedActivity.self, DailyWellness.self, SyncState.self,
             Goal.self, TrainingPlan.self, PlannedWorkout.self,
-            DailyReadiness.self, DailyCheckIn.self, PlanSnapshot.self, ChatMessage.self
+            DailyReadiness.self, DailyCheckIn.self, PlanSnapshot.self, ChatThread.self, ChatMessage.self
         ])
         return try ModelContainer(
             for: schema,
