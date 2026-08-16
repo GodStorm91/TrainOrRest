@@ -12,6 +12,7 @@ struct TrainOrRestApp: App {
     @StateObject private var engine: SyncEngine
     @StateObject private var pushService: WorkoutPushService
     @StateObject private var chatStore: CoachChatStore
+    @StateObject private var chatSession: CoachChatSessionState
     @StateObject private var replacementCoordinator: WorkoutReplacementCoordinator
     @Environment(\.scenePhase) private var scenePhase
 
@@ -31,6 +32,7 @@ struct TrainOrRestApp: App {
         let pushService = WorkoutPushService(modelContext: container.mainContext)
         let replacementCoordinator = WorkoutReplacementCoordinator(container: container)
         let chatStore = CoachChatStore(replacementCoordinator: replacementCoordinator)
+        let chatSession = CoachChatSessionState()
         let engine = SyncEngine(
             health: HealthKitService(),
             modelContext: container.mainContext,
@@ -44,6 +46,7 @@ struct TrainOrRestApp: App {
         _engine = StateObject(wrappedValue: engine)
         _pushService = StateObject(wrappedValue: pushService)
         _chatStore = StateObject(wrappedValue: chatStore)
+        _chatSession = StateObject(wrappedValue: chatSession)
         _replacementCoordinator = StateObject(wrappedValue: replacementCoordinator)
 
         // Background tasks must be registered before launch finishes.
@@ -60,6 +63,7 @@ struct TrainOrRestApp: App {
                 .environmentObject(engine)
                 .environmentObject(pushService)
                 .environmentObject(chatStore)
+                .environmentObject(chatSession)
                 .environmentObject(replacementCoordinator)
         }
         .modelContainer(container)

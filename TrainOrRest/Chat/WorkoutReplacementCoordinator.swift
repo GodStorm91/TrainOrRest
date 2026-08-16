@@ -177,7 +177,7 @@ final class WorkoutReplacementCoordinator: ObservableObject {
         defer { isConfirming = false }
 
         do {
-            let context = ModelContext(container)
+            let context = container.mainContext
             context.autosaveEnabled = false
             try CoachTools.confirmReplacement(
                 replacement,
@@ -201,7 +201,7 @@ final class WorkoutReplacementCoordinator: ObservableObject {
         defer { isConfirming = false }
 
         do {
-            let context = ModelContext(container)
+            let context = container.mainContext
             context.autosaveEnabled = false
             let result = try CoachTools.apply(
                 proposal: pendingProposal.proposal,

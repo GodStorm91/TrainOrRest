@@ -14,6 +14,7 @@ struct ChatView: View {
     @Query(sort: \DailyReadiness.date, order: .reverse) private var readinessDays: [DailyReadiness]
     @Query(sort: \CompletedActivity.date, order: .reverse) private var completedActivities: [CompletedActivity]
     @EnvironmentObject private var chatStore: CoachChatStore
+    @EnvironmentObject private var chatSession: CoachChatSessionState
     @EnvironmentObject private var replacementCoordinator: WorkoutReplacementCoordinator
     @State private var draft = ""
     @State private var hasAPIKey = false
@@ -23,7 +24,6 @@ struct ChatView: View {
     @State private var selectedImage: UIImage?
     @State private var evidenceReview: EvidenceReviewPresentation?
     @State private var isChatListPresented = false
-    @State private var activeThreadID: UUID?
     @AppStorage("coachEvidenceReviewed") private var coachEvidenceReviewed = false
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
 
@@ -39,12 +39,12 @@ struct ChatView: View {
     }
 
     private var messages: [ChatMessage] {
-        guard let activeThreadID else { return [] }
+        guard let activeThreadID = chatSession.activeThreadID else { return [] }
         return allMessages.filter { $0.threadID == activeThreadID }
     }
 
     private var activeThread: ChatThread? {
-        guard let activeThreadID else { return nil }
+        guard let activeThreadID = chatSession.activeThreadID else { return nil }
         return chatThreads.first { $0.uuid == activeThreadID }
     }
 
@@ -117,8 +117,8 @@ struct ChatView: View {
             )
         }
         .sheet(isPresented: $isChatListPresented) {
-            ChatHistorySheet(threads: chatThreads, activeThreadID: activeThreadID) { threadID in
-                activeThreadID = threadID
+            ChatHistorySheet(threads: chatThreads, activeThreadID: chatSession.activeThreadID) { threadID in
+                chatSession.activeThreadID = threadID
                 isChatListPresented = false
             }
             .presentationDetents([.medium, .large])
@@ -314,7 +314,7 @@ struct ChatView: View {
             .onChange(of: chatStore.isSending) {
                 scrollToBottom(proxy, animated: true)
             }
-            .onChange(of: activeThreadID) {
+            .onChange(of: chatSession.activeThreadID) {
                 scrollToBottom(proxy, animated: false)
             }
         }
@@ -518,7 +518,7 @@ struct ChatView: View {
 
     private func performSend(_ pending: PendingCoachSend) {
         let reviewedSnapshot = pending.reviewedSnapshot
-        let threadID = activeThreadID ?? createNewThread()
+        let threadID = chatSession.activeThreadID ?? createNewThread()
         draft = ""
         Task {
             await chatStore.send(
@@ -562,7 +562,7 @@ struct ChatView: View {
     private func createNewThread() -> UUID {
         let thread = ChatThread()
         modelContext.insert(thread)
-        activeThreadID = thread.uuid
+        chatSession.activeThreadID = thread.uuid
         draft = ""
         evidence.workout = nil
         clearImageAttachment()
@@ -571,9 +571,11 @@ struct ChatView: View {
     }
 
     private func createNewThreadForOpeningIfNeeded() {
-        if let activeThreadID,
-           allMessages.contains(where: { $0.threadID == activeThreadID }) == false {
-            return
+        if let activeThreadID = chatSession.activeThreadID {
+            if chatThreads.contains(where: { $0.uuid == activeThreadID }) {
+                return
+            }
+            chatSession.activeThreadID = nil
         }
         createNewThread()
     }
@@ -594,7 +596,7 @@ struct ChatView: View {
     }
 
     private func attachUnthreadedMessagesToActiveThread() {
-        guard let activeThreadID else { return }
+        guard let activeThreadID = chatSession.activeThreadID else { return }
         let unthreaded = allMessages.filter { $0.threadID == nil }
         guard !unthreaded.isEmpty else { return }
         for message in unthreaded {
