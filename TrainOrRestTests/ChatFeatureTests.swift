@@ -33,6 +33,8 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertTrue(text.contains("target time can be context for a training request"))
         XCTAssertTrue(text.contains("not a goal change or race workout"))
         XCTAssertTrue(text.contains("if no day is stated, ask which day to schedule it"))
+        XCTAssertTrue(text.contains("date is the source day that already has the workout"))
+        XCTAssertTrue(text.contains("detail is the target day to move it to"))
     }
 
     func testCoachContextIncludesPersonalSettingsFromUserDefaults() throws {
@@ -131,6 +133,36 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(fridayWorkout.kind, .tempo)
         XCTAssertFalse(wednesdayWorkout.structure.isEmpty)
         XCTAssertFalse(fridayWorkout.structure.isEmpty)
+    }
+
+    func testToolMoveExistingWorkoutToEmptyDateCreatesWorkoutOnTarget() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedEveryDayPlan(in: context)
+        let source = PlanEngineTestSupport.date(2026, 1, 9, hour: 0)
+        let target = PlanEngineTestSupport.date(2026, 1, 10, hour: 0)
+        let sourceWorkout = try XCTUnwrap(try plannedWorkouts(on: source, in: context).first)
+        XCTAssertNil(try plannedWorkouts(on: target, in: context).first)
+
+        let result = try CoachTools.apply(
+            proposal: PlanAdjustmentProposal(changes: [
+                .init(
+                    date: CoachContextBuilder.day(source, calendar: calendar),
+                    action: .move,
+                    detail: CoachContextBuilder.day(target, calendar: calendar)
+                )
+            ]),
+            in: context,
+            today: today,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(result.summary, "Moved 2026-01-09 to 2026-01-10")
+        XCTAssertNil(try plannedWorkouts(on: source, in: context).first)
+        let moved = try XCTUnwrap(try plannedWorkouts(on: target, in: context).first)
+        XCTAssertEqual(moved.kind, sourceWorkout.kind)
+        XCTAssertEqual(moved.distanceKm, sourceWorkout.distanceKm, accuracy: 0.001)
+        XCTAssertTrue(moved.manuallyOverridden)
     }
 
     func testToolRejectsPastWorkoutEdits() throws {
@@ -429,7 +461,8 @@ final class ChatFeatureTests: XCTestCase {
             today: today,
             calendar: calendar
         )) { error in
-            XCTAssertEqual(error.localizedDescription, "No workout on 2026-01-10.")
+            XCTAssertTrue(error.localizedDescription.contains("No workout on 2026-01-10."))
+            XCTAssertTrue(error.localizedDescription.contains("For move, set date to the source day"))
         }
         XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
     }

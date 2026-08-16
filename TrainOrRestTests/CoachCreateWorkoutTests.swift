@@ -140,7 +140,7 @@ final class CoachCreateWorkoutTests: XCTestCase {
             today: today,
             calendar: calendar
         )) { error in
-            XCTAssertTrue(error.localizedDescription.contains("Two workouts scheduled"))
+            XCTAssertTrue(error.localizedDescription.contains("Target date already has a workout"))
         }
     }
 

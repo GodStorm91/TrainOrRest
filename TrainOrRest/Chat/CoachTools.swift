@@ -109,11 +109,11 @@ enum CoachTools {
                 "action": .object([
                     "type": .string("string"),
                     "enum": .array(["swap", "downgrade", "rest", "move", "create"].map(JSONValue.string)),
-                    "description": .string("create adds a new workout; the others edit the workout already on date")
+                    "description": .string("create adds a new workout on a free date; move uses date as the existing source workout day and detail as the empty target day; swap/rest/downgrade edit the workout already on date")
                 ]),
                 "detail": .object([
                     "type": .string("string"),
-                    "description": .string("Target date as YYYY-MM-DD; required for swap and move, forbidden otherwise")
+                    "description": .string("Target date as YYYY-MM-DD; required for swap and move, forbidden otherwise. For move, this is the destination day, not another existing workout.")
                 ]),
                 "workout": workoutSchema
             ]),
@@ -857,7 +857,9 @@ enum CoachTools {
         to spec: inout TrainingPlanSpec,
         calendar: Calendar
     ) throws -> String {
-        guard let location = locate(date, in: spec) else { throw ValidationError("No workout on \(change.date).") }
+        guard let location = locate(date, in: spec) else {
+            throw ValidationError("No workout on \(change.date). For move, set date to the source day that already has the workout and detail to the empty target day. To add a new workout on this date, use create with a workout payload.")
+        }
         let workout = spec.weeks[location.week].workouts[location.workout]
         guard workout.kind != .race else { throw ValidationError("Race day cannot be edited.") }
 
@@ -877,7 +879,23 @@ enum CoachTools {
             return "Downgraded \(change.date) to easy"
         case .move:
             let target = try targetDay(change.detail, calendar: calendar)
-            spec.weeks[location.week].workouts[location.workout].date = target
+            guard locate(target, in: spec) == nil else { throw ValidationError("Target date already has a workout.") }
+            guard let targetWeek = weekIndex(for: target, in: spec, calendar: calendar) else {
+                throw ValidationError("\(CoachContextBuilder.day(target, calendar: calendar)) is outside the training plan.")
+            }
+            var moved = workout
+            spec.weeks[location.week].workouts.remove(at: location.workout)
+            if targetWeek != location.week {
+                spec.weeks[location.week].targetVolumeKm = PlanGenerator.rounded(
+                    spec.weeks[location.week].targetVolumeKm - workout.distanceKm
+                )
+                spec.weeks[targetWeek].targetVolumeKm = PlanGenerator.rounded(
+                    spec.weeks[targetWeek].targetVolumeKm + workout.distanceKm
+                )
+            }
+            moved.date = target
+            spec.weeks[targetWeek].workouts.append(moved)
+            spec.weeks[targetWeek].workouts.sort { $0.date < $1.date }
             return "Moved \(change.date) to \(CoachContextBuilder.day(target, calendar: calendar))"
         case .swap:
             let target = try targetDay(change.detail, calendar: calendar)
