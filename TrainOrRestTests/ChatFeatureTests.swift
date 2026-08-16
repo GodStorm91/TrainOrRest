@@ -227,6 +227,41 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(try plannedWorkouts(on: qualityDay, in: context).first).manuallyOverridden)
     }
 
+    func testChatStoreRejectsICSCalendarDetourAndStagesPlanToolInstead() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [.text("BEGIN:VCALENDAR\nDTSTART:20260107T080000\nSUMMARY:Easy run\nEND:VCALENDAR")], stopReason: "end_turn"),
+            ClaudeResponse(content: [
+                .toolUse(id: "toolu_1", name: CoachTools.toolName, input: .object([
+                    "changes": .array([
+                        .object([
+                            "date": .string(CoachContextBuilder.day(qualityDay, calendar: calendar)),
+                            "action": .string("downgrade")
+                        ])
+                    ])
+                ]))
+            ], stopReason: "tool_use")
+        ])
+        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
+        let store = CoachChatStore(
+            client: client,
+            calendar: calendar,
+            now: { self.today },
+            replacementCoordinator: coordinator
+        )
+
+        await store.send(text: "Update my plan this week.", model: "claude-test", apiKey: "test-key", in: context)
+
+        XCTAssertNotNil(coordinator.pendingProposal)
+        XCTAssertEqual(client.requests.count, 2)
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        XCTAssertFalse(messages.map(\.text).joined(separator: "\n").contains("VCALENDAR"))
+        XCTAssertEqual(messages.map(\.role), [.user, .assistant])
+        XCTAssertTrue(messages.last?.text.contains("I prepared this calendar update") == true)
+    }
+
     func testChatStoreSendsAttachedContextAndImage() async throws {
         let container = try makeContainer()
         let context = container.mainContext

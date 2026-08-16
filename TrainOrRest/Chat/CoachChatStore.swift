@@ -243,6 +243,18 @@ final class CoachChatStore: ObservableObject {
             }
             if toolUses.isEmpty {
                 let text = response.content.textContent
+                if Self.containsCalendarImportDetour(text) {
+                    if let streamingMessage {
+                        context.delete(streamingMessage)
+                        try context.save()
+                    }
+                    lastToolRejection = Self.calendarImportDetourMessage
+                    conversation.append(ClaudeMessageParam(
+                        role: "user",
+                        content: [.text("Rejected: \(Self.calendarImportDetourMessage) Call \(CoachTools.toolName) with the concrete calendar changes instead.")]
+                    ))
+                    continue
+                }
                 if let streamingMessage {
                     streamingMessage.text = text.isEmpty ? "I could not produce a response." : text
                     streamingMessage.appliedAdjustment = applied.isEmpty ? nil : applied.joined(separator: "; ")
@@ -342,6 +354,26 @@ final class CoachChatStore: ObservableObject {
             ))
         }
         try context.save()
+    }
+
+    private static let calendarImportDetourMessage = "Training schedule changes must update TrainOrRest Calendar through the plan tool, then sync intervals.icu from the app. Do not provide ICS/iCalendar/import instructions."
+
+    private static func containsCalendarImportDetour(_ text: String) -> Bool {
+        let lowercased = text.lowercased()
+        let needles = [
+            "begin:vcalendar",
+            "end:vcalendar",
+            "dtstart",
+            "dtend",
+            "vevent",
+            ".ics",
+            "icalendar",
+            "google calendar",
+            "import calendar",
+            "calendar import",
+            "import ics"
+        ]
+        return needles.contains { lowercased.contains($0) }
     }
 
     private func shouldPersistFailure(_ error: Error) -> Bool {

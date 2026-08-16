@@ -76,8 +76,10 @@ enum CoachTools {
             name: toolName,
             description: """
             Propose safe edits to the user's planned workouts, or create a new structured workout \
-            on a free training day. The app validates every proposal (dates, collisions, volume, \
-            intensity spacing) and resolves all paces itself before applying it.
+            on a free training day. This is the only supported way for the coach to change the \
+            app Calendar and downstream intervals.icu workouts. Do not output ICS/iCalendar files \
+            or calendar import instructions. The app validates every proposal (dates, collisions, \
+            volume, intensity spacing) and resolves all paces itself before applying it.
             """,
             inputSchema: .object([
                 "type": .string("object"),
