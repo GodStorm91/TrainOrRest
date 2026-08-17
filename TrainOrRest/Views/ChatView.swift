@@ -907,7 +907,8 @@ struct ChatView: View {
         return CIContext().jpegRepresentation(of: image, colorSpace: CGColorSpaceCreateDeviceRGB(), options: options)
     }
 
-    private func clearImageAttachment() {        selectedPhotoItem = nil
+    private func clearImageAttachment() {
+        selectedPhotoItem = nil
         selectedImageAttachment = nil
         selectedImage = nil
         evidence.hasPhoto = false
@@ -1026,28 +1027,68 @@ private struct ChatHistorySheet: View {
     @State private var threadBeingRenamed: ChatThread?
     @State private var renameDraft = ""
 
+    private var visibleThreads: [ChatThread] {
+        threads
+            .filter { $0.archivedAt == nil }
+            .sorted { lhs, rhs in
+                switch (lhs.pinnedAt, rhs.pinnedAt) {
+                case let (l?, r?): return l > r
+                case (.some, .none): return true
+                case (.none, .some): return false
+                case (.none, .none): return lhs.updatedAt > rhs.updatedAt
+                }
+            }
+    }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    if threads.isEmpty {
-                        ContentUnavailableView(
-                            "No chats yet",
-                            systemImage: "message",
-                            description: Text("Your coach conversations will show up here.")
-                        )
-                        .foregroundStyle(Theme.text, Theme.dim)
-                        .frame(maxWidth: .infinity, minHeight: 220)
-                    } else {
-                        ForEach(threads) { thread in
-                            chatRow(thread)
-                        }
+            List {
+                if visibleThreads.isEmpty {
+                    ContentUnavailableView(
+                        "Chưa có chat",
+                        systemImage: "message",
+                        description: Text("Các cuộc trò chuyện với Coach sẽ hiện ở đây.")
+                    )
+                    .foregroundStyle(Theme.text, Theme.dim)
+                    .frame(maxWidth: .infinity, minHeight: 220)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                } else {
+                    ForEach(visibleThreads) { thread in
+                        chatRow(thread)
+                            .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    archive(thread)
+                                } label: {
+                                    Label("Archive", systemImage: "archivebox")
+                                }
+                                .tint(Theme.warn)
+                            }
+                            .contextMenu {
+                                Button {
+                                    togglePin(thread)
+                                } label: {
+                                    Label(thread.pinnedAt == nil ? "Ghim chat" : "Bỏ ghim", systemImage: thread.pinnedAt == nil ? "pin" : "pin.slash")
+                                }
+                                Button {
+                                    beginRename(thread)
+                                } label: {
+                                    Label("Đổi tên", systemImage: "pencil")
+                                }
+                                Button(role: .destructive) {
+                                    archive(thread)
+                                } label: {
+                                    Label("Lưu trữ", systemImage: "archivebox")
+                                }
+                            }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 28)
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Chats")
             .toolbar {
@@ -1056,12 +1097,12 @@ private struct ChatHistorySheet: View {
                         .font(.body.weight(.semibold))
                 }
             }
-            .alert("Rename chat", isPresented: renameAlertBinding) {
-                TextField("Chat name", text: $renameDraft)
-                Button("Cancel", role: .cancel) { clearRenameDraft() }
-                Button("Save") { saveRename() }
+            .alert("Đổi tên chat", isPresented: renameAlertBinding) {
+                TextField("Tên chat", text: $renameDraft)
+                Button("Hủy", role: .cancel) { clearRenameDraft() }
+                Button("Lưu") { saveRename() }
             } message: {
-                Text("Give this coach thread a name you'll recognize later.")
+                Text("Đặt tên để nhận ra cuộc trò chuyện này sau.")
             }
         }
         .presentationBackground(Theme.bg)
@@ -1082,10 +1123,18 @@ private struct ChatHistorySheet: View {
                         .background(Theme.accent.opacity(0.12), in: Circle())
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(title(for: thread))
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(Theme.text)
-                            .lineLimit(1)
+                        HStack(spacing: 5) {
+                            if thread.pinnedAt != nil {
+                                Image(systemName: "pin.fill")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(Theme.accent)
+                                    .accessibilityLabel("Đã ghim")
+                            }
+                            Text(title(for: thread))
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(Theme.text)
+                                .lineLimit(1)
+                        }
                         Text(relativeDate(for: thread.updatedAt))
                             .font(.caption)
                             .foregroundStyle(Theme.dim)
@@ -1108,9 +1157,19 @@ private struct ChatHistorySheet: View {
 
             Menu {
                 Button {
+                    togglePin(thread)
+                } label: {
+                    Label(thread.pinnedAt == nil ? "Ghim chat" : "Bỏ ghim", systemImage: thread.pinnedAt == nil ? "pin" : "pin.slash")
+                }
+                Button {
                     beginRename(thread)
                 } label: {
-                    Label("Rename", systemImage: "pencil")
+                    Label("Đổi tên", systemImage: "pencil")
+                }
+                Button(role: .destructive) {
+                    archive(thread)
+                } label: {
+                    Label("Lưu trữ", systemImage: "archivebox")
                 }
             } label: {
                 Image(systemName: "ellipsis")
@@ -1119,14 +1178,14 @@ private struct ChatHistorySheet: View {
                     .frame(width: 36, height: 36)
                     .background(Theme.chip, in: Circle())
             }
-            .accessibilityLabel("Chat options")
+            .accessibilityLabel("Tùy chọn chat")
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Theme.border, lineWidth: 1)
+                .strokeBorder(thread.pinnedAt == nil ? Theme.border : Theme.accent.opacity(0.28), lineWidth: 1)
         )
         .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
@@ -1138,6 +1197,20 @@ private struct ChatHistorySheet: View {
                 if !isPresented { clearRenameDraft() }
             }
         )
+    }
+
+    private func togglePin(_ thread: ChatThread) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        thread.pinnedAt = thread.pinnedAt == nil ? .now : nil
+        thread.updatedAt = .now
+        try? modelContext.save()
+    }
+
+    private func archive(_ thread: ChatThread) {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        thread.archivedAt = .now
+        thread.pinnedAt = nil
+        try? modelContext.save()
     }
 
     private func beginRename(_ thread: ChatThread) {
