@@ -13,9 +13,9 @@ final class CompletedActivity {
     var maxHeartRate: Double?
     var avgPaceSecondsPerKm: Double?
     var sourceName: String
-    /// User's subjective post-run note. Data tells one half of the story;
-    /// motivation, effort and weird-leg vibes live here.
-    var reviewNote: String
+    /// User's subjective post-run note. Optional so existing SwiftData stores
+    /// can lightweight-migrate after this field is added.
+    var reviewNote: String?
     /// Once set, Today stops auto-presenting the post-run review sheet for
     /// this activity. The detail screen can still show the review anytime.
     var postRunReviewDismissedAt: Date?
@@ -38,7 +38,7 @@ final class CompletedActivity {
         self.maxHeartRate = maxHeartRate
         self.avgPaceSecondsPerKm = avgPaceSecondsPerKm
         self.sourceName = sourceName
-        self.reviewNote = ""
+        self.reviewNote = nil
         self.postRunReviewDismissedAt = nil
     }
 }

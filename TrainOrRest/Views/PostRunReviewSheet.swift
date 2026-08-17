@@ -145,7 +145,7 @@ struct PostRunReviewSheet: View {
                     .foregroundStyle(Theme.faint)
             }
 
-            TextEditor(text: $activity.reviewNote)
+            TextEditor(text: reviewNoteBinding)
                 .font(.system(size: 15, weight: .regular))
                 .foregroundStyle(Theme.text)
                 .frame(minHeight: 118)
@@ -153,7 +153,7 @@ struct PostRunReviewSheet: View {
                 .scrollContentBackground(.hidden)
                 .background(Theme.card2, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(alignment: .topLeading) {
-                    if activity.reviewNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    if (activity.reviewNote ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Text("How did it feel? Share what the data can't, like motivation, fueling, or how hard it felt.")
                             .font(.system(size: 15))
                             .foregroundStyle(Theme.faint)
@@ -164,6 +164,13 @@ struct PostRunReviewSheet: View {
                 }
                 .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
         }
+    }
+
+    private var reviewNoteBinding: Binding<String> {
+        Binding(
+            get: { activity.reviewNote ?? "" },
+            set: { newValue in activity.reviewNote = newValue.isEmpty ? nil : newValue }
+        )
     }
 
     private func close() {
