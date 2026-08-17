@@ -486,7 +486,7 @@ struct ChatView: View {
         }
         .padding(.horizontal, 14)
         .padding(.top, 8)
-        .padding(.bottom, (isSoftwareKeyboardVisible ? softwareKeyboardHeight + 6 : (bottomNavigation.map { _ in 4 } ?? 8)))
+        .padding(.bottom, isSoftwareKeyboardVisible ? 6 : (bottomNavigation.map { _ in 4 } ?? 8))
         .background(.clear)
         .animation(.easeOut(duration: 0.2), value: replacementCoordinator.pending)
         .animation(.easeOut(duration: 0.2), value: replacementCoordinator.pendingProposal)

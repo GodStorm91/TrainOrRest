@@ -120,6 +120,9 @@ struct PlanCalendarView: View {
             .contentShape(Rectangle())
             .onTapGesture {
                 withAnimation(.easeOut(duration: 0.15)) { mode = option }
+                if option == .week {
+                    weekScrollToken += 1
+                }
             }
     }
 

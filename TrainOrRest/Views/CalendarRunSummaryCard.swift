@@ -64,14 +64,19 @@ struct CalendarRunSummaryCard: View {
                 Spacer(minLength: 4)
                 if let onReview {
                     Button(action: onReview) {
-                        Label("Review", systemImage: "message.badge")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 10)
-                            .background(Color.black, in: Capsule())
+                        HStack(spacing: 5) {
+                            Image(systemName: "message.badge")
+                            Text("Review")
+                        }
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                        .frame(width: compact ? 78 : 92, height: 42)
+                        .background(Color.black, in: Capsule())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Review run")
                 }
             }
         }

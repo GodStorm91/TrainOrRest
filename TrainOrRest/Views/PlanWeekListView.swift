@@ -37,16 +37,28 @@ struct PlanWeekListView: View {
             }
             .scrollIndicators(.hidden)
             .background(Theme.bg)
-            .onAppear { expandedWeekStarts.insert(todayWeekStart) }
+            .onAppear {
+                expandedWeekStarts.insert(todayWeekStart)
+                scrollToToday(proxy, animated: false)
+            }
             .onChange(of: scrollToTodayToken) {
                 expandedWeekStarts.insert(todayWeekStart)
-                guard weekStarts.contains(todayWeekStart) else { return }
-                withAnimation(.easeOut(duration: 0.2)) {
-                    proxy.scrollTo(todayWeekStart, anchor: .top)
-                }
+                scrollToToday(proxy, animated: true)
             }
             .sheet(item: $reviewActivity) { activity in
                 PostRunReviewSheet(activity: activity, plannedWorkout: matchedWorkout(for: activity))
+            }
+        }
+    }
+
+    private func scrollToToday(_ proxy: ScrollViewProxy, animated: Bool) {
+        guard weekStarts.contains(todayWeekStart) else { return }
+        DispatchQueue.main.async {
+            let action = { proxy.scrollTo(todayWeekStart, anchor: .top) }
+            if animated {
+                withAnimation(.easeOut(duration: 0.2)) { action() }
+            } else {
+                action()
             }
         }
     }
