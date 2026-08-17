@@ -287,18 +287,18 @@ struct ChatView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
                 ZStack {
-                    Circle().fill(Theme.good.opacity(0.16))
-                    Circle().strokeBorder(Theme.good.opacity(0.28), lineWidth: 1)
-                    Circle().fill(Theme.good).frame(width: 9, height: 9)
+                    Circle().fill(todayReadinessTint.opacity(0.16))
+                    Circle().strokeBorder(todayReadinessTint.opacity(0.28), lineWidth: 1)
+                    Circle().fill(todayReadinessTint).frame(width: 9, height: 9)
                 }
                 .frame(width: 30, height: 30)
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Hôm nay: Sẵn sàng tập luyện")
+                    Text(todayReadinessTitle)
                         .font(.system(size: 21, weight: .semibold, design: .rounded))
                         .foregroundStyle(Theme.text)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("Phục hồi tốt · Chưa có dấu hiệu quá tải")
+                    Text(todayReadinessSubtitle)
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Theme.dim)
                 }
@@ -308,12 +308,12 @@ struct ChatView: View {
             Divider().overlay(Theme.border)
 
             HStack(spacing: 10) {
-                Image(systemName: "figure.run")
+                Image(systemName: todayWorkout?.kind?.symbolName ?? "figure.run")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.good)
                     .frame(width: 24, height: 24)
                     .background(Theme.good.opacity(0.12), in: Circle())
-                Text("Bài dự kiến: Tempo 8 km")
+                Text(todayPlannedWorkoutText)
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(Theme.text)
                 Spacer()
@@ -686,6 +686,50 @@ struct ChatView: View {
 
     private var todayReadiness: DailyReadiness? {
         readinessDays.first { calendar.isDateInToday($0.date) }
+    }
+
+    private var todayWorkout: PlannedWorkout? {
+        plannedWorkouts
+            .filter { calendar.isDateInToday($0.date) && $0.status == .planned }
+            .sorted { $0.date < $1.date }
+            .first
+    }
+
+    private var todayReadinessTint: Color {
+        todayReadiness?.verdict.torColor ?? Theme.dim
+    }
+
+    private var todayReadinessTitle: String {
+        guard let verdict = todayReadiness?.verdict else { return "Hôm nay: Đang cập nhật" }
+        switch verdict {
+        case .train: return "Hôm nay: Sẵn sàng tập luyện"
+        case .goEasy: return "Hôm nay: Nên tập nhẹ"
+        case .rest: return "Hôm nay: Ưu tiên phục hồi"
+        case .insufficientData: return "Hôm nay: Đang xây baseline"
+        }
+    }
+
+    private var todayReadinessSubtitle: String {
+        guard let readiness = todayReadiness else { return "Chưa có verdict mới nhất từ dữ liệu sức khỏe." }
+        if readiness.reasons.isEmpty {
+            return readiness.verdict == .train ? "Phục hồi tốt · Chưa có dấu hiệu quá tải" : readiness.verdict.torSubtitle
+        }
+        return Array(readiness.reasons.prefix(2)).joined(separator: " · ")
+    }
+
+    private var todayPlannedWorkoutText: String {
+        guard let workout = todayWorkout else { return "Không có bài dự kiến hôm nay" }
+        var parts: [String] = []
+        parts.append(workout.kind?.displayName ?? "Run")
+        parts.append(kmText(workout.distanceKm))
+        if let band = workout.paceBand {
+            parts.append(Formatters.paceBand(band).replacingOccurrences(of: " /km", with: "/km"))
+        }
+        return "Bài dự kiến: " + parts.joined(separator: " · ")
+    }
+
+    private func kmText(_ km: Double) -> String {
+        abs(km.rounded() - km) < 0.05 ? "\(Int(km.rounded())) km" : String(format: "%.1f km", km)
     }
 
     /// A run counts as "recent" when it finished within the last two days.
