@@ -50,6 +50,9 @@ struct ProfileView: View {
             .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 24)
         }
         .background(Theme.bg)
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 82)
+        }
         .scrollIndicators(.hidden)
         .sheet(isPresented: $showGoalEntry) { GoalEntryView() }
         .task { intervalsAPIKey = (try? KeychainStore.load(account: KeychainStore.intervalsICUAccount)) ?? "" }
