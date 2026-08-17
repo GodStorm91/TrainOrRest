@@ -313,6 +313,10 @@ final class ChatFeatureTests: XCTestCase {
             in: context
         )
 
+        let storedMessages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        XCTAssertEqual(storedMessages.first?.text, "Review this workout.")
+        XCTAssertFalse(storedMessages.first?.text.contains("Attached:") == true)
+
         let content = try XCTUnwrap(client.requests.first?.messages.last?.content)
         XCTAssertTrue(content.textContent.contains("Attached context:"))
         XCTAssertTrue(content.textContent.contains("Health snapshot:"))

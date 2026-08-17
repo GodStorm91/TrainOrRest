@@ -75,7 +75,7 @@ struct ChatBubble: View {
         .contextMenu {
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                UIPasteboard.general.string = message.text
+                UIPasteboard.general.string = displayText
             } label: {
                 Label("Sao chép", systemImage: "doc.on.doc")
             }
@@ -99,6 +99,13 @@ struct ChatBubble: View {
         }
     }
 
+    private var displayText: String {
+        if isUser {
+            return message.text.components(separatedBy: "\n\nAttached:").first ?? message.text
+        }
+        return message.text
+    }
+
     private var bubbleShape: UnevenRoundedRectangle {
         UnevenRoundedRectangle(
             cornerRadii: isUser
@@ -111,9 +118,9 @@ struct ChatBubble: View {
     @ViewBuilder
     private var messageBody: some View {
         if isUser {
-            MarkdownMessageView(text: message.text, tone: .onAccent, allowsRuleTokens: false)
+            MarkdownMessageView(text: displayText, tone: .onAccent, allowsRuleTokens: false)
         } else {
-            MarkdownMessageView(text: message.text, tone: .standard, allowsRuleTokens: true)
+            MarkdownMessageView(text: displayText, tone: .standard, allowsRuleTokens: true)
                 .textSelection(.enabled)
         }
     }

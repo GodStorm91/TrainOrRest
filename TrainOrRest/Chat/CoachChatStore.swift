@@ -90,13 +90,7 @@ final class CoachChatStore: ObservableObject {
         lastError = nil
         context.insert(ChatMessage(
             role: .user,
-            text: CoachAttachmentContextBuilder.displayText(
-                text: trimmed,
-                attachments: attachments,
-                in: context,
-                today: today,
-                calendar: calendar
-            ),
+            text: trimmed,
             date: .now,
             threadID: threadID
         ))
@@ -361,7 +355,7 @@ final class CoachChatStore: ObservableObject {
             ))
         } else if let lastToolRejection {
             context.insert(assistantMessage(
-                text: "I could not safely apply that plan change. Last validation error: \(lastToolRejection)",
+                text: Self.userFacingPlanToolRejection(lastToolRejection),
                 groundingSnapshot: groundingSnapshot,
                 threadID: threadID
             ))
@@ -373,6 +367,20 @@ final class CoachChatStore: ObservableObject {
             ))
         }
         try context.save()
+    }
+
+    private static func userFacingPlanToolRejection(_ raw: String) -> String {
+        let lower = raw.lowercased()
+        if lower.contains("swap does not take a workout") || lower.contains("missing workout") || lower.contains("workout") {
+            return "Coach chưa đọc được buổi chạy cần thay đổi. Anh thử nói rõ ngày, loại buổi và mục tiêu mới, hoặc để em tạo đề xuất từ kế hoạch hiện tại."
+        }
+        if lower.contains("volume") || lower.contains("load") || lower.contains("ramp") || lower.contains("safe") {
+            return "Thay đổi này có thể làm tải tập tăng quá nhanh, nên em chưa áp dụng vào lịch. Anh có thể giảm quãng đường/cường độ rồi thử lại."
+        }
+        if lower.contains("stale") || lower.contains("changed") || lower.contains("current") {
+            return "Kế hoạch đã thay đổi so với lúc Coach tạo đề xuất. Anh mở lại lịch hiện tại rồi gửi yêu cầu mới nhé."
+        }
+        return "Em chưa thể áp dụng thay đổi này vào lịch. Anh thử yêu cầu một thay đổi cụ thể hơn, ví dụ ngày nào, đổi sang buổi gì, quãng đường bao nhiêu."
     }
 
     private static let calendarImportDetourMessage = "Training schedule changes must update TrainOrRest Calendar through the plan tool, then sync intervals.icu from the app. Do not provide ICS/iCalendar/import instructions."
