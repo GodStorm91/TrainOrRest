@@ -18,6 +18,7 @@ struct TodayView: View {
 
     @State private var showGoalEntry = false
     @State private var checkInSaveFailed = false
+    @State private var postRunReviewActivityID: UUID?
     private let calendar = Calendar.current
 
     var body: some View {
@@ -47,7 +48,16 @@ struct TodayView: View {
             .scrollIndicators(.hidden)
             .refreshable { await engine.syncAll() }
             .navigationBarHidden(true)
+            .task { presentLatestRunReviewIfNeeded() }
+            .onChange(of: completedActivities.map(\.hkUUID)) { _, _ in
+                presentLatestRunReviewIfNeeded()
+            }
             .sheet(isPresented: $showGoalEntry) { GoalEntryView() }
+            .sheet(isPresented: postRunReviewBinding) {
+                if let activity = postRunReviewActivity {
+                    PostRunReviewSheet(activity: activity, plannedWorkout: matchedWorkout(for: activity))
+                }
+            }
         }
     }
 
@@ -160,6 +170,32 @@ struct TodayView: View {
 
     private var latestTodayActivity: CompletedActivity? {
         completedActivities.first { calendar.isDate($0.date, inSameDayAs: .now) }
+    }
+
+    private var postRunReviewActivity: CompletedActivity? {
+        guard let postRunReviewActivityID else { return nil }
+        return completedActivities.first { $0.hkUUID == postRunReviewActivityID }
+    }
+
+    private var postRunReviewBinding: Binding<Bool> {
+        Binding(
+            get: { postRunReviewActivity != nil },
+            set: { isPresented in
+                if !isPresented {
+                    postRunReviewActivity?.postRunReviewDismissedAt = .now
+                    try? modelContext.save()
+                    postRunReviewActivityID = nil
+                }
+            }
+        )
+    }
+
+    private func presentLatestRunReviewIfNeeded() {
+        guard postRunReviewActivityID == nil,
+              let activity = completedActivities.first(where: {
+                  calendar.isDate($0.date, inSameDayAs: .now) && $0.postRunReviewDismissedAt == nil
+              }) else { return }
+        postRunReviewActivityID = activity.hkUUID
     }
 
     private func matchedWorkout(for activity: CompletedActivity) -> PlannedWorkout? {
