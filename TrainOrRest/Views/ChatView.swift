@@ -858,9 +858,19 @@ struct ChatView: View {
             return
         }
 
-        let threadID = createNewThread(title: reviewThreadTitle(for: activity))
+        let threadID: UUID
+        if let existingThread = existingReviewThread(for: activity) {
+            existingThread.reviewActivityUUID = activity.hkUUID
+            existingThread.archivedAt = nil
+            existingThread.updatedAt = .now
+            try? modelContext.save()
+            threadID = existingThread.uuid
+            draft = messages(in: existingThread.uuid).isEmpty ? request.prompt : ""
+        } else {
+            threadID = createNewThread(title: reviewThreadTitle(for: activity), reviewActivityUUID: activity.hkUUID)
+            draft = request.prompt
+        }
         evidence = EvidenceSelection(readinessSnapshot: true, weekPlan: true, workout: .completed(activity.hkUUID), hasPhoto: false)
-        draft = request.prompt
         chatSession.activeThreadID = threadID
         composerFocused = true
         onReviewRequestConsumed(request)
@@ -872,9 +882,24 @@ struct ChatView: View {
         return "Review \(distance) run · \(date)"
     }
 
+    private func existingReviewThread(for activity: CompletedActivity) -> ChatThread? {
+        if let exact = chatThreads.first(where: { $0.reviewActivityUUID == activity.hkUUID }) {
+            return exact
+        }
+        let title = reviewThreadTitle(for: activity)
+        return chatThreads
+            .filter { $0.reviewActivityUUID == nil && $0.title == title }
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .first
+    }
+
+    private func messages(in threadID: UUID) -> [ChatMessage] {
+        allMessages.filter { $0.threadID == threadID }.sorted { $0.date < $1.date }
+    }
+
     @discardableResult
-    private func createNewThread(title: String = "New chat") -> UUID {
-        let thread = ChatThread(title: title)
+    private func createNewThread(title: String = "New chat", reviewActivityUUID: UUID? = nil) -> UUID {
+        let thread = ChatThread(title: title, reviewActivityUUID: reviewActivityUUID)
         modelContext.insert(thread)
         chatSession.activeThreadID = thread.uuid
         draft = ""

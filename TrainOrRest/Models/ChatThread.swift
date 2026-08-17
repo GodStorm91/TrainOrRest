@@ -9,6 +9,9 @@ final class ChatThread {
     var updatedAt: Date
     var pinnedAt: Date?
     var archivedAt: Date?
+    /// CompletedActivity.hkUUID for Calendar-created review threads. Optional so
+    /// existing SwiftData stores migrate lightly and normal chats stay generic.
+    var reviewActivityUUID: UUID?
 
     init(
         uuid: UUID = UUID(),
@@ -16,7 +19,8 @@ final class ChatThread {
         createdAt: Date = .now,
         updatedAt: Date = .now,
         pinnedAt: Date? = nil,
-        archivedAt: Date? = nil
+        archivedAt: Date? = nil,
+        reviewActivityUUID: UUID? = nil
     ) {
         self.uuid = uuid
         self.title = title
@@ -24,5 +28,6 @@ final class ChatThread {
         self.updatedAt = updatedAt
         self.pinnedAt = pinnedAt
         self.archivedAt = archivedAt
+        self.reviewActivityUUID = reviewActivityUUID
     }
 }
