@@ -6,14 +6,13 @@ import SwiftUI
 struct PlanWeekListView: View {
     /// Bumping this value scrolls the list to the current week.
     var scrollToTodayToken: Int
+    var onReviewRunInChat: (CompletedActivity) -> Void = { _ in }
 
     @Query(sort: \PlannedWorkout.date) private var workouts: [PlannedWorkout]
     @Query(sort: \CompletedActivity.date, order: .reverse) private var completedActivities: [CompletedActivity]
     @Query private var plans: [TrainingPlan]
 
     @State private var expandedWeekStarts: Set<Date> = []
-    @State private var reviewActivity: CompletedActivity?
-
     private var calendar: Calendar { .current }
 
     var body: some View {
@@ -44,9 +43,6 @@ struct PlanWeekListView: View {
             .onChange(of: scrollToTodayToken) {
                 expandedWeekStarts.insert(todayWeekStart)
                 scrollToToday(proxy, animated: true)
-            }
-            .sheet(item: $reviewActivity) { activity in
-                PostRunReviewSheet(activity: activity, plannedWorkout: matchedWorkout(for: activity))
             }
         }
     }
@@ -109,7 +105,7 @@ struct PlanWeekListView: View {
                         activity: activity,
                         plannedWorkout: matchedWorkout(for: activity) ?? workouts(on: date).first,
                         compact: true,
-                        onReview: { reviewActivity = activity }
+                        onReview: { onReviewRunInChat(activity) }
                     )
                 } else if let workout = workouts(on: date).first {
                     NavigationLink {

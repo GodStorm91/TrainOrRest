@@ -7,6 +7,7 @@ struct RootTabView: View {
 
     @State private var selection: Tab = .chat
     @State private var isKeyboardVisible = false
+    @State private var pendingReviewChatRequest: CalendarReviewChatRequest?
     @Namespace private var dockNamespace
 
     var body: some View {
@@ -41,16 +42,29 @@ struct RootTabView: View {
     private var activeScreen: some View {
         switch selection {
         case .calendar:
-            NavigationStack { PlanCalendarView() }
+            NavigationStack {
+                PlanCalendarView { activity in
+                    pendingReviewChatRequest = CalendarReviewChatRequest(activityUUID: activity.hkUUID)
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                        selection = .chat
+                    }
+                }
+            }
         case .chat:
             NavigationStack {
                 ChatView(
                     bottomNavigation: AnyView(
                         TorTabDock(selection: $selection, namespace: dockNamespace)
                     ),
+                    reviewRequest: pendingReviewChatRequest,
                     onOpenCalendar: { _ in
                         withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
                             selection = .calendar
+                        }
+                    },
+                    onReviewRequestConsumed: { request in
+                        if pendingReviewChatRequest?.id == request.id {
+                            pendingReviewChatRequest = nil
                         }
                     }
                 )

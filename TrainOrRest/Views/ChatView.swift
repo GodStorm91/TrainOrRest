@@ -7,7 +7,9 @@ import UIKit
 
 struct ChatView: View {
     private let bottomNavigation: AnyView?
+    private let reviewRequest: CalendarReviewChatRequest?
     private let onOpenCalendar: (Date?) -> Void
+    private let onReviewRequestConsumed: (CalendarReviewChatRequest) -> Void
 
     @AppStorage("coachModel") private var model = CoachChatConfig.defaultModel
     @Environment(\.modelContext) private var modelContext
@@ -32,6 +34,7 @@ struct ChatView: View {
     @State private var isHeaderCollapsed = false
     @State private var softwareKeyboardHeight: CGFloat = 0
     @State private var planTransaction: ChatPlanTransaction?
+    @State private var lastConsumedReviewRequestID: UUID?
     @FocusState private var composerFocused: Bool
     @AppStorage("coachEvidenceReviewed") private var coachEvidenceReviewed = false
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
@@ -39,9 +42,16 @@ struct ChatView: View {
     private let calendar = Calendar.current
     private let bottomAnchorID = "chat-feed-bottom-anchor"
 
-    init(bottomNavigation: AnyView? = nil, onOpenCalendar: @escaping (Date?) -> Void = { _ in }) {
+    init(
+        bottomNavigation: AnyView? = nil,
+        reviewRequest: CalendarReviewChatRequest? = nil,
+        onOpenCalendar: @escaping (Date?) -> Void = { _ in },
+        onReviewRequestConsumed: @escaping (CalendarReviewChatRequest) -> Void = { _ in }
+    ) {
         self.bottomNavigation = bottomNavigation
+        self.reviewRequest = reviewRequest
         self.onOpenCalendar = onOpenCalendar
+        self.onReviewRequestConsumed = onReviewRequestConsumed
     }
 
     private var language: CoachLanguage {
@@ -91,20 +101,29 @@ struct ChatView: View {
             chatStore.lastError = nil
             migrateLegacyMessagesIfNeeded()
             removePersistedTransientErrorMessages()
-            createNewThreadForOpeningIfNeeded()
+            if reviewRequest == nil {
+                createNewThreadForOpeningIfNeeded()
+            }
+            consumeReviewRequestIfNeeded()
         }
         .onAppear {
             refreshKeyState()
             chatStore.lastError = nil
             migrateLegacyMessagesIfNeeded()
             removePersistedTransientErrorMessages()
-            createNewThreadForOpeningIfNeeded()
+            if reviewRequest == nil {
+                createNewThreadForOpeningIfNeeded()
+            }
+            consumeReviewRequestIfNeeded()
         }
         .onChange(of: allMessages.count) {
             attachUnthreadedMessagesToActiveThread()
         }
         .onChange(of: selectedPhotoItem) { _, item in
             loadImageAttachment(from: item)
+        }
+        .onChange(of: reviewRequest?.id) { _, _ in
+            consumeReviewRequestIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
             updateKeyboardHeight(from: notification)
@@ -786,9 +805,32 @@ struct ChatView: View {
         }
     }
 
+    private func consumeReviewRequestIfNeeded() {
+        guard let request = reviewRequest, lastConsumedReviewRequestID != request.id else { return }
+        lastConsumedReviewRequestID = request.id
+        guard let activity = completedActivities.first(where: { $0.hkUUID == request.activityUUID }) else {
+            chatStore.lastError = "Không tìm thấy buổi chạy để review. Thử đồng bộ lại Health rồi mở lại Calendar."
+            onReviewRequestConsumed(request)
+            return
+        }
+
+        let threadID = createNewThread(title: reviewThreadTitle(for: activity))
+        evidence = EvidenceSelection(readinessSnapshot: true, weekPlan: true, workout: .completed(activity.hkUUID), hasPhoto: false)
+        draft = request.prompt
+        chatSession.activeThreadID = threadID
+        composerFocused = true
+        onReviewRequestConsumed(request)
+    }
+
+    private func reviewThreadTitle(for activity: CompletedActivity) -> String {
+        let distance = Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " ", with: "")
+        let date = activity.date.formatted(.dateTime.month(.abbreviated).day())
+        return "Review \(distance) run · \(date)"
+    }
+
     @discardableResult
-    private func createNewThread() -> UUID {
-        let thread = ChatThread()
+    private func createNewThread(title: String = "New chat") -> UUID {
+        let thread = ChatThread(title: title)
         modelContext.insert(thread)
         chatSession.activeThreadID = thread.uuid
         draft = ""

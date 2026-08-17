@@ -5,6 +5,7 @@ import SwiftUI
 /// The training plan tab. Switches between a month calendar grid and the
 /// week-by-week list; both share the plan's real workout data.
 struct PlanCalendarView: View {
+    var onReviewRunInChat: (CompletedActivity) -> Void = { _ in }
     enum Mode: String, CaseIterable, Identifiable {
         case month = "Month"
         case week = "Week"
@@ -81,10 +82,11 @@ struct PlanCalendarView: View {
                 workouts: workouts,
                 completedActivities: completedActivities,
                 monthAnchor: $monthAnchor,
-                selectedDate: $selectedDate
+                selectedDate: $selectedDate,
+                onReviewRunInChat: onReviewRunInChat
             )
         } else {
-            PlanWeekListView(scrollToTodayToken: weekScrollToken)
+            PlanWeekListView(scrollToTodayToken: weekScrollToken, onReviewRunInChat: onReviewRunInChat)
         }
     }
 

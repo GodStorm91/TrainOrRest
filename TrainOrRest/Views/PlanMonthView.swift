@@ -9,8 +9,7 @@ struct PlanMonthView: View {
     let completedActivities: [CompletedActivity]
     @Binding var monthAnchor: Date
     @Binding var selectedDate: Date
-
-    @State private var reviewActivity: CompletedActivity?
+    var onReviewRunInChat: (CompletedActivity) -> Void = { _ in }
 
     private let calendar = Calendar.current
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 3), count: 7)
@@ -29,9 +28,6 @@ struct PlanMonthView: View {
             .padding(.bottom, 24)
         }
         .scrollIndicators(.hidden)
-        .sheet(item: $reviewActivity) { activity in
-            PostRunReviewSheet(activity: activity, plannedWorkout: matchedWorkout(for: activity))
-        }
     }
 
     // MARK: - Month navigation
@@ -201,7 +197,7 @@ struct PlanMonthView: View {
                     activity: activity,
                     plannedWorkout: matchedWorkout(for: activity) ?? dayWorkouts.first,
                     compact: false,
-                    onReview: { reviewActivity = activity }
+                    onReview: { onReviewRunInChat(activity) }
                 )
             }
 
