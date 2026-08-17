@@ -5,6 +5,7 @@ import UIKit
 
 struct ChatView: View {
     private let bottomNavigation: AnyView?
+    private let onOpenCalendar: (Date?) -> Void
 
     @AppStorage("coachModel") private var model = CoachChatConfig.defaultModel
     @Environment(\.modelContext) private var modelContext
@@ -24,14 +25,18 @@ struct ChatView: View {
     @State private var selectedImage: UIImage?
     @State private var evidenceReview: EvidenceReviewPresentation?
     @State private var isChatListPresented = false
+    @State private var softwareKeyboardHeight: CGFloat = 0
+    @State private var planTransaction: ChatPlanTransaction?
+    @FocusState private var composerFocused: Bool
     @AppStorage("coachEvidenceReviewed") private var coachEvidenceReviewed = false
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
 
     private let calendar = Calendar.current
     private let bottomAnchorID = "chat-feed-bottom-anchor"
 
-    init(bottomNavigation: AnyView? = nil) {
+    init(bottomNavigation: AnyView? = nil, onOpenCalendar: @escaping (Date?) -> Void = { _ in }) {
         self.bottomNavigation = bottomNavigation
+        self.onOpenCalendar = onOpenCalendar
     }
 
     private var language: CoachLanguage {
@@ -40,8 +45,10 @@ struct ChatView: View {
 
     private var messages: [ChatMessage] {
         guard let activeThreadID = chatSession.activeThreadID else { return [] }
-        return allMessages.filter { $0.threadID == activeThreadID }
+        return allMessages.filter { $0.threadID == activeThreadID && !isPlanAuditMessage($0) }
     }
+
+    private var isSoftwareKeyboardVisible: Bool { softwareKeyboardHeight > 80 }
 
     private var activeThread: ChatThread? {
         guard let activeThreadID = chatSession.activeThreadID else { return nil }
@@ -90,6 +97,12 @@ struct ChatView: View {
         }
         .onChange(of: allMessages.count) {
             attachUnthreadedMessagesToActiveThread()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+            updateKeyboardHeight(from: notification)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { notification in
+            updateKeyboardHeight(from: notification, forceHidden: true)
         }
         .overlay(alignment: .top) {
             if let error = chatStore.lastError ?? replacementCoordinator.lastError {
@@ -277,14 +290,14 @@ struct ChatView: View {
 
     private var suggestedPromptRows: some View {
         VStack(spacing: 9) {
-            ChatPromptButton("Analyze my last activity", systemImage: "waveform.path.ecg") {
-                draft = "Analyze my last activity"
+            ChatPromptButton("Phân tích buổi tập gần nhất", systemImage: "waveform.path.ecg") {
+                draft = "Phân tích buổi tập gần nhất"
             }
-            ChatPromptButton("How is my training load this week?", systemImage: "chart.line.uptrend.xyaxis") {
-                draft = "How is my training load this week?"
+            ChatPromptButton("Tải tập tuần này của tôi thế nào?", systemImage: "chart.line.uptrend.xyaxis") {
+                draft = "Tải tập tuần này của tôi thế nào?"
             }
-            ChatPromptButton("What should I do today?", systemImage: "sun.max") {
-                draft = "What should I do today?"
+            ChatPromptButton("Hôm nay tôi nên tập gì?", systemImage: "sun.max") {
+                draft = "Hôm nay tôi nên tập gì?"
             }
         }
     }
@@ -294,7 +307,7 @@ struct ChatView: View {
             ScrollView {
                 LazyVStack(spacing: 14) {
                     ForEach(messages) { message in
-                        ChatBubble(message: message)
+                        ChatBubble(message: message, hidesSources: isSoftwareKeyboardVisible)
                             .id(message.date)
                     }
                     Color.clear
@@ -305,6 +318,7 @@ struct ChatView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 18)
             }
+            .scrollDismissesKeyboard(.interactively)
             .onAppear {
                 scrollToBottom(proxy, animated: false)
             }
@@ -347,48 +361,44 @@ struct ChatView: View {
 
     private var chatFooter: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !messages.isEmpty || selectedImageAttachment != nil || evidence.workout != nil || evidence.hasPhoto {
-                ChatContextTrayView(
-                    evidence: $evidence,
-                    selectedPhotoItem: $selectedPhotoItem,
-                    selectedImageAttachment: $selectedImageAttachment,
-                    selectedImage: $selectedImage,
-                    plannedWorkouts: plannedWorkouts,
-                    completedActivities: completedActivities,
-                    onReviewEvidence: { presentEvidenceReview(confirming: nil) }
+            if let transaction = planTransaction {
+                PlanTransactionCard(
+                    transaction: transaction,
+                    onViewCalendar: { onOpenCalendar(planTransaction?.calendarDate) },
+                    onUndo: { planTransaction = nil },
+                    onRetry: retryPlanTransaction,
+                    onDismiss: { planTransaction = nil }
                 )
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
-            // A staged swap takes over the suggestion slot: it needs a decision
-            // before anything else can be asked.
-            if let pending = replacementCoordinator.pending, !replacementCoordinator.isConfirming {
+            } else if let pending = replacementCoordinator.pending {
                 PlanUpdateCard(
                     pending: pending,
                     language: language,
-                    onApply: { replacementCoordinator.confirm(pending.id) },
+                    isApplying: replacementCoordinator.isConfirming,
+                    onApply: { applyReplacement(pending) },
                     onKeep: { replacementCoordinator.cancel() },
-                    // Asking why is not a decision to swap, and the composer is
-                    // locked while a proposal stands — so dismiss it and prefill
-                    // the question. Nothing is applied either way.
                     onAskWhy: {
                         replacementCoordinator.cancel()
                         draft = language.whySwapPrompt
                     }
                 )
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
-            } else if let pending = replacementCoordinator.pendingProposal, !replacementCoordinator.isConfirming {
+            } else if let pending = replacementCoordinator.pendingProposal {
                 PlanProposalCard(
                     pending: pending,
                     language: language,
-                    onApply: { replacementCoordinator.confirmProposal(pending.id) },
+                    isApplying: replacementCoordinator.isConfirming,
+                    onApply: { applyProposal(pending) },
                     onKeep: { replacementCoordinator.cancel() }
                 )
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
-            } else if !messages.isEmpty, !chatStore.isSending {
-                CoachAskNextStrip(prompts: suggestionPrompts, label: language.askNextLabel) { draft = $0 }
+            } else if shouldShowSuggestions {
+                CoachAskNextStrip(prompts: Array(suggestionPrompts.prefix(2)), label: language.askNextLabel) { draft = $0 }
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
+            attachmentChips
             composer
-            if let bottomNavigation {
+            if let bottomNavigation, !isSoftwareKeyboardVisible {
                 bottomNavigation
                     .padding(.top, 2)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -396,19 +406,64 @@ struct ChatView: View {
         }
         .padding(.horizontal, 14)
         .padding(.top, 8)
-        .padding(.bottom, bottomNavigation.map { _ in 4 } ?? 8)
+        .padding(.bottom, (isSoftwareKeyboardVisible ? softwareKeyboardHeight + 6 : (bottomNavigation.map { _ in 4 } ?? 8)))
         .background(.clear)
         .animation(.easeOut(duration: 0.2), value: replacementCoordinator.pending)
         .animation(.easeOut(duration: 0.2), value: replacementCoordinator.pendingProposal)
+        .animation(.easeOut(duration: 0.2), value: isSoftwareKeyboardVisible)
+    }
+
+    private var shouldShowSuggestions: Bool {
+        !isSoftwareKeyboardVisible && !messages.isEmpty && !chatStore.isSending
+    }
+
+    @ViewBuilder
+    private var attachmentChips: some View {
+        if evidence.workout != nil || selectedImageAttachment != nil {
+            HStack(spacing: 8) {
+                if evidence.workout != nil {
+                    removableChip("Buổi tập", symbol: "figure.run") { evidence.workout = nil }
+                }
+                if selectedImageAttachment != nil {
+                    removableChip("Ảnh", symbol: "photo") { clearImageAttachment() }
+                }
+                Spacer(minLength: 0)
+            }
+            .transition(.opacity.combined(with: .move(edge: .bottom)))
+        }
+    }
+
+    private func removableChip(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: symbol)
+                .font(.caption.weight(.semibold))
+            Text(title)
+                .font(.caption.weight(.semibold))
+            Button(action: action) {
+                Image(systemName: "xmark")
+                    .font(.caption2.weight(.bold))
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Xóa \(title)")
+        }
+        .foregroundStyle(Theme.text)
+        .padding(.leading, 10)
+        .padding(.trailing, 5)
+        .padding(.vertical, 6)
+        .background(Theme.chip, in: Capsule())
+        .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
     }
 
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
             Menu {
-                Button("Use readiness snapshot") { evidence.readinessSnapshot = true }
-                Button("Review evidence") { presentEvidenceReview(confirming: nil) }
+                Button("Dùng thể trạng hiện tại") { evidence.readinessSnapshot = true }
+                Button("Kế hoạch tuần này") { evidence.weekPlan = true }
+                Button("Xem nguồn dữ liệu") { presentEvidenceReview(confirming: nil) }
+                Button("Prompt đã lưu") { draft = "Hôm nay tôi nên tập gì?" }
                 if selectedImageAttachment != nil {
-                    Button("Clear image", role: .destructive) { clearImageAttachment() }
+                    Button("Xóa ảnh", role: .destructive) { clearImageAttachment() }
                 }
             } label: {
                 Image(systemName: "plus")
@@ -418,23 +473,34 @@ struct ChatView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Thêm ngữ cảnh")
 
-            TextField("Ask anything", text: $draft, axis: .vertical)
+            TextField("Hỏi Coach bất cứ điều gì…", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.body)
                 .foregroundStyle(Theme.text)
                 .tint(Theme.accent)
                 .lineLimit(1...5)
                 .padding(.vertical, 12)
+                .focused($composerFocused)
                 .disabled(replacementCoordinator.hasPendingDecision || replacementCoordinator.isConfirming)
 
-            Button { draft = "What should I do today?" } label: {
-                Image(systemName: "bookmark")
+            Button {
+                if isSoftwareKeyboardVisible {
+                    composerFocused = false
+                } else {
+                    draft = "Hôm nay tôi nên tập gì?"
+                    composerFocused = true
+                }
+            } label: {
+                Image(systemName: isSoftwareKeyboardVisible ? "keyboard.chevron.compact.down" : "bookmark")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.dim)
-                    .frame(width: 36, height: 44)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(isSoftwareKeyboardVisible ? "Ẩn bàn phím" : "Prompt đã lưu")
 
             Button {
                 send()
@@ -520,6 +586,7 @@ struct ChatView: View {
         let reviewedSnapshot = pending.reviewedSnapshot
         let threadID = chatSession.activeThreadID ?? createNewThread()
         draft = ""
+        composerFocused = true
         Task {
             await chatStore.send(
                 text: pending.text,
@@ -532,7 +599,55 @@ struct ChatView: View {
             )
             evidence.workout = nil
             clearImageAttachment()
+            await MainActor.run { composerFocused = true }
         }
+    }
+
+    private func applyReplacement(_ pending: PendingWorkoutReplacement) {
+        planTransaction = .applying(title: "Đang cập nhật kế hoạch…")
+        replacementCoordinator.confirm(pending.id)
+        if let error = replacementCoordinator.lastError {
+            planTransaction = .failure(userMessage: userFacingPlanError(error), technicalDetails: error, retry: .replacement(pending))
+        } else if replacementCoordinator.pending != nil {
+            planTransaction = nil
+        } else {
+            planTransaction = .success(summary: pending.successMessage, date: pending.date, undo: .safe)
+        }
+    }
+
+    private func applyProposal(_ pending: PendingPlanProposal) {
+        planTransaction = .applying(title: "Đang cập nhật kế hoạch…")
+        replacementCoordinator.confirmProposal(pending.id)
+        if let error = replacementCoordinator.lastError {
+            planTransaction = .failure(userMessage: userFacingPlanError(error), technicalDetails: error, retry: .proposal(pending))
+        } else if replacementCoordinator.pendingProposal != nil {
+            planTransaction = nil
+        } else {
+            planTransaction = .success(summary: pending.summary, date: nil, undo: .unsafe)
+        }
+    }
+
+    private func retryPlanTransaction() {
+        guard case .failure(_, _, let retry) = planTransaction else { return }
+        switch retry {
+        case .replacement(let pending):
+            planTransaction = nil
+            replacementCoordinator.stage(pending)
+        case .proposal(let pending):
+            planTransaction = nil
+            replacementCoordinator.stage(pending.proposal, summary: pending.summary, threadID: pending.threadID)
+        }
+    }
+
+    private func userFacingPlanError(_ error: String) -> String {
+        let lower = error.lowercased()
+        if lower.contains("missing") || lower.contains("couldn't be read") || lower.contains("duration") || lower.contains("pace") {
+            return "Kế hoạch còn thiếu thời lượng hoặc pace mục tiêu. Anh có thể để Coach tự đề xuất hoặc nhập thủ công."
+        }
+        if lower.contains("load") || lower.contains("volume") || lower.contains("ramp") || lower.contains("safe") {
+            return "Buổi tập mới có thể khiến tải tập tuần này tăng quá nhanh."
+        }
+        return "Kế hoạch hiện tại chưa bị thay đổi."
     }
 
     private func presentEvidenceReview(confirming pending: PendingCoachSend?) {
@@ -650,6 +765,31 @@ struct ChatView: View {
         selectedImageAttachment = nil
         selectedImage = nil
         evidence.hasPhoto = false
+    }
+
+    private func updateKeyboardHeight(from notification: Notification, forceHidden: Bool = false) {
+        guard !forceHidden,
+              let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else {
+            withKeyboardAnimation(notification) { softwareKeyboardHeight = 0 }
+            return
+        }
+        let screenMaxY = UIScreen.main.bounds.maxY
+        let overlap = max(0, screenMaxY - frame.minY)
+        withKeyboardAnimation(notification) { softwareKeyboardHeight = overlap }
+    }
+
+    private func withKeyboardAnimation(_ notification: Notification, updates: @escaping () -> Void) {
+        let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.2
+        let reduceMotion = UIAccessibility.isReduceMotionEnabled
+        if reduceMotion {
+            updates()
+        } else {
+            withAnimation(.easeOut(duration: duration)) { updates() }
+        }
+    }
+
+    private func isPlanAuditMessage(_ message: ChatMessage) -> Bool {
+        message.role == .assistant && message.appliedAdjustment != nil && message.text.hasPrefix("Applied:")
     }
 }
 
@@ -821,6 +961,114 @@ private struct EvidenceReviewPresentation: Identifiable {
     let pendingSend: PendingCoachSend?
 }
 
+private enum ChatPlanRetry: Equatable {
+    case replacement(PendingWorkoutReplacement)
+    case proposal(PendingPlanProposal)
+}
+
+private enum ChatPlanUndo: Equatable {
+    case safe
+    case unsafe
+}
+
+private enum ChatPlanTransaction: Equatable {
+    case applying(title: String)
+    case success(summary: String, date: Date?, undo: ChatPlanUndo)
+    case failure(userMessage: String, technicalDetails: String, retry: ChatPlanRetry)
+
+    var calendarDate: Date? {
+        if case .success(_, let date, _) = self { return date }
+        return nil
+    }
+}
+
+private struct PlanTransactionCard: View {
+    let transaction: ChatPlanTransaction
+    let onViewCalendar: () -> Void
+    let onUndo: () -> Void
+    let onRetry: () -> Void
+    let onDismiss: () -> Void
+
+    @State private var showsTechnicalDetails = false
+
+    var body: some View {
+        TorCard(padding: 14, cornerRadius: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                switch transaction {
+                case .applying(let title):
+                    HStack(spacing: 10) {
+                        ProgressView().tint(Theme.accent)
+                        Text(title)
+                            .font(.torHeading(15, .bold))
+                            .foregroundStyle(Theme.text)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 86, alignment: .leading)
+                case .success(let summary, let date, let undo):
+                    Label("Đã cập nhật kế hoạch", systemImage: "checkmark.circle.fill")
+                        .font(.torHeading(15, .bold))
+                        .foregroundStyle(Theme.good)
+                    Text(summary.replacingOccurrences(of: "Applied: ", with: ""))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                    if let date {
+                        Text(date.formatted(.dateTime.weekday(.wide).day().month(.wide)))
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(Theme.dim)
+                    }
+                    HStack(spacing: 8) {
+                        transactionButton("Xem trong lịch", systemImage: "calendar", prominent: true, action: onViewCalendar)
+                        if undo == .safe {
+                            transactionButton("Hoàn tác", systemImage: "arrow.uturn.backward", prominent: false, action: onUndo)
+                        }
+                    }
+                case .failure(let userMessage, let technicalDetails, _):
+                    Label(failureTitle(for: userMessage), systemImage: "exclamationmark.triangle.fill")
+                        .font(.torHeading(15, .bold))
+                        .foregroundStyle(Theme.warn)
+                    Text(userMessage)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        transactionButton("Thử lại", systemImage: "arrow.clockwise", prominent: true, action: onRetry)
+                        transactionButton("Giữ kế hoạch cũ", systemImage: "xmark", prominent: false, action: onDismiss)
+                    }
+                    DisclosureGroup("Xem chi tiết kỹ thuật", isExpanded: $showsTechnicalDetails) {
+                        Text(technicalDetails)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(Theme.faint)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 6)
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.dim)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.accent.opacity(0.35), lineWidth: 1))
+    }
+
+    private func failureTitle(for message: String) -> String {
+        if message.contains("thiếu") { return "Chưa thể tạo buổi chạy" }
+        if message.contains("tải tập") { return "Thay đổi này chưa phù hợp với kế hoạch hiện tại" }
+        return "Chưa thể cập nhật kế hoạch lúc này"
+    }
+
+    private func transactionButton(_ title: String, systemImage: String, prominent: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.torHeading(13, .bold))
+                .foregroundStyle(prominent ? .white : Theme.text)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(prominent ? Theme.accent : Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(prominent ? .clear : Theme.border, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 private struct GroundingReviewSheet: View {
     let snapshot: GroundingSnapshot
     let requiresConfirmation: Bool
@@ -832,7 +1080,7 @@ private struct GroundingReviewSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Evidence Review")
+                        Text("Nguồn dữ liệu đã sử dụng")
                             .font(.system(.title2, design: .rounded).weight(.semibold))
                             .foregroundStyle(Theme.text)
                         Text(snapshot.footnoteLine)
@@ -851,7 +1099,7 @@ private struct GroundingReviewSheet: View {
 
                     if requiresConfirmation {
                         Button(action: onConfirm) {
-                            Label("Use Evidence and Send", systemImage: "paperplane.fill")
+                            Label("Dùng nguồn dữ liệu và gửi", systemImage: "paperplane.fill")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
@@ -865,12 +1113,12 @@ private struct GroundingReviewSheet: View {
             .toolbar {
                 if requiresConfirmation {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel", action: onCancel)
+                        Button("Hủy", action: onCancel)
                     }
                 }
                 if !requiresConfirmation {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Done", action: onConfirm)
+                        Button("Xong", action: onConfirm)
                     }
                 }
             }

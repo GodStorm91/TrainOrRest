@@ -27,7 +27,7 @@ struct ChatContextTrayView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ContextChip(
-                        title: "Readiness snapshot",
+                        title: "Thể trạng hiện tại",
                         detail: evidence.readinessSnapshot ? "on" : "off",
                         systemImage: "heart.text.square",
                         isSelected: evidence.readinessSnapshot
@@ -35,7 +35,7 @@ struct ChatContextTrayView: View {
                         evidence.readinessSnapshot.toggle()
                     }
                     ContextChip(
-                        title: "This week plan",
+                        title: "Kế hoạch tuần này",
                         detail: evidence.weekPlan ? "on" : "off",
                         systemImage: "calendar",
                         isSelected: evidence.weekPlan
@@ -45,7 +45,7 @@ struct ChatContextTrayView: View {
                     workoutMenu
                     imagePicker
                     ContextChip(
-                        title: "Evidence",
+                        title: "Nguồn dữ liệu",
                         detail: "review",
                         systemImage: "doc.text.magnifyingglass",
                         isSelected: true,
@@ -60,11 +60,11 @@ struct ChatContextTrayView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Label("Evidence", systemImage: "paperclip")
+            Label("Nguồn dữ liệu", systemImage: "paperclip")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.dim)
             Spacer()
-            Label("Evidence checked", systemImage: "checkmark.shield")
+            Label("Đã kiểm tra dữ liệu", systemImage: "checkmark.shield")
                 .font(.caption2)
                 .foregroundStyle(Theme.faint)
         }

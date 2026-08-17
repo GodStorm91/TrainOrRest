@@ -47,7 +47,12 @@ struct RootTabView: View {
                 ChatView(
                     bottomNavigation: AnyView(
                         TorTabDock(selection: $selection, namespace: dockNamespace)
-                    )
+                    ),
+                    onOpenCalendar: { _ in
+                        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                            selection = .calendar
+                        }
+                    }
                 )
             }
         case .profile:

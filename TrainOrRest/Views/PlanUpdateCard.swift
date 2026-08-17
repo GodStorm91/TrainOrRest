@@ -7,6 +7,7 @@ import SwiftUI
 struct PlanUpdateCard: View {
     let pending: PendingWorkoutReplacement
     let language: CoachLanguage
+    var isApplying: Bool = false
     let onApply: () -> Void
     let onKeep: () -> Void
     let onAskWhy: () -> Void
@@ -46,26 +47,36 @@ struct PlanUpdateCard: View {
 
     private var applyLabel: String {
         if pending.expected.weekIndex >= 0 {
-            return "Apply to week \(pending.expected.weekIndex + 1)"
+            return "Xác nhận tuần \(pending.expected.weekIndex + 1)"
         }
-        return "Apply to this week"
+        return "Xác nhận"
     }
 
     private var card: some View {
         TorCard(padding: 14, cornerRadius: 16) {
             VStack(alignment: .leading, spacing: 12) {
-                titleRow
-                ledgerRow
-                planChangedBanner
-                diffRow
+                if isApplying {
+                    HStack(spacing: 10) {
+                        ProgressView().tint(Theme.accent)
+                        Text("Đang cập nhật kế hoạch…")
+                            .font(.torHeading(15, .bold))
+                            .foregroundStyle(Theme.text)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
+                } else {
+                    titleRow
+                    ledgerRow
+                    planChangedBanner
+                    diffRow
 
-                Rectangle().fill(Theme.line).frame(height: 1)
+                    Rectangle().fill(Theme.line).frame(height: 1)
 
-                Text(language.weeklyVolumeDeltaText(pending.volumeDeltaKm))
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(Theme.faint)
+                    Text(language.weeklyVolumeDeltaText(pending.volumeDeltaKm))
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(Theme.faint)
 
-                actions
+                    actions
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -79,7 +90,7 @@ struct PlanUpdateCard: View {
         HStack(spacing: 7) {
             Image(systemName: "arrow.triangle.2.circlepath")
                 .font(.system(size: 11, weight: .bold))
-            Text(language.planUpdateTitle)
+            Text("ĐỀ XUẤT CẬP NHẬT KẾ HOẠCH")
                 .font(.torLabel(11, .bold))
                 .tracking(1.4)
         }
@@ -88,17 +99,17 @@ struct PlanUpdateCard: View {
 
     private var ledgerRow: some View {
         HStack(spacing: 6) {
-            ledgerChip("Proposed", symbol: "sparkles", tint: Theme.accent)
+            ledgerChip("Đề xuất", symbol: "sparkles", tint: Theme.accent)
 
             Button {
                 showsValidationReceipt = true
             } label: {
-                ledgerChip("Validated", symbol: "checkmark.seal", tint: Theme.good)
+                ledgerChip("Đã kiểm tra", symbol: "checkmark.seal", tint: Theme.good)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Show validation receipt")
 
-            ledgerChip("Awaits you", symbol: "person", tint: Theme.dim)
+            ledgerChip("Chờ xác nhận", symbol: "person", tint: Theme.dim)
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
     }
@@ -112,7 +123,7 @@ struct PlanUpdateCard: View {
                     .foregroundStyle(Theme.warn)
                     .accessibilityHidden(true)
 
-                Text("Plan changed since this was proposed — review the updated change.")
+                Text("Kế hoạch đã thay đổi sau đề xuất này, anh xem lại thay đổi mới nhé.")
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(Theme.text)
                     .fixedSize(horizontal: false, vertical: true)
@@ -124,7 +135,7 @@ struct PlanUpdateCard: View {
                 Theme.soft(Theme.warn, 0.16),
                 in: RoundedRectangle(cornerRadius: 10, style: .continuous)
             )
-            .accessibilityLabel("Plan changed since this was proposed. Review the updated change.")
+            .accessibilityLabel("Kế hoạch đã thay đổi sau đề xuất này.")
         }
     }
 
@@ -210,7 +221,7 @@ struct PlanUpdateCard: View {
     private var actions: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 7) {
-                secondaryButton(language.keepExistingLabel(pending.existing.kind), action: onKeep)
+                secondaryButton("Giữ kế hoạch cũ", action: onKeep)
                 secondaryButton(language.whySwapPrompt, action: onAskWhy)
             }
 
@@ -248,41 +259,51 @@ struct PlanUpdateCard: View {
 struct PlanProposalCard: View {
     let pending: PendingPlanProposal
     let language: CoachLanguage
+    var isApplying: Bool = false
     let onApply: () -> Void
     let onKeep: () -> Void
 
     var body: some View {
         TorCard(padding: 14, cornerRadius: 16) {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 7) {
-                    Image(systemName: "calendar.badge.checkmark")
-                        .font(.system(size: 11, weight: .bold))
-                    Text("CALENDAR UPDATE")
-                        .font(.torLabel(11, .bold))
-                        .tracking(1.4)
-                }
-                .foregroundStyle(Theme.accent)
+                if isApplying {
+                    HStack(spacing: 10) {
+                        ProgressView().tint(Theme.accent)
+                        Text("Đang cập nhật kế hoạch…")
+                            .font(.torHeading(15, .bold))
+                            .foregroundStyle(Theme.text)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
+                } else {
+                    HStack(spacing: 7) {
+                        Image(systemName: "calendar.badge.checkmark")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("ĐỀ XUẤT CẬP NHẬT KẾ HOẠCH")
+                            .font(.torLabel(11, .bold))
+                            .tracking(1.4)
+                    }
+                    .foregroundStyle(Theme.accent)
 
-                HStack(spacing: 6) {
-                    chip("Proposed", symbol: "sparkles", tint: Theme.accent)
-                    chip("Needs approval", symbol: "person.crop.circle.badge.checkmark", tint: Theme.good)
-                    chip("Pushes intervals.icu", symbol: "arrow.triangle.2.circlepath", tint: Theme.dim)
-                }
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    HStack(spacing: 6) {
+                        chip("Đề xuất", symbol: "sparkles", tint: Theme.accent)
+                        chip("Chờ xác nhận", symbol: "person.crop.circle.badge.checkmark", tint: Theme.good)
+                        chip("Đã kiểm tra", symbol: "checkmark.shield", tint: Theme.dim)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
 
-                Text(pending.summary)
-                    .font(.torHeading(15, .semibold))
-                    .foregroundStyle(Theme.text)
-                    .fixedSize(horizontal: false, vertical: true)
+                    Text(pending.summary)
+                        .font(.torHeading(15, .semibold))
+                        .foregroundStyle(Theme.text)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                Text("Nothing is saved to Calendar until you apply it. After applying, TrainOrRest will trigger the intervals.icu sync if watch push is enabled.")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(Theme.faint)
-                    .fixedSize(horizontal: false, vertical: true)
+                    Text("Chưa thay đổi kế hoạch. TrainOrRest chỉ cập nhật sau khi anh xác nhận.")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(Theme.faint)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                HStack(spacing: 8) {
+                    HStack(spacing: 8) {
                     Button(action: onKeep) {
-                        Text("Keep current plan")
+                        Text("Giữ kế hoạch cũ")
                             .font(.torHeading(13, .semibold))
                             .foregroundStyle(Theme.text)
                             .frame(maxWidth: .infinity, minHeight: 44)
@@ -291,14 +312,15 @@ struct PlanProposalCard: View {
                     }
                     .buttonStyle(.plain)
 
-                    Button(action: onApply) {
-                        Label(language.applyChangesLabel, systemImage: "checkmark")
-                            .font(.torHeading(13, .bold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .background(Theme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        Button(action: onApply) {
+                            Label("Xác nhận", systemImage: "checkmark")
+                                .font(.torHeading(13, .bold))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .background(Theme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

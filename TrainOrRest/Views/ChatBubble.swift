@@ -27,6 +27,8 @@ struct CoachAvatar: View {
 
 struct ChatBubble: View {
     let message: ChatMessage
+    var hidesSources: Bool = false
+
     @State private var showsGroundingSummary = false
 
     private var isUser: Bool { message.role == .user }
@@ -38,39 +40,50 @@ struct ChatBubble: View {
             } else {
                 CoachAvatar(size: 26)
             }
+
             VStack(alignment: isUser ? .trailing : .leading, spacing: 5) {
                 messageBody
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
                     .background(bubbleShape.fill(isUser ? Theme.accent : Theme.card))
                     .overlay { if !isUser { bubbleShape.strokeBorder(Theme.border, lineWidth: 1) } }
-                CopyMessageButton(text: message.text)
-                if let applied = message.appliedAdjustment {
+
+                if let applied = message.appliedAdjustment, !message.text.hasPrefix("Applied:") {
                     appliedBadge(applied)
                         .padding(.top, 1)
                 }
-                if !isUser, let footnote = message.groundingFootnote, let summary = message.groundingSummary {
+
+                if !hidesSources, !isUser, let footnote = message.groundingFootnote, let summary = message.groundingSummary {
                     groundingFootnote(footnote, summary: summary)
                 }
             }
+
             if !isUser {
                 Spacer(minLength: 40)
             }
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+        .contextMenu {
+            Button {
+                UIPasteboard.general.string = message.text
+            } label: {
+                Label("Sao chép", systemImage: "doc.on.doc")
+            }
+            if !isUser {
+                Button {} label: { Label("Đánh giá", systemImage: "hand.thumbsup") }
+                Button(role: .destructive) {} label: { Label("Báo lỗi", systemImage: "exclamationmark.bubble") }
+            }
+        }
         .sheet(isPresented: $showsGroundingSummary) {
             ReceiptSheet(
-                title: "Evidence",
-                subtitle: message.groundingFootnote,
-                rows: [
-                    .detail("Grounding summary", value: message.groundingSummary ?? "", symbol: "doc.text.magnifyingglass")
-                ]
+                title: "Nguồn dữ liệu đã sử dụng",
+                subtitle: sourceLine(for: message.groundingFootnote),
+                rows: sourceRows(summary: message.groundingSummary ?? "")
             )
         }
     }
 
     private var bubbleShape: UnevenRoundedRectangle {
-        // AI: 18/18/18/5 · User: 18/18/5/18 (top-leading, top-trailing, bottom-trailing, bottom-leading)
         UnevenRoundedRectangle(
             cornerRadii: isUser
                 ? .init(topLeading: 18, bottomLeading: 18, bottomTrailing: 5, topTrailing: 18)
@@ -89,57 +102,9 @@ struct ChatBubble: View {
         }
     }
 
-    /// Copies the message verbatim (markdown included) and confirms briefly.
-    private struct CopyMessageButton: View {
-        let text: String
-
-        @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
-        @State private var didCopy = false
-        @State private var resetTask: Task<Void, Never>?
-
-        private static let confirmationSeconds: Double = 1.6
-
-        private var language: CoachLanguage {
-            CoachLanguage(rawValue: languageRaw) ?? .en
-        }
-
-        var body: some View {
-            Button(action: copy) {
-                HStack(spacing: 5) {
-                    Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(didCopy ? Theme.good : Theme.faint)
-                    Text(didCopy ? language.copiedLabel : language.copyLabel)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.faint)
-                }
-                .padding(.horizontal, 4)
-                .padding(.vertical, 2)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .animation(.easeOut(duration: 0.15), value: didCopy)
-            .accessibilityLabel(didCopy ? language.copiedLabel : language.copyLabel)
-            .onDisappear { resetTask?.cancel() }
-        }
-
-        private func copy() {
-            UIPasteboard.general.string = text
-            didCopy = true
-            // Restart the countdown so a re-tap never leaves a stale checkmark.
-            resetTask?.cancel()
-            resetTask = Task {
-                try? await Task.sleep(for: .seconds(Self.confirmationSeconds))
-                guard !Task.isCancelled else { return }
-                // Task.sleep resumes off the main actor; hop back before touching state.
-                await MainActor.run { didCopy = false }
-            }
-        }
-    }
-
     private func appliedBadge(_ applied: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Label("Validated plan update", systemImage: "checkmark.shield.fill")
+            Label("Đã kiểm tra và cập nhật kế hoạch", systemImage: "checkmark.shield.fill")
                 .font(.caption.weight(.semibold))
             Text(applied)
                 .font(.caption)
@@ -158,20 +123,44 @@ struct ChatBubble: View {
         Button {
             showsGroundingSummary = true
         } label: {
-            Label {
-                Text(footnote)
-                    .font(.caption)
-                    .foregroundStyle(Theme.faint)
-                    .fixedSize(horizontal: false, vertical: true)
-            } icon: {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .font(.caption)
-                    .foregroundStyle(Theme.faint)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            Text(sourceLine(for: footnote))
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Theme.faint)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Review evidence. \(footnote)")
+        .accessibilityLabel("Xem nguồn dữ liệu")
+    }
+
+    private func sourceLine(for footnote: String?) -> String {
+        let footnote = footnote ?? ""
+        let sourceCount = max(1, footnote.components(separatedBy: " · ").dropFirst().filter { !$0.isEmpty && $0 != "No evidence" }.count)
+        if let time = footnote.components(separatedBy: " · ").first?.replacingOccurrences(of: "Based on ", with: ""), !time.isEmpty {
+            return "Dựa trên dữ liệu lúc \(time) · Xem nguồn"
+        }
+        return "Dựa trên \(sourceCount) nguồn dữ liệu · Xem nguồn"
+    }
+
+    private func sourceRows(summary: String) -> [ReceiptSheet.Row] {
+        let lines = summary
+            .split(separator: "\n")
+            .map(String.init)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if lines.isEmpty {
+            return [.check("Đã kiểm tra dữ liệu", value: "Không có chi tiết nguồn bổ sung.")]
+        }
+        return lines.prefix(6).map { line in
+            .check(sourceTitle(for: line), value: line)
+        }
+    }
+
+    private func sourceTitle(for line: String) -> String {
+        if line.localizedCaseInsensitiveContains("readiness") { return "Thể trạng hiện tại" }
+        if line.localizedCaseInsensitiveContains("plan") { return "Kế hoạch tuần này" }
+        if line.localizedCaseInsensitiveContains("workout") { return "Buổi tập gần nhất" }
+        if line.localizedCaseInsensitiveContains("photo") { return "Ảnh đính kèm" }
+        return "Nguồn dữ liệu"
     }
 }
