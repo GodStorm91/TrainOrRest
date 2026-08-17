@@ -1,100 +1,275 @@
 import SwiftData
 import SwiftUI
 
-/// The training plan as a week-by-week list, grouped by calendar week with
-/// phase/volume headers. This is the "Week" mode of the plan tab.
+/// RestOrTrain-style week mode: collapsed weekly summaries, expandable current
+/// week, and completed Garmin runs rendered as post-run cards inside the week.
 struct PlanWeekListView: View {
     /// Bumping this value scrolls the list to the current week.
     var scrollToTodayToken: Int
 
     @Query(sort: \PlannedWorkout.date) private var workouts: [PlannedWorkout]
+    @Query(sort: \CompletedActivity.date, order: .reverse) private var completedActivities: [CompletedActivity]
     @Query private var plans: [TrainingPlan]
-    @State private var visibleWeekStarts: Set<Date> = []
+
+    @State private var expandedWeekStarts: Set<Date> = []
+    @State private var reviewActivity: CompletedActivity?
 
     private var calendar: Calendar { .current }
 
     var body: some View {
         ScrollViewReader { proxy in
-            List {
-                ForEach(weekStarts, id: \.self) { weekStart in
-                    Section {
-                        ForEach(workoutsByWeekStart[weekStart] ?? []) { workout in
-                            NavigationLink {
-                                WorkoutDetailView(workout: workout)
-                            } label: {
-                                PlannedWorkoutRow(workout: workout)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    ForEach(weekStarts, id: \.self) { weekStart in
+                        VStack(alignment: .leading, spacing: 10) {
+                            weekHeader(weekStart)
+                                .id(weekStart)
+                            if expandedWeekStarts.contains(weekStart) {
+                                weekDays(weekStart)
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
                             }
-                            .listRowBackground(Color.clear)
-                            .listRowSeparatorTint(Theme.line)
                         }
-                    } header: {
-                        weekHeader(weekStart)
                     }
-                    .id(weekStart)
-                    .onAppear { visibleWeekStarts.insert(weekStart) }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 110)
             }
-            .scrollContentBackground(.hidden)
+            .scrollIndicators(.hidden)
             .background(Theme.bg)
+            .onAppear { expandedWeekStarts.insert(todayWeekStart) }
             .onChange(of: scrollToTodayToken) {
+                expandedWeekStarts.insert(todayWeekStart)
                 guard weekStarts.contains(todayWeekStart) else { return }
                 withAnimation(.easeOut(duration: 0.2)) {
                     proxy.scrollTo(todayWeekStart, anchor: .top)
                 }
             }
+            .sheet(item: $reviewActivity) { activity in
+                PostRunReviewSheet(activity: activity, plannedWorkout: matchedWorkout(for: activity))
+            }
         }
     }
 
-    // Weeks are grouped by date, not stored week index: regeneration keeps
-    // past rows from older generations whose indices no longer align.
-    private var workoutsByWeekStart: [Date: [PlannedWorkout]] {
-        Dictionary(grouping: workouts) {
-            PlanGenerator.mondayOfWeek(containing: $0.date, calendar: calendar)
+    private func weekHeader(_ weekStart: Date) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.18)) { toggleWeek(weekStart) }
+        } label: {
+            HStack(spacing: 10) {
+                Text("🗓️")
+                    .font(.system(size: 21))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(weekTitle(weekStart))
+                        .font(.torHeading(20, .bold))
+                        .foregroundStyle(Theme.text)
+                    Text(weekSummary(weekStart))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.dim)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(Theme.faint)
+                Image(systemName: expandedWeekStarts.contains(weekStart) ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Theme.faint)
+            }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+    }
+
+    private func weekDays(_ weekStart: Date) -> some View {
+        VStack(spacing: 10) {
+            ForEach(days(inWeekStarting: weekStart), id: \.self) { date in
+                dayRow(date)
+            }
+        }
+    }
+
+    private func dayRow(_ date: Date) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            dayRail(date)
+
+            VStack(alignment: .leading, spacing: 8) {
+                if let activity = completedActivity(on: date) {
+                    CalendarRunSummaryCard(
+                        activity: activity,
+                        plannedWorkout: matchedWorkout(for: activity) ?? workouts(on: date).first,
+                        compact: true,
+                        onReview: { reviewActivity = activity }
+                    )
+                } else if let workout = workouts(on: date).first {
+                    NavigationLink {
+                        WorkoutDetailView(workout: workout)
+                    } label: {
+                        plannedDayCard(workout)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    restPlaceholder
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func dayRail(_ date: Date) -> some View {
+        let isToday = calendar.isDateInToday(date)
+        return VStack(spacing: 2) {
+            Text(date.formatted(.dateTime.weekday(.abbreviated)))
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(isToday ? Color.white : Theme.dim)
+            Text("\(calendar.component(.day, from: date))")
+                .font(.torHeading(22, .bold))
+                .foregroundStyle(isToday ? Color.white : Theme.text)
+        }
+        .frame(width: 50)
+        .frame(minHeight: 68)
+        .padding(.vertical, 8)
+        .background(isToday ? Color(hex: 0x334155) : Color.clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func plannedDayCard(_ workout: PlannedWorkout) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: workout.kind?.symbolName ?? "figure.run")
+                .font(.system(size: 21, weight: .semibold))
+                .foregroundStyle(workout.kind?.styleColor ?? Theme.accent)
+                .frame(width: 46, height: 46)
+                .background(Theme.soft(workout.kind?.styleColor ?? Theme.accent), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 7) {
+                    Circle().fill(workout.kind?.styleColor ?? Theme.dim).frame(width: 7, height: 7)
+                    TorEyebrow(workout.kind?.displayName ?? "Session").tracking(1.5)
+                }
+                Text(workout.kind?.displayName ?? "Run")
+                    .font(.torHeading(17, .bold))
+                    .foregroundStyle(Theme.text)
+                Text(plannedSubtitle(workout))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.dim)
+            }
+            Spacer(minLength: 8)
+            statusBadge(workout)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.faint)
+        }
+        .padding(14)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(calendar.isDateInToday(workout.date) ? Theme.accent : Theme.border, lineWidth: 1))
+    }
+
+    private var restPlaceholder: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .stroke(Theme.border.opacity(0.8), style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
+            .frame(height: 86)
+            .overlay(alignment: .leading) {
+                Text("Rest")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.faint)
+                    .padding(.leading, 16)
+            }
+    }
+
+    @ViewBuilder
+    private func statusBadge(_ workout: PlannedWorkout) -> some View {
+        switch workout.status {
+        case .done: badge("DONE", Theme.good)
+        case .skipped: badge("SKIPPED", Theme.warn)
+        case .planned:
+            if calendar.isDateInToday(workout.date) { badge("TODAY", Theme.accent) }
+        }
+    }
+
+    private func badge(_ text: String, _ color: Color) -> some View {
+        Text(text)
+            .font(.torLabel(10, .bold))
+            .tracking(0.6)
+            .foregroundStyle(color)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Theme.soft(color), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+
+    private func plannedSubtitle(_ workout: PlannedWorkout) -> String {
+        var parts = [String(format: "%.2f km", workout.distanceKm)]
+        if let band = workout.paceBand { parts.append(Formatters.paceBand(band).replacingOccurrences(of: " /km", with: "/km")) }
+        if let seconds = workout.expectedDurationSeconds { parts.append("~\(Int((seconds / 60).rounded())) min") }
+        return parts.joined(separator: " · ")
+    }
+
+    private func toggleWeek(_ weekStart: Date) {
+        if expandedWeekStarts.contains(weekStart) {
+            expandedWeekStarts.remove(weekStart)
+        } else {
+            expandedWeekStarts.insert(weekStart)
+        }
+    }
+
+    private var workoutsByWeekStart: [Date: [PlannedWorkout]] {
+        Dictionary(grouping: workouts) { PlanGenerator.mondayOfWeek(containing: $0.date, calendar: calendar) }
+    }
+
+    private var activitiesByWeekStart: [Date: [CompletedActivity]] {
+        Dictionary(grouping: completedActivities) { PlanGenerator.mondayOfWeek(containing: $0.date, calendar: calendar) }
     }
 
     private var weekStarts: [Date] {
-        workoutsByWeekStart.keys.sorted()
+        Set(workoutsByWeekStart.keys).union(activitiesByWeekStart.keys).sorted()
     }
 
     private var todayWeekStart: Date {
         PlanGenerator.mondayOfWeek(containing: .now, calendar: calendar)
     }
 
-    /// Index into the current plan's week metadata, valid only for weeks at
-    /// or after the plan anchor.
-    private func planWeekIndex(for weekStart: Date) -> Int? {
-        guard let plan = plans.first else { return nil }
-        let anchorWeek = PlanGenerator.mondayOfWeek(containing: plan.anchorDate, calendar: calendar)
-        let offset = (calendar.dateComponents([.day], from: anchorWeek, to: weekStart).day ?? 0) / 7
-        guard offset >= 0, plan.weekPhasesRaw.indices.contains(offset) else { return nil }
-        return offset
+    private func weekTitle(_ weekStart: Date) -> String {
+        let end = calendar.date(byAdding: .day, value: 6, to: weekStart) ?? weekStart
+        let month1 = weekStart.formatted(.dateTime.month(.abbreviated))
+        let month2 = end.formatted(.dateTime.month(.abbreviated))
+        if month1 == month2 {
+            return "\(month1) \(calendar.component(.day, from: weekStart)) - \(calendar.component(.day, from: end))"
+        }
+        return "\(month1) \(calendar.component(.day, from: weekStart)) - \(month2) \(calendar.component(.day, from: end))"
     }
 
-    @ViewBuilder
-    private func weekHeader(_ weekStart: Date) -> some View {
-        PlanWeekHeaderView(
-            weekStart: weekStart,
-            phase: phase(for: weekStart),
-            volumeKm: volume(for: weekStart),
-            isRecovery: isRecoveryWeek(weekStart)
-        )
-        .opacity(visibleWeekStarts.contains(weekStart) ? 1 : 0.85)
-        .animation(.easeOut(duration: 0.18), value: visibleWeekStarts.contains(weekStart))
+    private func weekSummary(_ weekStart: Date) -> String {
+        let workouts = workoutsByWeekStart[weekStart] ?? []
+        let activities = activitiesByWeekStart[weekStart] ?? []
+        let plannedMinutes = workouts.compactMap(\.expectedDurationSeconds).reduce(0, +) / 60
+        let doneMinutes = activities.reduce(0) { $0 + $1.durationSeconds } / 60
+        let plannedLoad = workouts.compactMap { $0.expectedDurationSeconds }.reduce(0) { $0 + TrainingLoad.sessionLoad(durationSeconds: $1, avgPaceSecondsPerKm: nil, paces: nil) }
+        let doneLoad = activities.reduce(0) { $0 + TrainingLoad.sessionLoad(durationSeconds: $1.durationSeconds, avgPaceSecondsPerKm: $1.avgPaceSecondsPerKm, paces: nil) }
+        if doneMinutes > 0 {
+            return "\(minutes(doneMinutes)) / \(minutes(plannedMinutes))  \(Int(doneLoad.rounded())) / \(Int(plannedLoad.rounded())) Load"
+        }
+        return "\(minutes(plannedMinutes))  \(Int(plannedLoad.rounded())) Load"
     }
 
-    private func phase(for weekStart: Date) -> TrainingPhase? {
-        guard let index = planWeekIndex(for: weekStart), let plan = plans.first else { return nil }
-        return plan.phase(forWeek: index)
+    private func minutes(_ value: Double) -> String {
+        let rounded = Int(value.rounded())
+        if rounded >= 60 {
+            let hours = rounded / 60
+            let minutes = rounded % 60
+            return minutes == 0 ? "\(hours)h" : "\(hours)h \(minutes)m"
+        }
+        return "\(rounded)m"
     }
 
-    private func volume(for weekStart: Date) -> Double? {
-        guard let index = planWeekIndex(for: weekStart), let plan = plans.first else { return nil }
-        return plan.weekTargetVolumesKm[index]
+    private func days(inWeekStarting weekStart: Date) -> [Date] {
+        (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: weekStart) }
     }
 
-    private func isRecoveryWeek(_ weekStart: Date) -> Bool {
-        guard let index = planWeekIndex(for: weekStart), let plan = plans.first else { return false }
-        return plan.weekIsDown[index]
+    private func workouts(on date: Date) -> [PlannedWorkout] {
+        workouts.filter { calendar.isDate($0.date, inSameDayAs: date) }
+    }
+
+    private func completedActivity(on date: Date) -> CompletedActivity? {
+        completedActivities.first { calendar.isDate($0.date, inSameDayAs: date) }
+    }
+
+    private func matchedWorkout(for activity: CompletedActivity) -> PlannedWorkout? {
+        workouts.first(where: { $0.matchedActivityUUID == activity.hkUUID }) ?? workouts(on: activity.date).first
     }
 }

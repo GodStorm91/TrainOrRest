@@ -12,6 +12,7 @@ struct PlanCalendarView: View {
     }
 
     @Query(sort: \PlannedWorkout.date) private var workouts: [PlannedWorkout]
+    @Query(sort: \CompletedActivity.date, order: .reverse) private var completedActivities: [CompletedActivity]
     @Query(sort: \PlanEdit.appliedAt, order: .reverse) private var planEdits: [PlanEdit]
     @Query private var goals: [Goal]
     @Environment(\.modelContext) private var modelContext
@@ -73,7 +74,12 @@ struct PlanCalendarView: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if mode == .month {
-            PlanMonthView(workouts: workouts, monthAnchor: $monthAnchor, selectedDate: $selectedDate)
+            PlanMonthView(
+                workouts: workouts,
+                completedActivities: completedActivities,
+                monthAnchor: $monthAnchor,
+                selectedDate: $selectedDate
+            )
         } else {
             PlanWeekListView(scrollToTodayToken: weekScrollToken)
         }

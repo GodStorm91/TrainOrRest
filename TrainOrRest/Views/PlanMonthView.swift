@@ -6,8 +6,11 @@ import SwiftUI
 /// dots and detail come from the planned workouts passed in.
 struct PlanMonthView: View {
     let workouts: [PlannedWorkout]
+    let completedActivities: [CompletedActivity]
     @Binding var monthAnchor: Date
     @Binding var selectedDate: Date
+
+    @State private var reviewActivity: CompletedActivity?
 
     private let calendar = Calendar.current
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 3), count: 7)
@@ -26,6 +29,9 @@ struct PlanMonthView: View {
             .padding(.bottom, 24)
         }
         .scrollIndicators(.hidden)
+        .sheet(item: $reviewActivity) { activity in
+            PostRunReviewSheet(activity: activity, plannedWorkout: matchedWorkout(for: activity))
+        }
     }
 
     // MARK: - Month navigation
@@ -190,7 +196,16 @@ struct PlanMonthView: View {
         let isToday = calendar.isDateInToday(selectedDate)
         return VStack(alignment: .leading, spacing: 10) {
             TorEyebrow(detailEyebrow(isToday: isToday)).tracking(2)
-            if dayWorkouts.isEmpty {
+            if let activity = completedActivity(on: selectedDate) {
+                CalendarRunSummaryCard(
+                    activity: activity,
+                    plannedWorkout: matchedWorkout(for: activity) ?? dayWorkouts.first,
+                    compact: false,
+                    onReview: { reviewActivity = activity }
+                )
+            }
+
+            if dayWorkouts.isEmpty && completedActivity(on: selectedDate) == nil {
                 restCard
             } else {
                 ForEach(dayWorkouts) { workout in
@@ -289,8 +304,8 @@ struct PlanMonthView: View {
     }
 
     private func subtitle(_ workout: PlannedWorkout) -> String {
-        var parts = [Formatters.kilometers(workout.distanceKm * 1000)]
-        if let band = workout.paceBand { parts.append(Formatters.paceBand(band)) }
+        var parts = [String(format: "%.2f km", workout.distanceKm)]
+        if let band = workout.paceBand { parts.append(Formatters.paceBand(band).replacingOccurrences(of: " /km", with: "/km")) }
         if let seconds = workout.expectedDurationSeconds {
             parts.append("~\(Int((seconds / 60).rounded())) min")
         }
@@ -301,5 +316,13 @@ struct PlanMonthView: View {
 
     private func workouts(on date: Date) -> [PlannedWorkout] {
         workouts.filter { calendar.isDate($0.date, inSameDayAs: date) }
+    }
+
+    private func completedActivity(on date: Date) -> CompletedActivity? {
+        completedActivities.first { calendar.isDate($0.date, inSameDayAs: date) }
+    }
+
+    private func matchedWorkout(for activity: CompletedActivity) -> PlannedWorkout? {
+        workouts.first(where: { $0.matchedActivityUUID == activity.hkUUID }) ?? workouts(on: activity.date).first
     }
 }
