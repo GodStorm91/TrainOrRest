@@ -37,6 +37,22 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertTrue(text.contains("detail is the target day to move it to"))
     }
 
+    func testCoachContextTreatsVietnameseTaiTapAsTrainingLoadNotPlanEdit() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+
+        let text = try CoachContextBuilder.build(in: context, today: qualityDay, calendar: calendar)
+
+        XCTAssertTrue(text.contains("'tải tập'"))
+        XCTAssertTrue(text.contains("mean training load/workload"))
+        XCTAssertTrue(text.contains("not calendar-edit requests"))
+        XCTAssertTrue(text.contains("Training load this week"))
+        XCTAssertTrue(text.contains("completed load"))
+        XCTAssertTrue(text.contains("planned remaining load"))
+        XCTAssertTrue(text.contains("projected total load"))
+    }
+
     func testCoachContextIncludesPersonalSettingsFromUserDefaults() throws {
         let container = try makeContainer()
         let context = container.mainContext
