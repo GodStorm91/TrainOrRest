@@ -40,6 +40,9 @@ struct PlanCalendarView: View {
             content
         }
         .background(Theme.bg)
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 82)
+        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
