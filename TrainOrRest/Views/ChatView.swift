@@ -658,6 +658,9 @@ private struct ChatHistorySheet: View {
     let activeThreadID: UUID?
     let onSelect: (UUID) -> Void
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @State private var threadBeingRenamed: ChatThread?
+    @State private var renameDraft = ""
 
     var body: some View {
         NavigationStack {
@@ -689,55 +692,107 @@ private struct ChatHistorySheet: View {
                         .font(.body.weight(.semibold))
                 }
             }
+            .alert("Rename chat", isPresented: renameAlertBinding) {
+                TextField("Chat name", text: $renameDraft)
+                Button("Cancel", role: .cancel) { clearRenameDraft() }
+                Button("Save") { saveRename() }
+            } message: {
+                Text("Give this coach thread a name you'll recognize later.")
+            }
         }
         .presentationBackground(Theme.bg)
         .presentationDragIndicator(.visible)
     }
 
     private func chatRow(_ thread: ChatThread) -> some View {
-        Button {
-            onSelect(thread.uuid)
-            dismiss()
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: thread.uuid == activeThreadID ? "message.fill" : "message")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: 30, height: 30)
-                    .background(Theme.accent.opacity(0.12), in: Circle())
+        HStack(spacing: 10) {
+            Button {
+                onSelect(thread.uuid)
+                dismiss()
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: thread.uuid == activeThreadID ? "message.fill" : "message")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                        .frame(width: 30, height: 30)
+                        .background(Theme.accent.opacity(0.12), in: Circle())
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title(for: thread))
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(Theme.text)
-                        .lineLimit(1)
-                    Text(relativeDate(for: thread.updatedAt))
-                        .font(.caption)
-                        .foregroundStyle(Theme.dim)
-                }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title(for: thread))
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(Theme.text)
+                            .lineLimit(1)
+                        Text(relativeDate(for: thread.updatedAt))
+                            .font(.caption)
+                            .foregroundStyle(Theme.dim)
+                    }
 
-                Spacer(minLength: 8)
+                    Spacer(minLength: 8)
 
-                if thread.uuid == activeThreadID {
-                    Image(systemName: "checkmark")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(Theme.good)
-                } else {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(Theme.faint)
+                    if thread.uuid == activeThreadID {
+                        Image(systemName: "checkmark")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Theme.good)
+                    } else {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Theme.faint)
+                    }
                 }
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .strokeBorder(Theme.border, lineWidth: 1)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .buttonStyle(.plain)
+
+            Menu {
+                Button {
+                    beginRename(thread)
+                } label: {
+                    Label("Rename", systemImage: "pencil")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Theme.dim)
+                    .frame(width: 36, height: 36)
+                    .background(Theme.chip, in: Circle())
+            }
+            .accessibilityLabel("Chat options")
         }
-        .buttonStyle(.plain)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private var renameAlertBinding: Binding<Bool> {
+        Binding(
+            get: { threadBeingRenamed != nil },
+            set: { isPresented in
+                if !isPresented { clearRenameDraft() }
+            }
+        )
+    }
+
+    private func beginRename(_ thread: ChatThread) {
+        threadBeingRenamed = thread
+        renameDraft = title(for: thread)
+    }
+
+    private func saveRename() {
+        guard let thread = threadBeingRenamed else { return }
+        let clean = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        thread.title = clean.isEmpty ? "New chat" : clean
+        thread.updatedAt = .now
+        try? modelContext.save()
+        clearRenameDraft()
+    }
+
+    private func clearRenameDraft() {
+        threadBeingRenamed = nil
+        renameDraft = ""
     }
 
     private func title(for thread: ChatThread) -> String {

@@ -123,11 +123,12 @@ struct PostRunReviewSheet: View {
             }
 
             Button {
+                markReviewed()
                 withAnimation(.easeOut(duration: 0.2)) {
                     showDetailedReview.toggle()
                 }
             } label: {
-                Label("Review", systemImage: "message.badge")
+                Label(showDetailedReview ? "Hide Review" : "Review", systemImage: "message.badge")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(PostRunActionButtonStyle())
@@ -173,9 +174,15 @@ struct PostRunReviewSheet: View {
         )
     }
 
+    private func markReviewed() {
+        if activity.postRunReviewDismissedAt == nil {
+            activity.postRunReviewDismissedAt = .now
+            try? modelContext.save()
+        }
+    }
+
     private func close() {
-        activity.postRunReviewDismissedAt = .now
-        try? modelContext.save()
+        markReviewed()
         dismiss()
     }
 }
