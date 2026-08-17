@@ -48,17 +48,17 @@ enum AppAppearance: String, CaseIterable, Identifiable {
 enum Theme {
     // MARK: - Palette (dark / light token pairs from the design)
 
-    static let bg = dynamic(dark: 0x08080D, light: 0xF4F5FA)
-    static let card = dynamicA(dark: (0x14141D, 1.0), light: (0xFFFFFF, 0.86))
-    static let card2 = dynamicA(dark: (0x1B1B26, 1.0), light: (0xFFFFFF, 0.62))
+    static let bg = dynamic(dark: 0x08080D, light: 0xF7F6F2)
+    static let card = dynamicA(dark: (0x14141D, 1.0), light: (0xFFFFFF, 0.98))
+    static let card2 = dynamicA(dark: (0x1B1B26, 1.0), light: (0xFFFFFF, 0.92))
     static let text = dynamic(dark: 0xF5F5FA, light: 0x11131A)
 
     static let line = dynamicA(dark: (0xFFFFFF, 0.07), light: (0x182033, 0.08))
-    static let border = dynamicA(dark: (0xFFFFFF, 0.08), light: (0x182033, 0.10))
-    static let dim = dynamicA(dark: (0xF5F5FA, 0.62), light: (0x11131A, 0.68))
-    // Raised from the design's 0.32 so captions clear WCAG contrast on the dark canvas.
-    static let faint = dynamicA(dark: (0xF5F5FA, 0.46), light: (0x11131A, 0.52))
-    static let chip = dynamicA(dark: (0xFFFFFF, 0.06), light: (0xFFFFFF, 0.58))
+    static let border = dynamicA(dark: (0xFFFFFF, 0.08), light: (0x182033, 0.16))
+    static let dim = dynamicA(dark: (0xF5F5FA, 0.62), light: (0x11131A, 0.74))
+    // Raised so captions clear WCAG contrast on both canvases.
+    static let faint = dynamicA(dark: (0xF5F5FA, 0.50), light: (0x11131A, 0.62))
+    static let chip = dynamicA(dark: (0xFFFFFF, 0.06), light: (0xFFFFFF, 0.82))
 
     /// Interactive primary: buttons, links, selected state, and focus.
     static let accent = dynamic(dark: 0x9B7BF0, light: 0x7C3AED)

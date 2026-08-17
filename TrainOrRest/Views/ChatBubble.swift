@@ -28,6 +28,9 @@ struct CoachAvatar: View {
 struct ChatBubble: View {
     let message: ChatMessage
     var hidesSources: Bool = false
+    var showsAvatar: Bool = true
+    var showsSource: Bool = true
+    var isGroupedWithPrevious: Bool = false
 
     @State private var showsGroundingSummary = false
 
@@ -37,24 +40,29 @@ struct ChatBubble: View {
         HStack(alignment: .bottom, spacing: 9) {
             if isUser {
                 Spacer(minLength: 40)
-            } else {
+            } else if showsAvatar {
                 CoachAvatar(size: 26)
+                    .accessibilityHidden(true)
+            } else {
+                Color.clear.frame(width: 26, height: 26)
             }
 
-            VStack(alignment: isUser ? .trailing : .leading, spacing: 5) {
+            VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
                 messageBody
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
                     .background(bubbleShape.fill(isUser ? Theme.accent : Theme.card))
                     .overlay { if !isUser { bubbleShape.strokeBorder(Theme.border, lineWidth: 1) } }
+                    .shadow(color: isUser ? .clear : Color.black.opacity(0.045), radius: 10, x: 0, y: 4)
 
                 if let applied = message.appliedAdjustment, !message.text.hasPrefix("Applied:") {
                     appliedBadge(applied)
                         .padding(.top, 1)
                 }
 
-                if !hidesSources, !isUser, let footnote = message.groundingFootnote, let summary = message.groundingSummary {
+                if showsSource, !hidesSources, !isUser, let footnote = message.groundingFootnote, let summary = message.groundingSummary {
                     groundingFootnote(footnote, summary: summary)
+                        .padding(.top, 2)
                 }
             }
 
@@ -63,15 +71,23 @@ struct ChatBubble: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+        .padding(.top, isGroupedWithPrevious ? -8 : 0)
         .contextMenu {
             Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 UIPasteboard.general.string = message.text
             } label: {
                 Label("Sao chép", systemImage: "doc.on.doc")
             }
+            .accessibilityLabel("Sao chép")
+
             if !isUser {
-                Button {} label: { Label("Đánh giá", systemImage: "hand.thumbsup") }
+                Button {} label: { Label("Hữu ích", systemImage: "hand.thumbsup") }
+                    .accessibilityLabel("Hữu ích")
+                Button {} label: { Label("Không hữu ích", systemImage: "hand.thumbsdown") }
+                    .accessibilityLabel("Không hữu ích")
                 Button(role: .destructive) {} label: { Label("Báo lỗi", systemImage: "exclamationmark.bubble") }
+                    .accessibilityLabel("Báo lỗi")
             }
         }
         .sheet(isPresented: $showsGroundingSummary) {
@@ -125,7 +141,7 @@ struct ChatBubble: View {
         } label: {
             Text(sourceLine(for: footnote))
                 .font(.caption.weight(.medium))
-                .foregroundStyle(Theme.faint)
+                .foregroundStyle(Theme.dim)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())

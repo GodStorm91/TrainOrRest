@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// The contextual "Ask Next" suggestion strip that sits above the composer:
-/// one scrollable row of quick prompts, the first highlighted as the primary
-/// suggestion. Tapping a chip hands its text back to the composer.
+/// The contextual "Ask Next" suggestion strip that sits above the composer.
+/// P1 keeps it quiet: at most two full-width rows, no horizontal clipping.
 struct CoachAskNextStrip: View {
     let prompts: [String]
     var label: String = "ASK NEXT"
@@ -22,13 +21,10 @@ struct CoachAskNextStrip: View {
                 }
                 .padding(.horizontal, 4)
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(Array(prompts.enumerated()), id: \.element) { index, prompt in
-                            chip(prompt, primary: index == 0)
-                        }
+                VStack(spacing: 8) {
+                    ForEach(Array(prompts.prefix(2).enumerated()), id: \.element) { index, prompt in
+                        chip(prompt, primary: index == 0)
                     }
-                    .padding(.horizontal, 2)
                 }
             }
         }
@@ -39,9 +35,13 @@ struct CoachAskNextStrip: View {
             Text(text)
                 .font(.system(size: 13, weight: primary ? .semibold : .medium))
                 .foregroundStyle(primary ? Theme.accent : Theme.text)
-                .lineLimit(1)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minHeight: 44, alignment: .center)
                 .padding(.horizontal, 14)
-                .padding(.vertical, 9)
+                .padding(.vertical, 8)
                 .background(
                     primary ? Theme.accentSoft : Theme.card,
                     in: RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -52,5 +52,6 @@ struct CoachAskNextStrip: View {
                 )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(text)
     }
 }

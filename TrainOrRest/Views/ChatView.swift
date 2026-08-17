@@ -1,3 +1,5 @@
+import CoreImage
+import ImageIO
 import PhotosUI
 import SwiftData
 import SwiftUI
@@ -17,6 +19,7 @@ struct ChatView: View {
     @EnvironmentObject private var chatStore: CoachChatStore
     @EnvironmentObject private var chatSession: CoachChatSessionState
     @EnvironmentObject private var replacementCoordinator: WorkoutReplacementCoordinator
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var draft = ""
     @State private var hasAPIKey = false
     @State private var evidence = EvidenceSelection()
@@ -25,6 +28,8 @@ struct ChatView: View {
     @State private var selectedImage: UIImage?
     @State private var evidenceReview: EvidenceReviewPresentation?
     @State private var isChatListPresented = false
+    @State private var isSavedPromptsPresented = false
+    @State private var isHeaderCollapsed = false
     @State private var softwareKeyboardHeight: CGFloat = 0
     @State private var planTransaction: ChatPlanTransaction?
     @FocusState private var composerFocused: Bool
@@ -98,6 +103,9 @@ struct ChatView: View {
         .onChange(of: allMessages.count) {
             attachUnthreadedMessagesToActiveThread()
         }
+        .onChange(of: selectedPhotoItem) { _, item in
+            loadImageAttachment(from: item)
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
             updateKeyboardHeight(from: notification)
         }
@@ -136,6 +144,14 @@ struct ChatView: View {
             }
             .presentationDetents([.medium, .large])
         }
+        .sheet(isPresented: $isSavedPromptsPresented) {
+            SavedPromptsSheet(prompts: savedPrompts) { prompt in
+                draft = prompt
+                composerFocused = true
+                isSavedPromptsPresented = false
+            }
+            .presentationDetents([.height(310), .medium])
+        }
     }
 
     private var chatBackground: some View {
@@ -143,21 +159,21 @@ struct ChatView: View {
             Theme.bg
             LinearGradient(
                 colors: [
-                    Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x07070C) : UIColor(hex: 0xFFFFFF) }),
+                    Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x07070C) : UIColor(hex: 0xFFFEFB) }),
                     Theme.bg,
-                    Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x10111A) : UIColor(hex: 0xEEF1F8) })
+                    Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x10111A) : UIColor(hex: 0xF2F3F6) })
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             RadialGradient(
-                colors: [Theme.accent.opacity(0.14), .clear],
+                colors: [Theme.accent.opacity(0.055), .clear],
                 center: .topTrailing,
                 startRadius: 20,
                 endRadius: 360
             )
             RadialGradient(
-                colors: [Theme.good.opacity(0.08), .clear],
+                colors: [Theme.good.opacity(0.045), .clear],
                 center: .bottomLeading,
                 startRadius: 40,
                 endRadius: 420
@@ -166,39 +182,52 @@ struct ChatView: View {
     }
 
     private var topControlDeck: some View {
-        HStack(alignment: .top) {
-            LiquidGlassGroup {
-                Button { isChatListPresented = true } label: {
-                    Image(systemName: "line.3.horizontal").torTopControlIcon()
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Menu")
+        HStack(spacing: 10) {
+            Button { isChatListPresented = true } label: {
+                Image(systemName: "line.3.horizontal")
+                    .torTopControlIcon()
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Mở menu")
 
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 7) {
+                    if !isHeaderCollapsed { CoachAvatar(size: 24).accessibilityHidden(true) }
+                    Text("Coach")
+                        .font(.torHeading(isHeaderCollapsed ? 16 : 18, .bold))
+                        .foregroundStyle(Theme.text)
+                }
+                if !isHeaderCollapsed, let updated = latestGroundingTimeText {
+                    Text("Dữ liệu cập nhật lúc \(updated)")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(Theme.dim)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Menu {
                 Button { createNewThread() } label: {
-                    Image(systemName: "square.and.pencil").torTopControlIcon()
+                    Label("Cuộc trò chuyện mới", systemImage: "square.and.pencil")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("New conversation")
+                Button { isChatListPresented = true } label: {
+                    Label("Lịch sử trò chuyện", systemImage: "clock.arrow.circlepath")
+                }
+                NavigationLink { SettingsView() } label: {
+                    Label("Cài đặt", systemImage: "gearshape")
+                }
+            } label: {
+                Image(systemName: isHeaderCollapsed ? "ellipsis" : "square.and.pencil")
+                    .torTopControlIcon()
             }
-
-            Spacer()
-
-            LiquidGlassGroup {
-                Button {} label: {
-                    Image(systemName: "bell").torTopControlIcon()
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Notifications")
-
-                NavigationLink {
-                    SettingsView()
-                } label: {
-                    Image(systemName: "gearshape").torTopControlIcon()
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Settings")
-            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Cuộc trò chuyện mới")
         }
+        .frame(height: isHeaderCollapsed ? 44 : 52)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 2)
+        .torGlass(cornerRadius: isHeaderCollapsed ? 22 : 24, tint: .subtle)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isHeaderCollapsed)
     }
 
     private var coachHeader: some View {
@@ -305,10 +334,24 @@ struct ChatView: View {
     private var messageFeed: some View {
         ScrollViewReader { proxy in
             ScrollView {
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: ChatScrollOffsetPreferenceKey.self,
+                        value: geometry.frame(in: .named("chatFeed")).minY
+                    )
+                }
+                .frame(height: 0)
+
                 LazyVStack(spacing: 14) {
-                    ForEach(messages) { message in
-                        ChatBubble(message: message, hidesSources: isSoftwareKeyboardVisible)
-                            .id(message.date)
+                    ForEach(Array(messages.enumerated()), id: \.element.date) { index, message in
+                        ChatBubble(
+                            message: message,
+                            hidesSources: isSoftwareKeyboardVisible,
+                            showsAvatar: shouldShowAssistantAvatar(at: index),
+                            showsSource: shouldShowAssistantSource(at: index),
+                            isGroupedWithPrevious: isGroupedWithPreviousMessage(at: index)
+                        )
+                        .id(message.date)
                     }
                     Color.clear
                         .frame(height: 1)
@@ -317,6 +360,17 @@ struct ChatView: View {
                 .padding(.horizontal, 14)
                 .padding(.top, 12)
                 .padding(.bottom, 18)
+            }
+            .coordinateSpace(name: "chatFeed")
+            .onPreferenceChange(ChatScrollOffsetPreferenceKey.self) { offset in
+                let collapsed = offset < -26
+                if collapsed != isHeaderCollapsed {
+                    if reduceMotion {
+                        isHeaderCollapsed = collapsed
+                    } else {
+                        withAnimation(.easeOut(duration: 0.16)) { isHeaderCollapsed = collapsed }
+                    }
+                }
             }
             .scrollDismissesKeyboard(.interactively)
             .onAppear {
@@ -334,8 +388,34 @@ struct ChatView: View {
         }
     }
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
-        guard !messages.isEmpty else { return }
+
+    private var latestGroundingTimeText: String? {
+        messages.reversed().compactMap(groundingTimeText).first
+    }
+
+    private func groundingTimeText(for message: ChatMessage) -> String? {
+        guard let footnote = message.groundingFootnote else { return nil }
+        let raw = footnote.components(separatedBy: " · ").first?.replacingOccurrences(of: "Based on ", with: "") ?? ""
+        return raw.isEmpty ? nil : raw
+    }
+
+    private func isGroupedWithPreviousMessage(at index: Int) -> Bool {
+        guard index > 0, messages[index].role == .assistant else { return false }
+        return messages[index - 1].role == .assistant
+    }
+
+    private func shouldShowAssistantAvatar(at index: Int) -> Bool {
+        guard messages[index].role == .assistant else { return true }
+        return !isGroupedWithPreviousMessage(at: index)
+    }
+
+    private func shouldShowAssistantSource(at index: Int) -> Bool {
+        guard messages[index].role == .assistant else { return false }
+        let isLastInAssistantGroup = index == messages.indices.last || messages[index + 1].role != .assistant
+        return isLastInAssistantGroup && messages[index].groundingFootnote != nil
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {        guard !messages.isEmpty else { return }
         let action = { proxy.scrollTo(bottomAnchorID, anchor: .bottom) }
         DispatchQueue.main.async {
             if animated {
@@ -419,15 +499,17 @@ struct ChatView: View {
 
     @ViewBuilder
     private var attachmentChips: some View {
-        if evidence.workout != nil || selectedImageAttachment != nil {
-            HStack(spacing: 8) {
+        if evidence.readinessSnapshot || evidence.workout != nil || selectedImageAttachment != nil {
+            FlowLayout(spacing: 8, lineSpacing: 8) {
+                if evidence.readinessSnapshot {
+                    removableChip("Dữ liệu sức khỏe", symbol: "heart.fill") { evidence.readinessSnapshot = false }
+                }
                 if evidence.workout != nil {
-                    removableChip("Buổi tập", symbol: "figure.run") { evidence.workout = nil }
+                    removableChip("Buổi tập gần nhất", symbol: "figure.run") { evidence.workout = nil }
                 }
                 if selectedImageAttachment != nil {
                     removableChip("Ảnh", symbol: "photo") { clearImageAttachment() }
                 }
-                Spacer(minLength: 0)
             }
             .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
@@ -456,14 +538,25 @@ struct ChatView: View {
     }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        HStack(alignment: .bottom, spacing: 6) {
             Menu {
-                Button("Dùng thể trạng hiện tại") { evidence.readinessSnapshot = true }
-                Button("Kế hoạch tuần này") { evidence.weekPlan = true }
-                Button("Xem nguồn dữ liệu") { presentEvidenceReview(confirming: nil) }
-                Button("Prompt đã lưu") { draft = "Hôm nay tôi nên tập gì?" }
+                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                    Label("Đính kèm hình ảnh", systemImage: "photo")
+                }
+                Button { evidence.readinessSnapshot = true } label: {
+                    Label("Dữ liệu sức khỏe", systemImage: "heart")
+                }
+                Button { attachLatestWorkout() } label: {
+                    Label("Buổi tập", systemImage: "figure.run")
+                }
+                Button { isSavedPromptsPresented = true } label: {
+                    Label("Câu hỏi đã lưu", systemImage: "bookmark")
+                }
+                .accessibilityLabel("Mở câu hỏi đã lưu")
                 if selectedImageAttachment != nil {
-                    Button("Xóa ảnh", role: .destructive) { clearImageAttachment() }
+                    Button(role: .destructive) { clearImageAttachment() } label: {
+                        Label("Xóa ảnh", systemImage: "xmark.circle")
+                    }
                 }
             } label: {
                 Image(systemName: "plus")
@@ -473,9 +566,9 @@ struct ChatView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Thêm ngữ cảnh")
+            .accessibilityLabel("Thêm nội dung")
 
-            TextField("Hỏi Coach bất cứ điều gì…", text: $draft, axis: .vertical)
+            TextField(isSoftwareKeyboardVisible ? "Nội dung đang nhập…" : "Hỏi Coach bất cứ điều gì…", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.body)
                 .foregroundStyle(Theme.text)
@@ -485,22 +578,19 @@ struct ChatView: View {
                 .focused($composerFocused)
                 .disabled(replacementCoordinator.hasPendingDecision || replacementCoordinator.isConfirming)
 
-            Button {
-                if isSoftwareKeyboardVisible {
+            if isSoftwareKeyboardVisible {
+                Button {
                     composerFocused = false
-                } else {
-                    draft = "Hôm nay tôi nên tập gì?"
-                    composerFocused = true
+                } label: {
+                    Image(systemName: "keyboard.chevron.compact.down")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Theme.dim)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
-            } label: {
-                Image(systemName: isSoftwareKeyboardVisible ? "keyboard.chevron.compact.down" : "bookmark")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Theme.dim)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .accessibilityLabel("Ẩn bàn phím")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(isSoftwareKeyboardVisible ? "Ẩn bàn phím" : "Prompt đã lưu")
 
             Button {
                 send()
@@ -520,16 +610,37 @@ struct ChatView: View {
                 .opacity(isSendDisabled ? 0.45 : 1)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Gửi tin nhắn")
             .disabled(isSendDisabled)
         }
         .padding(.leading, 2)
         .padding(.trailing, 4)
         .padding(.vertical, 4)
-        .torGlass(cornerRadius: 28, tint: .graphite)
+        .torGlass(cornerRadius: 26, tint: .graphite)
     }
 
-    private var isSendDisabled: Bool {
-        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+    private var savedPrompts: [String] {
+        [
+            "Hôm nay tôi nên tập gì?",
+            "Tải tập tuần này của tôi thế nào?",
+            "Làm sao để phục hồi nhanh hơn?",
+            "Buổi sau có nên tăng cường độ không?"
+        ]
+    }
+
+    private func attachLatestWorkout() {
+        if let activity = completedActivities.first {
+            evidence.workout = .completed(activity.hkUUID)
+        } else if let workout = plannedWorkouts.first(where: { $0.date >= calendar.startOfDay(for: .now) }) {
+            evidence.workout = .planned(workout.uuid)
+        } else {
+            draft = "Chọn buổi tập gần nhất để Coach phân tích"
+            composerFocused = true
+        }
+    }
+
+    private var isSendDisabled: Bool {        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || chatStore.isSending
             || replacementCoordinator.hasPendingDecision
             || replacementCoordinator.isConfirming
@@ -597,9 +708,11 @@ struct ChatView: View {
                 threadID: threadID,
                 in: modelContext
             )
-            evidence.workout = nil
-            clearImageAttachment()
-            await MainActor.run { composerFocused = true }
+            await MainActor.run {
+                evidence = EvidenceSelection()
+                clearImageAttachment()
+                composerFocused = true
+            }
         }
     }
 
@@ -760,8 +873,41 @@ struct ChatView: View {
         return attachments
     }
 
-    private func clearImageAttachment() {
-        selectedPhotoItem = nil
+
+    private func loadImageAttachment(from item: PhotosPickerItem?) {
+        guard let item else {
+            clearImageAttachment()
+            return
+        }
+        Task {
+            guard let data = try? await item.loadTransferable(type: Data.self),
+                  let compressed = compressedImageData(from: data),
+                  let image = UIImage(data: compressed) else { return }
+            await MainActor.run {
+                selectedImageAttachment = CoachImageAttachment(
+                    data: compressed,
+                    mediaType: "image/jpeg",
+                    filename: "training-context.jpg"
+                )
+                selectedImage = image
+                evidence.hasPhoto = true
+            }
+        }
+    }
+
+    private func compressedImageData(from data: Data) -> Data? {
+        guard var image = CIImage(data: data, options: [.applyOrientationProperty: true]) else { return nil }
+        let maxSide: CGFloat = 1280
+        let largestSide = max(image.extent.width, image.extent.height)
+        let scale = largestSide > maxSide ? maxSide / largestSide : 1
+        image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let options: [CIImageRepresentationOption: Any] = [
+            CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): 0.78
+        ]
+        return CIContext().jpegRepresentation(of: image, colorSpace: CGColorSpaceCreateDeviceRGB(), options: options)
+    }
+
+    private func clearImageAttachment() {        selectedPhotoItem = nil
         selectedImageAttachment = nil
         selectedImage = nil
         evidence.hasPhoto = false
@@ -790,6 +936,84 @@ struct ChatView: View {
 
     private func isPlanAuditMessage(_ message: ChatMessage) -> Bool {
         message.role == .assistant && message.appliedAdjustment != nil && message.text.hasPrefix("Applied:")
+    }
+}
+
+private struct ChatScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct SavedPromptsSheet: View {
+    let prompts: [String]
+    let onSelect: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: "bookmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 30, height: 30)
+                    .background(Theme.accentSoft, in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Câu hỏi đã lưu")
+                        .font(.torHeading(20, .bold))
+                        .foregroundStyle(Theme.text)
+                    Text("Chọn một câu, rồi sửa trước khi gửi.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.dim)
+                }
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Theme.dim)
+                        .frame(width: 36, height: 36)
+                        .background(Theme.chip, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Đóng")
+            }
+
+            VStack(spacing: 8) {
+                ForEach(prompts, id: \.self) { prompt in
+                    Button {
+                        onSelect(prompt)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Text(prompt)
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(Theme.text)
+                                .multilineTextAlignment(.leading)
+                                .lineLimit(2)
+                            Spacer()
+                            Image(systemName: "arrow.turn.down.left")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(Theme.faint)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(minHeight: 44)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(Theme.border, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Chèn câu hỏi đã lưu: \(prompt)")
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(18)
+        .presentationBackground(.thinMaterial)
+        .presentationDragIndicator(.visible)
     }
 }
 

@@ -22,8 +22,8 @@ struct PlanUpdateCard: View {
         card
             .sheet(isPresented: $showsValidationReceipt) {
                 ReceiptSheet(
-                    title: "Validated",
-                    subtitle: "Checked by local training rules before it can change your plan.",
+                    title: "Đã kiểm tra kế hoạch",
+                    subtitle: "Đã kiểm tra bằng quy tắc tập luyện trên máy trước khi thay đổi kế hoạch.",
                     rows: validationRows
                 )
             }
