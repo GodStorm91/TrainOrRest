@@ -10,7 +10,6 @@ struct ProfileView: View {
     @Query(sort: \DailyReadiness.date, order: .reverse) private var readiness: [DailyReadiness]
 
     @AppStorage(PersonalCoachSettings.weightKgKey) private var weightKg = ""
-    @AppStorage(PersonalCoachSettings.storageKey) private var coachNotes = ""
 
     @State private var showGoalEntry = false
     @State private var showAthleteProfile = false
@@ -245,8 +244,6 @@ struct ProfileView: View {
     }
 
     private var athleteName: String {
-        let notes = PersonalCoachSettings.sanitizedNotes(coachNotes)
-        if notes.localizedCaseInsensitiveContains("Khanh") { return "Khanh Nguyen" }
         return "Khanh Nguyen"
     }
 
@@ -387,7 +384,6 @@ struct AthleteProfileEditView: View {
     @AppStorage(PersonalCoachSettings.ageKey) private var age = ""
     @AppStorage(PersonalCoachSettings.heightCmKey) private var heightCm = ""
     @AppStorage(PersonalCoachSettings.weightKgKey) private var weightKg = ""
-    @AppStorage(PersonalCoachSettings.storageKey) private var notes = ""
 
     var body: some View {
         Form {
@@ -395,19 +391,6 @@ struct AthleteProfileEditView: View {
                 numberField("Age", text: $age, unit: "years", allowsDecimal: false)
                 numberField("Height", text: $heightCm, unit: "cm", allowsDecimal: true)
                 numberField("Weight", text: $weightKg, unit: "kg", allowsDecimal: true)
-            }
-            Section {
-                TextEditor(text: $notes)
-                    .frame(minHeight: 120)
-                    .autocorrectionDisabled()
-                    .onChange(of: notes) { _, newValue in
-                        let sanitized = PersonalCoachSettings.sanitizedNotes(newValue)
-                        if sanitized != newValue { notes = sanitized }
-                    }
-            } header: {
-                Text("Running context")
-            } footer: {
-                Text("Keep this athlete-specific: injuries, preferred training days, fueling constraints, and coaching preferences. Connections and app settings live in Settings.")
             }
         }
         .navigationTitle("Athlete Profile")

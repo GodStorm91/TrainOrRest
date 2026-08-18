@@ -98,7 +98,7 @@ struct ChatView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task {
             refreshKeyState()
-            chatStore.lastError = nil
+            chatStore.resetError()
             migrateLegacyMessagesIfNeeded()
             removePersistedTransientErrorMessages()
             if reviewRequest == nil {
@@ -108,7 +108,7 @@ struct ChatView: View {
         }
         .onAppear {
             refreshKeyState()
-            chatStore.lastError = nil
+            chatStore.resetError()
             migrateLegacyMessagesIfNeeded()
             removePersistedTransientErrorMessages()
             if reviewRequest == nil {
@@ -132,13 +132,23 @@ struct ChatView: View {
             updateKeyboardHeight(from: notification, forceHidden: true)
         }
         .overlay(alignment: .top) {
-            if let error = chatStore.lastError ?? replacementCoordinator.lastError {
-                Text(error)
-                    .font(.footnote)
-                    .foregroundStyle(.white)
-                    .padding(8)
-                    .background(Theme.bad, in: Capsule())
-                .padding(.top, 4)
+            if let event = chatStore.errorEvent {
+                ChatErrorBannerView(
+                    event: event,
+                    language: language,
+                    isRetrying: chatStore.isRetrying,
+                    isCompact: isSoftwareKeyboardVisible,
+                    onRetry: {
+                        Task { await chatStore.retryFailedResponse(in: modelContext) }
+                    },
+                    onDismiss: {
+                        chatStore.dismissError(event.id)
+                    }
+                )
+                .id(event.id)
+                .padding(.horizontal, 16)
+                .padding(.top, isHeaderCollapsed ? 62 : 72)
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .sheet(item: $evidenceReview) { review in
@@ -845,7 +855,7 @@ struct ChatView: View {
             }
             evidenceReview = EvidenceReviewPresentation(snapshot: snapshot, pendingSend: pendingWithSnapshot)
         } catch {
-            chatStore.lastError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            chatStore.presentError((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
         }
     }
 
@@ -853,7 +863,7 @@ struct ChatView: View {
         guard let request = reviewRequest, lastConsumedReviewRequestID != request.id else { return }
         lastConsumedReviewRequestID = request.id
         guard let activity = completedActivities.first(where: { $0.hkUUID == request.activityUUID }) else {
-            chatStore.lastError = "Không tìm thấy buổi chạy để review. Thử đồng bộ lại Health rồi mở lại Calendar."
+            chatStore.presentError("Không tìm thấy buổi chạy để review. Thử đồng bộ lại Health rồi mở lại Calendar.")
             onReviewRequestConsumed(request)
             return
         }
@@ -1048,6 +1058,92 @@ struct ChatView: View {
 
     private func isPlanAuditMessage(_ message: ChatMessage) -> Bool {
         message.role == .assistant && message.appliedAdjustment != nil && message.text.hasPrefix("Applied:")
+    }
+}
+
+private struct ChatErrorBannerView: View {
+    let event: CoachChatErrorEvent
+    let language: CoachLanguage
+    let isRetrying: Bool
+    let isCompact: Bool
+    let onRetry: () -> Void
+    let onDismiss: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Theme.bad)
+                .frame(width: 24, height: 28)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: isCompact ? 6 : 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(event.title)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(event.message)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Theme.dim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if event.canRetry || isRetrying {
+                    Button(action: onRetry) {
+                        HStack(spacing: 6) {
+                            if isRetrying {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                    .tint(Theme.bad)
+                            }
+                            Text(isRetrying ? language.retryingCoachErrorTitle : event.retryTitle)
+                                .font(.caption.weight(.bold))
+                        }
+                        .foregroundStyle(Theme.bad)
+                        .frame(minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isRetrying || !event.canRetry)
+                    .accessibilityLabel(language.retryLabel)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(Theme.text)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(language.dismissErrorLabel)
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 6)
+        .padding(.vertical, isCompact ? 8 : 10)
+        .background(errorSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Theme.bad.opacity(0.26), lineWidth: 1)
+        )
+        .shadow(color: Theme.bad.opacity(0.12), radius: reduceMotion ? 0 : 16, y: reduceMotion ? 0 : 8)
+        .onAppear {
+            UIAccessibility.post(
+                notification: .announcement,
+                argument: "\(language.chatErrorAnnouncementPrefix): \(event.title)"
+            )
+        }
+    }
+
+    private var errorSurface: Color {
+        Color(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(hex: 0x351316).withAlphaComponent(0.96)
+                : UIColor(hex: 0xFFF0F0).withAlphaComponent(0.98)
+        })
     }
 }
 

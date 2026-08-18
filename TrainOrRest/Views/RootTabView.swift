@@ -7,6 +7,7 @@ struct RootTabView: View {
 
     @State private var selection: Tab = .chat
     @State private var isKeyboardVisible = false
+    @State private var isBottomDockHiddenByChild = false
     @State private var pendingReviewChatRequest: CalendarReviewChatRequest?
     @Namespace private var dockNamespace
 
@@ -33,6 +34,10 @@ struct RootTabView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             withAnimation(.easeOut(duration: 0.18)) { isKeyboardVisible = false }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .torSetBottomDockHidden)) { notification in
+            let hidden = notification.object as? Bool ?? false
+            withAnimation(.easeOut(duration: 0.18)) { isBottomDockHiddenByChild = hidden }
         }
         .animation(.smooth(duration: 0.26), value: selection)
         .tint(Theme.accent)
@@ -75,7 +80,7 @@ struct RootTabView: View {
     }
 
     private var shouldShowDock: Bool {
-        !isKeyboardVisible && selection != .chat
+        !isKeyboardVisible && !isBottomDockHiddenByChild && selection != .chat
     }
 }
 

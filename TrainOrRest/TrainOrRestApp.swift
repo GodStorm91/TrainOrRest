@@ -23,7 +23,8 @@ struct TrainOrRestApp: App {
                 for: CompletedActivity.self, DailyWellness.self, SyncState.self,
                 Goal.self, TrainingPlan.self, PlannedWorkout.self,
                 DailyReadiness.self, DailyCheckIn.self, RuleOverride.self,
-                PlanSnapshot.self, ChatThread.self, ChatMessage.self, PlanEdit.self
+                PlanSnapshot.self, ChatThread.self, ChatMessage.self, PlanEdit.self,
+                CoachMemoryItem.self
             )
         } catch {
             fatalError("Failed to create SwiftData container: \(error)")

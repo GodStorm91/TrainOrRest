@@ -1,9 +1,28 @@
 import Foundation
 import SwiftData
 
+struct CoachChatErrorEvent: Identifiable, Equatable {
+    let id: UUID
+    let title: String
+    let message: String
+    let retryTitle: String
+    let canRetry: Bool
+}
+
+private struct PendingCoachRetry {
+    let model: String
+    let apiKey: String
+    let attachments: [CoachContextAttachment]
+    let groundingSnapshot: GroundingSnapshot
+    let today: Date
+    let threadID: UUID?
+}
+
 @MainActor
 final class CoachChatStore: ObservableObject {
     @Published private(set) var isSending = false
+    @Published private(set) var isRetrying = false
+    @Published private(set) var errorEvent: CoachChatErrorEvent?
     @Published var lastError: String?
 
     private let anthropicClient: ClaudeServicing
@@ -11,6 +30,7 @@ final class CoachChatStore: ObservableObject {
     private let calendar: Calendar
     private let now: () -> Date
     private let replacementCoordinator: WorkoutReplacementCoordinator?
+    private var pendingRetry: PendingCoachRetry?
 
     init(
         client: ClaudeServicing? = nil,
@@ -38,7 +58,10 @@ final class CoachChatStore: ObservableObject {
     ) async {
         let account = CoachModelProvider.apiKeyAccount(for: model)
         guard let apiKey = try? KeychainStore.load(account: account), !apiKey.isEmpty else {
-            lastError = "Add your \(CoachModelProvider.displayName(for: model)) API key in Settings first."
+            showError(
+                CoachLanguage.current.missingCoachKeyError(provider: CoachModelProvider.displayName(for: model)),
+                canRetry: false
+            )
             return
         }
         await send(
@@ -66,7 +89,7 @@ final class CoachChatStore: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         guard replacementCoordinator?.hasPendingDecision != true else {
-            lastError = CoachLanguage.current.replacementPendingMessage
+            showError(CoachLanguage.current.replacementPendingMessage, canRetry: false)
             return
         }
         let today = now()
@@ -83,11 +106,11 @@ final class CoachChatStore: ObservableObject {
                 )
             }
         } catch {
-            lastError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            showError(error)
             return
         }
         isSending = true
-        lastError = nil
+        clearError()
         context.insert(ChatMessage(
             role: .user,
             text: trimmed,
@@ -96,6 +119,14 @@ final class CoachChatStore: ObservableObject {
         ))
         updateThread(threadID, titleFrom: trimmed, in: context)
         try? context.save()
+        let retry = PendingCoachRetry(
+            model: model,
+            apiKey: apiKey,
+            attachments: attachments,
+            groundingSnapshot: snapshot,
+            today: today,
+            threadID: threadID
+        )
 
         do {
             try await runLoop(
@@ -107,15 +138,67 @@ final class CoachChatStore: ObservableObject {
                 threadID: threadID,
                 in: context
             )
+            clearRetry()
         } catch {
-            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            lastError = message
+            showError(error, retry: shouldPersistFailure(error) ? nil : retry)
             if shouldPersistFailure(error) {
-                context.insert(assistantMessage(text: message, groundingSnapshot: snapshot, threadID: threadID))
+                context.insert(assistantMessage(text: technicalErrorMessage(error), groundingSnapshot: snapshot, threadID: threadID))
                 try? context.save()
             }
         }
         isSending = false
+    }
+
+    func dismissError(_ id: UUID) {
+        guard errorEvent?.id == id else { return }
+        errorEvent = nil
+    }
+
+    func resetError() {
+        clearError()
+        clearRetry()
+    }
+
+    func presentError(_ message: String) {
+        showError(message, canRetry: false)
+    }
+
+    func retryFailedResponse(in context: ModelContext) async {
+        guard !isSending, !isRetrying, let retry = pendingRetry else { return }
+        isRetrying = true
+        isSending = true
+        errorEvent = CoachChatErrorEvent(
+            id: errorEvent?.id ?? UUID(),
+            title: CoachLanguage.current.retryingCoachErrorTitle,
+            message: CoachLanguage.current.retryingCoachErrorMessage,
+            retryTitle: CoachLanguage.current.retryLabel,
+            canRetry: false
+        )
+        do {
+            try await runLoop(
+                apiKey: retry.apiKey,
+                model: retry.model,
+                attachments: retry.attachments,
+                groundingSnapshot: retry.groundingSnapshot,
+                today: retry.today,
+                threadID: retry.threadID,
+                in: context
+            )
+            clearRetry()
+            clearError()
+        } catch {
+            showError(error, retry: shouldPersistFailure(error) ? nil : retry)
+            if shouldPersistFailure(error) {
+                context.insert(assistantMessage(
+                    text: technicalErrorMessage(error),
+                    groundingSnapshot: retry.groundingSnapshot,
+                    threadID: retry.threadID
+                ))
+                try? context.save()
+            }
+        }
+        isSending = false
+        isRetrying = false
     }
 
     func testConnection(apiKey: String, model: String) async -> String {
@@ -433,6 +516,40 @@ final class CoachChatStore: ObservableObject {
         case .api:
             return true
         }
+    }
+
+    private func clearError() {
+        lastError = nil
+        errorEvent = nil
+    }
+
+    private func clearRetry() {
+        pendingRetry = nil
+    }
+
+    private func showError(_ error: Error, retry: PendingCoachRetry? = nil) {
+        let technical = technicalErrorMessage(error)
+        showError(technical, canRetry: retry != nil)
+        pendingRetry = retry
+    }
+
+    private func showError(_ message: String, canRetry: Bool) {
+        lastError = message
+        let copy = CoachLanguage.current.chatErrorCopy(for: message)
+        errorEvent = CoachChatErrorEvent(
+            id: UUID(),
+            title: copy.title,
+            message: copy.message,
+            retryTitle: CoachLanguage.current.retryLabel,
+            canRetry: canRetry
+        )
+        if !canRetry {
+            pendingRetry = nil
+        }
+    }
+
+    private func technicalErrorMessage(_ error: Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 
     private func assistantMessage(

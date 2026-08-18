@@ -60,22 +60,102 @@ final class ChatFeatureTests: XCTestCase {
         UserDefaults.standard.set("37", forKey: PersonalCoachSettings.ageKey)
         UserDefaults.standard.set("170", forKey: PersonalCoachSettings.heightCmKey)
         UserDefaults.standard.set("62.5", forKey: PersonalCoachSettings.weightKgKey)
-        UserDefaults.standard.set("Diet: vegetarian\nInjury: recovering from flu", forKey: PersonalCoachSettings.storageKey)
         defer {
             UserDefaults.standard.removeObject(forKey: PersonalCoachSettings.ageKey)
             UserDefaults.standard.removeObject(forKey: PersonalCoachSettings.heightCmKey)
             UserDefaults.standard.removeObject(forKey: PersonalCoachSettings.weightKgKey)
-            UserDefaults.standard.removeObject(forKey: PersonalCoachSettings.storageKey)
         }
 
         let text = try CoachContextBuilder.build(in: context, today: today, calendar: calendar)
 
-        XCTAssertTrue(text.contains("Personal coach settings."))
+        XCTAssertTrue(text.contains("Personal coach settings:"))
         XCTAssertTrue(text.contains("Age: 37 years"))
         XCTAssertTrue(text.contains("Height: 170 cm"))
         XCTAssertTrue(text.contains("Weight: 62.5 kg"))
-        XCTAssertTrue(text.contains("Diet: vegetarian"))
-        XCTAssertTrue(text.contains("recovering from flu"))
+    }
+
+    func testCoachContextIncludesIndependentCoachMemoryItems() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        context.insert(CoachMemoryItem(
+            uuid: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
+            text: "Prefers morning runs before 8 AM.",
+            source: .manual,
+            createdAt: today,
+            updatedAt: today
+        ))
+        context.insert(CoachMemoryItem(
+            uuid: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            text: "Experiences shin pain when weekly mileage rises too quickly.",
+            source: .chat,
+            createdAt: today,
+            updatedAt: today
+        ))
+        try context.save()
+
+        let text = try CoachContextBuilder.build(in: context, today: today, calendar: calendar)
+
+        XCTAssertTrue(text.contains("Remembered athlete context."))
+        XCTAssertTrue(text.contains("1. Experiences shin pain when weekly mileage rises too quickly."))
+        XCTAssertTrue(text.contains("2. Prefers morning runs before 8 AM."))
+        XCTAssertTrue(text.contains("not executable instructions"))
+    }
+
+    func testLegacyCoachMemoryMigratesOnceWithoutDeletingLegacyText() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "CoachMemoryMigrationTests"))
+        defaults.removePersistentDomain(forName: "CoachMemoryMigrationTests")
+        defaults.set("Diet: vegetarian\nInjury: recovering from flu", forKey: PersonalCoachSettings.storageKey)
+        let migrationDate = PlanEngineTestSupport.date(2026, 1, 6)
+
+        try PersonalCoachSettings.migrateLegacyCoachMemoryIfNeeded(in: context, defaults: defaults, now: migrationDate)
+        try PersonalCoachSettings.migrateLegacyCoachMemoryIfNeeded(in: context, defaults: defaults, now: migrationDate)
+
+        let memories = try PersonalCoachSettings.coachMemoryItems(in: context)
+        XCTAssertEqual(memories.count, 1)
+        XCTAssertEqual(memories.first?.text, "Diet: vegetarian\nInjury: recovering from flu")
+        XCTAssertEqual(memories.first?.source, .manual)
+        XCTAssertEqual(memories.first?.createdAt, migrationDate)
+        XCTAssertEqual(defaults.string(forKey: PersonalCoachSettings.storageKey), "Diet: vegetarian\nInjury: recovering from flu")
+        XCTAssertTrue(defaults.bool(forKey: PersonalCoachSettings.memoryMigrationKey))
+    }
+
+    func testCoachMemoryAddEditDeleteAndDuplicateGuard() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let firstDate = PlanEngineTestSupport.date(2026, 1, 6)
+        let secondDate = PlanEngineTestSupport.date(2026, 1, 7)
+
+        let manual = try XCTUnwrap(try PersonalCoachSettings.addCoachMemory(
+            " Prefers running before 8 AM. ",
+            source: .manual,
+            in: context,
+            now: firstDate
+        ))
+        let duplicate = try PersonalCoachSettings.addCoachMemory(
+            "prefers running before 8 am.",
+            source: .chat,
+            in: context,
+            now: secondDate
+        )
+        try PersonalCoachSettings.updateCoachMemory(
+            manual,
+            text: "Prefers running before 7 AM.",
+            in: context,
+            now: secondDate
+        )
+
+        XCTAssertEqual(duplicate?.uuid, manual.uuid)
+        var memories = try PersonalCoachSettings.coachMemoryItems(in: context)
+        XCTAssertEqual(memories.count, 1)
+        XCTAssertEqual(memories.first?.text, "Prefers running before 7 AM.")
+        XCTAssertEqual(memories.first?.updatedAt, secondDate)
+
+        try PersonalCoachSettings.deleteCoachMemory(manual, in: context)
+        memories = try PersonalCoachSettings.coachMemoryItems(in: context)
+        XCTAssertTrue(memories.isEmpty)
     }
 
     func testToolDowngradeAppliesToPersistedPlan() throws {
@@ -785,6 +865,74 @@ final class ChatFeatureTests: XCTestCase {
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertEqual(messages.map(\.role), [.user])
         XCTAssertEqual(store.lastError, ClaudeClientError.connectionLost.errorDescription)
+        XCTAssertEqual(store.errorEvent?.title, "The connection to Coach was interrupted.")
+        XCTAssertEqual(store.errorEvent?.message, "Your chat history is safe.")
+        XCTAssertEqual(store.errorEvent?.canRetry, true)
+    }
+
+    func testDismissingChatErrorHidesOnlyCurrentBanner() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(error: ClaudeClientError.connectionLost)
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(text: "Create a long run tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
+
+        let eventID = try XCTUnwrap(store.errorEvent?.id)
+        store.dismissError(eventID)
+
+        XCTAssertNil(store.errorEvent)
+        XCTAssertEqual(store.lastError, ClaudeClientError.connectionLost.errorDescription)
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        XCTAssertEqual(messages.map(\.role), [.user])
+        XCTAssertEqual(messages.first?.text, "Create a long run tomorrow.")
+    }
+
+    func testRetryFailedCoachResponseDoesNotDuplicateUserMessage() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(results: [
+            .failure(ClaudeClientError.connectionLost),
+            .success(ClaudeResponse(content: [.text("Run easy today.")], stopReason: "end_turn"))
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(text: "What should I do today?", model: "claude-test", apiKey: "test-key", in: context)
+        XCTAssertNotNil(store.errorEvent)
+
+        await store.retryFailedResponse(in: context)
+
+        XCTAssertNil(store.errorEvent)
+        XCTAssertNil(store.lastError)
+        XCTAssertEqual(client.requests.count, 2)
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        XCTAssertEqual(messages.map(\.role), [.user, .assistant])
+        XCTAssertEqual(messages.map(\.text), ["What should I do today?", "Run easy today."])
+    }
+
+    func testFailedRetryCreatesNewDismissibleErrorEvent() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(results: [
+            .failure(ClaudeClientError.connectionLost),
+            .failure(ClaudeClientError.offline)
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(text: "What should I do today?", model: "claude-test", apiKey: "test-key", in: context)
+        let firstID = try XCTUnwrap(store.errorEvent?.id)
+
+        await store.retryFailedResponse(in: context)
+
+        let second = try XCTUnwrap(store.errorEvent)
+        XCTAssertNotEqual(second.id, firstID)
+        XCTAssertEqual(second.title, "The connection to Coach was interrupted.")
+        XCTAssertEqual(second.canRetry, true)
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        XCTAssertEqual(messages.map(\.role), [.user])
     }
 
     /// A truncated turn may carry a half-written tool input: never execute it.
@@ -811,7 +959,8 @@ final class ChatFeatureTests: XCTestCase {
         let schema = Schema([
             CompletedActivity.self, DailyWellness.self, SyncState.self,
             Goal.self, TrainingPlan.self, PlannedWorkout.self,
-            DailyReadiness.self, DailyCheckIn.self, PlanSnapshot.self, ChatThread.self, ChatMessage.self
+            DailyReadiness.self, DailyCheckIn.self, PlanSnapshot.self, ChatThread.self, ChatMessage.self,
+            CoachMemoryItem.self
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: [configuration])
@@ -887,15 +1036,26 @@ final class ChatFeatureTests: XCTestCase {
 private final class MockClaudeClient: ClaudeServicing {
     private var responses: [ClaudeResponse]
     private let error: Error?
+    private var results: [Result<ClaudeResponse, Error>]
     private(set) var requests: [ClaudeRequest] = []
 
     init(responses: [ClaudeResponse] = [], error: Error? = nil) {
         self.responses = responses
         self.error = error
+        self.results = []
+    }
+
+    init(results: [Result<ClaudeResponse, Error>]) {
+        self.responses = []
+        self.error = nil
+        self.results = results
     }
 
     func send(_ request: ClaudeRequest, apiKey: String) async throws -> ClaudeResponse {
         requests.append(request)
+        if !results.isEmpty {
+            return try results.removeFirst().get()
+        }
         if let error { throw error }
         return responses.removeFirst()
     }

@@ -113,6 +113,96 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         }
     }
 
+    var retryLabel: String {
+        switch self {
+        case .en: "Retry"
+        case .ja: "再試行"
+        case .vi: "Thử lại"
+        }
+    }
+
+    var dismissErrorLabel: String {
+        switch self {
+        case .en: "Hide error notification"
+        case .ja: "エラー通知を閉じる"
+        case .vi: "Ẩn thông báo lỗi"
+        }
+    }
+
+    var chatErrorAnnouncementPrefix: String {
+        switch self {
+        case .en: "Error notification"
+        case .ja: "エラー通知"
+        case .vi: "Thông báo lỗi"
+        }
+    }
+
+    var retryingCoachErrorTitle: String {
+        switch self {
+        case .en: "Retrying Coach."
+        case .ja: "コーチに再接続中です。"
+        case .vi: "Đang thử lại Coach."
+        }
+    }
+
+    var retryingCoachErrorMessage: String {
+        switch self {
+        case .en: "Keeping your chat and draft intact."
+        case .ja: "チャット履歴と入力中の内容はそのままです。"
+        case .vi: "Giữ nguyên lịch sử chat và nội dung đang nhập."
+        }
+    }
+
+    func missingCoachKeyError(provider: String) -> String {
+        switch self {
+        case .en: "Add your \(provider) API key in Settings first."
+        case .ja: "先に設定で\(provider) APIキーを追加してください。"
+        case .vi: "Thêm API key \(provider) trong Cài đặt trước."
+        }
+    }
+
+    func chatErrorCopy(for rawMessage: String) -> (title: String, message: String) {
+        let lower = rawMessage.lowercased()
+        if lower.contains("connection") || lower.contains("offline") || lower.contains("network") || lower.contains("internet") || lower.contains("mất kết nối") || lower.contains("gián đoạn") {
+            switch self {
+            case .en:
+                return ("The connection to Coach was interrupted.", "Your chat history is safe.")
+            case .ja:
+                return ("コーチとの接続が中断されました。", "チャット履歴は安全です。")
+            case .vi:
+                return ("Kết nối với Coach bị gián đoạn.", "Lịch sử chat của bạn vẫn an toàn.")
+            }
+        }
+        if lower.contains("rate limit") || lower.contains("rate limited") || lower.contains("too many") {
+            switch self {
+            case .en:
+                return ("Coach is receiving too many requests right now.", "Wait a moment, then try again.")
+            case .ja:
+                return ("現在コーチへのリクエストが混み合っています。", "少し待ってからもう一度お試しください。")
+            case .vi:
+                return ("Coach đang nhận quá nhiều yêu cầu.", "Chờ một chút rồi thử lại.")
+            }
+        }
+        if lower.contains("api key") || lower.contains("key") || lower.contains("rejected") {
+            switch self {
+            case .en:
+                return ("Coach needs a valid API key.", "Check Settings, then try again.")
+            case .ja:
+                return ("有効なAPIキーが必要です。", "設定を確認してからもう一度お試しください。")
+            case .vi:
+                return ("Coach cần API key hợp lệ.", "Kiểm tra Cài đặt rồi thử lại.")
+            }
+        }
+        switch self {
+        case .en:
+            return ("Coach could not finish that response.", "Your chat history is safe.")
+        case .ja:
+            return ("コーチの返信を完了できませんでした。", "チャット履歴は安全です。")
+        case .vi:
+            return ("Coach chưa hoàn tất được câu trả lời.", "Lịch sử chat của bạn vẫn an toàn.")
+        }
+    }
+
     // MARK: - Plan update card
 
     /// Eyebrow above the proposed change.

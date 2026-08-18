@@ -1,16 +1,18 @@
+import SwiftData
 import SwiftUI
 import UIKit
 
 struct SettingsView: View {
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.system.rawValue
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
-    @AppStorage(PersonalCoachSettings.storageKey) private var personalCoachNotes = ""
     @AppStorage(PersonalCoachSettings.weightKgKey) private var weightKg = ""
     @AppStorage(WorkoutPushSettings.enabledKey) private var watchPushEnabled = false
     @AppStorage(WorkoutPushSettings.athleteIDKey) private var athleteID = ""
 
+    @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var pushService: WorkoutPushService
     @Environment(\.dismiss) private var dismiss
+    @Query(sort: \CoachMemoryItem.updatedAt, order: .reverse) private var memoryItems: [CoachMemoryItem]
     @State private var intervalsAPIKey = ""
 
     private var appearance: AppAppearance { AppAppearance(rawValue: appearanceRaw) ?? .system }
@@ -89,6 +91,7 @@ struct SettingsView: View {
             Button("Done") { dismiss() }
         }
         .task {
+            try? PersonalCoachSettings.migrateLegacyCoachMemoryIfNeeded(in: modelContext)
             intervalsAPIKey = (try? KeychainStore.load(account: KeychainStore.intervalsICUAccount)) ?? ""
         }
     }
@@ -129,8 +132,9 @@ struct SettingsView: View {
     }
 
     private var memorySummary: String {
-        let notes = PersonalCoachSettings.sanitizedNotes(personalCoachNotes)
-        return notes.isEmpty ? "Empty" : "1 note"
+        let count = memoryItems.count
+        if count == 0 { return "Empty" }
+        return count == 1 ? "1 memory" : "\(count) memories"
     }
 
     private func clean(_ raw: String) -> String? {
@@ -366,32 +370,142 @@ struct WatchDeliverySettingsView: View {
 }
 
 struct CoachMemorySettingsView: View {
-    @AppStorage(PersonalCoachSettings.storageKey) private var notes = ""
+    @Environment(\.modelContext) private var modelContext
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+    @Query(sort: \CoachMemoryItem.updatedAt, order: .reverse) private var memoryItems: [CoachMemoryItem]
+    @State private var deleteCandidate: CoachMemoryItem?
+    @State private var isShowingDeleteConfirmation = false
+    @State private var isShowingClearConfirmation = false
+    @State private var errorMessage: String?
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+    private var sortedMemories: [CoachMemoryItem] {
+        memoryItems.sorted { lhs, rhs in
+            if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
+            if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+            return lhs.uuid.uuidString < rhs.uuid.uuidString
+        }
+    }
 
     var body: some View {
         Form {
             Section {
-                TextEditor(text: $notes)
-                    .frame(minHeight: 160)
-                    .autocorrectionDisabled()
-                    .onChange(of: notes) { _, newValue in
-                        let sanitized = PersonalCoachSettings.sanitizedNotes(newValue)
-                        if sanitized != newValue { notes = sanitized }
-                    }
-            } header: {
-                Text("Remembered athlete context")
-            } footer: {
-                Text("Coach uses this local note to keep stable context such as injuries, fueling, scheduling constraints, and preferences. Clear it to remove remembered context.")
+                Text(language.coachMemoryIntro)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+
             Section {
-                Button(role: .destructive) { notes = "" } label: {
-                    Label("Clear coach memory", systemImage: "trash")
+                if sortedMemories.isEmpty {
+                    CoachMemoryEmptyState(language: language)
+                } else {
+                    ForEach(sortedMemories, id: \.uuid) { item in
+                        CoachMemoryCard(
+                            item: item,
+                            dateText: dateText(for: item.updatedAt),
+                            language: language,
+                            onDelete: {
+                                deleteCandidate = item
+                                isShowingDeleteConfirmation = true
+                            }
+                        )
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    }
                 }
-                .disabled(notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                NavigationLink {
+                    CoachMemoryEditorView()
+                } label: {
+                    Label(language.addMemoryTitle, systemImage: "plus")
+                }
+                .accessibilityLabel(language.addCoachMemoryAccessibilityLabel)
+            } header: {
+                Text(language.rememberedAthleteContextTitle)
+            } footer: {
+                Text(language.coachMemoryFooter)
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    isShowingClearConfirmation = true
+                } label: {
+                    Label(language.clearAllCoachMemoryTitle, systemImage: "trash")
+                }
+                .disabled(sortedMemories.isEmpty)
+                .accessibilityLabel(language.clearAllCoachMemoryAccessibilityLabel)
             }
         }
-        .navigationTitle("Coach Memory")
+        .navigationTitle(language.coachMemoryTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    CoachMemoryEditorView()
+                } label: {
+                    Image(systemName: "plus")
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel(language.addCoachMemoryAccessibilityLabel)
+            }
+        }
+        .task {
+            do {
+                try PersonalCoachSettings.migrateLegacyCoachMemoryIfNeeded(in: modelContext)
+            } catch {
+                errorMessage = language.loadMemoryErrorTitle
+            }
+        }
+        .onAppear {
+            NotificationCenter.default.post(name: .torSetBottomDockHidden, object: true)
+        }
+        .onDisappear {
+            NotificationCenter.default.post(name: .torSetBottomDockHidden, object: false)
+        }
+        .alert(language.deleteMemoryConfirmationTitle, isPresented: $isShowingDeleteConfirmation) {
+            Button(language.cancelTitle, role: .cancel) { deleteCandidate = nil }
+            Button(language.deleteTitle, role: .destructive) { deleteSelectedMemory() }
+        } message: {
+            Text(language.deleteMemoryConfirmationMessage)
+        }
+        .alert(language.clearAllConfirmationTitle, isPresented: $isShowingClearConfirmation) {
+            Button(language.cancelTitle, role: .cancel) {}
+            Button(language.clearAllConfirmationAction, role: .destructive) { clearAllMemories() }
+        } message: {
+            Text(language.clearAllConfirmationMessage)
+        }
+        .alert(language.errorTitle, isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button(language.tryAgainTitle) {
+                errorMessage = nil
+                try? PersonalCoachSettings.migrateLegacyCoachMemoryIfNeeded(in: modelContext)
+            }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    private func deleteSelectedMemory() {
+        guard let deleteCandidate else { return }
+        do {
+            try PersonalCoachSettings.deleteCoachMemory(deleteCandidate, in: modelContext)
+        } catch {
+            errorMessage = language.deleteMemoryErrorMessage
+        }
+        self.deleteCandidate = nil
+    }
+
+    private func clearAllMemories() {
+        do {
+            try PersonalCoachSettings.clearCoachMemory(in: modelContext)
+        } catch {
+            errorMessage = language.loadMemoryErrorTitle
+        }
+    }
+
+    private func dateText(for date: Date) -> String {
+        date.formatted(.dateTime.month(.abbreviated).day().year())
     }
 }
 
@@ -513,6 +627,607 @@ struct CoachProviderSettingsView: View {
             "Deep Claude review"
         default:
             id
+        }
+    }
+}
+
+private struct CoachMemoryCard: View {
+    let item: CoachMemoryItem
+    let dateText: String
+    let language: CoachLanguage
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(item.text)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Text(dateText)
+                        if item.source == .chat {
+                            Text(language.learnedFromChatLabel)
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Menu {
+                    NavigationLink {
+                        CoachMemoryEditorView(item: item)
+                    } label: {
+                        Label(language.editMemoryTitle, systemImage: "pencil")
+                    }
+                    Button(role: .destructive, action: onDelete) {
+                        Label(language.deleteTitle, systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel(language.moreActionsForMemoryAccessibilityLabel)
+            }
+        }
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(item.text), \(dateText)")
+    }
+}
+
+private struct CoachMemoryEmptyState: View {
+    let language: CoachLanguage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(language.noCoachMemoriesTitle, systemImage: "brain.head.profile")
+                .font(.headline)
+            Text(language.noCoachMemoriesMessage)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            NavigationLink {
+                CoachMemoryEditorView()
+            } label: {
+                Label(language.addMemoryTitle, systemImage: "plus")
+            }
+            .accessibilityLabel(language.addCoachMemoryAccessibilityLabel)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 8)
+    }
+}
+
+private struct CoachMemoryEditorView: View {
+    let item: CoachMemoryItem?
+
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+    @State private var draft: String
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+    @State private var pendingExample: String?
+    @State private var isShowingReplaceConfirmation = false
+    @State private var isShowingDiscardConfirmation = false
+    @FocusState private var isEditorFocused: Bool
+
+    init(item: CoachMemoryItem? = nil) {
+        self.item = item
+        _draft = State(initialValue: item?.text ?? "")
+    }
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+    private var trimmedDraft: String { PersonalCoachSettings.sanitizedMemoryText(draft) }
+    private var isEditing: Bool { item != nil }
+    private var hasMeaningfulChange: Bool {
+        guard let item else { return !trimmedDraft.isEmpty }
+        return PersonalCoachSettings.normalizedMemoryText(item.text) != PersonalCoachSettings.normalizedMemoryText(trimmedDraft)
+    }
+    private var canSave: Bool {
+        !trimmedDraft.isEmpty && hasMeaningfulChange && !isSaving && draft.count <= PersonalCoachSettings.maxMemoryItemCharacters
+    }
+
+    var body: some View {
+        Form {
+            if !isEditorFocused {
+                Section {
+                    Text(language.memoryEditorIntro)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Section {
+                ZStack(alignment: .topLeading) {
+                    TextEditor(text: $draft)
+                        .frame(minHeight: 170)
+                        .focused($isEditorFocused)
+                        .autocorrectionDisabled(false)
+                        .accessibilityLabel(language.memoryTextFieldAccessibilityLabel)
+                    if draft.isEmpty {
+                        Text(language.memoryEditorPlaceholder)
+                            .foregroundStyle(.tertiary)
+                            .padding(.top, 8)
+                            .padding(.leading, 5)
+                            .allowsHitTesting(false)
+                    }
+                }
+                HStack {
+                    Spacer()
+                    Text("\(draft.count)/\(PersonalCoachSettings.maxMemoryItemCharacters)")
+                        .font(.caption)
+                        .foregroundStyle(draft.count > PersonalCoachSettings.maxMemoryItemCharacters ? Theme.bad : .secondary)
+                }
+            }
+
+            Section {
+                ForEach(language.coachMemorySuggestedExamples, id: \.self) { example in
+                    Button {
+                        selectExample(example)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Text(example)
+                                .foregroundStyle(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                            Image(systemName: "plus")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(Theme.accent)
+                        }
+                        .frame(minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                }
+            } header: {
+                Text(language.suggestedExamplesTitle)
+            }
+
+            if let errorMessage {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(errorMessage)
+                            .foregroundStyle(Theme.bad)
+                        Text(language.memoryTextNotLostMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button(language.tryAgainTitle) { save() }
+                    }
+                }
+            }
+        }
+        .navigationTitle(isEditing ? language.editMemoryTitle : language.addMemoryTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button(language.backTitle) { back() }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    save()
+                } label: {
+                    if isSaving {
+                        ProgressView()
+                    } else {
+                        Text(language.saveTitle)
+                    }
+                }
+                .disabled(!canSave)
+                .accessibilityLabel(language.saveMemoryAccessibilityLabel)
+            }
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .interactiveDismissDisabled(hasMeaningfulChange)
+        .task {
+            await MainActor.run { isEditorFocused = true }
+        }
+        .onChange(of: draft) { _, newValue in
+            if newValue.count > PersonalCoachSettings.maxMemoryItemCharacters {
+                draft = String(newValue.prefix(PersonalCoachSettings.maxMemoryItemCharacters))
+            }
+        }
+        .alert(language.replaceMemoryDraftTitle, isPresented: $isShowingReplaceConfirmation) {
+            Button(language.cancelTitle, role: .cancel) { pendingExample = nil }
+            Button(language.replaceTitle) {
+                if let pendingExample {
+                    draft = pendingExample
+                }
+                pendingExample = nil
+            }
+        } message: {
+            Text(language.replaceMemoryDraftMessage)
+        }
+        .alert(language.discardChangesTitle, isPresented: $isShowingDiscardConfirmation) {
+            Button(language.keepEditingTitle, role: .cancel) {}
+            Button(language.discardTitle, role: .destructive) { dismiss() }
+        }
+    }
+
+    private func selectExample(_ example: String) {
+        if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            draft = example
+        } else {
+            pendingExample = example
+            isShowingReplaceConfirmation = true
+        }
+        isEditorFocused = true
+    }
+
+    private func back() {
+        if hasMeaningfulChange {
+            isShowingDiscardConfirmation = true
+        } else {
+            dismiss()
+        }
+    }
+
+    private func save() {
+        guard canSave else { return }
+        isSaving = true
+        errorMessage = nil
+        do {
+            if let item {
+                try PersonalCoachSettings.updateCoachMemory(item, text: draft, in: modelContext)
+            } else {
+                _ = try PersonalCoachSettings.addCoachMemory(draft, source: .manual, in: modelContext)
+            }
+            isSaving = false
+            dismiss()
+        } catch {
+            isSaving = false
+            errorMessage = language.saveMemoryErrorTitle
+        }
+    }
+}
+
+extension Notification.Name {
+    static let torSetBottomDockHidden = Notification.Name("torSetBottomDockHidden")
+}
+
+extension CoachLanguage {
+    var coachMemoryTitle: String {
+        switch self {
+        case .en: "Coach Memory"
+        case .ja: "コーチメモリー"
+        case .vi: "Bộ nhớ Coach"
+        }
+    }
+
+    var rememberedAthleteContextTitle: String {
+        switch self {
+        case .en: "Remembered athlete context"
+        case .ja: "記憶したアスリート情報"
+        case .vi: "Thông tin vận động viên đã ghi nhớ"
+        }
+    }
+
+    var coachMemoryIntro: String {
+        switch self {
+        case .en: "RestOrTrain remembers useful facts from your chats. You can also add, edit, or remove memories manually."
+        case .ja: "RestOrTrain はチャットから役立つ情報を記憶します。手動で追加、編集、削除もできます。"
+        case .vi: "RestOrTrain ghi nhớ các thông tin hữu ích từ cuộc trò chuyện. Anh cũng có thể tự thêm, sửa hoặc xóa ghi nhớ."
+        }
+    }
+
+    var coachMemoryFooter: String {
+        switch self {
+        case .en: "Coach uses these facts to personalize future advice. You can edit or remove any item."
+        case .ja: "Coach はこれらの情報を使って今後の助言を調整します。各項目は編集または削除できます。"
+        case .vi: "Coach dùng các thông tin này để cá nhân hóa lời khuyên sau này. Anh có thể sửa hoặc xóa từng mục."
+        }
+    }
+
+    var addMemoryTitle: String {
+        switch self {
+        case .en: "Add memory"
+        case .ja: "メモリーを追加"
+        case .vi: "Thêm ghi nhớ"
+        }
+    }
+
+    var editMemoryTitle: String {
+        switch self {
+        case .en: "Edit Memory"
+        case .ja: "メモリーを編集"
+        case .vi: "Chỉnh sửa ghi nhớ"
+        }
+    }
+
+    var deleteTitle: String {
+        switch self {
+        case .en: "Delete"
+        case .ja: "削除"
+        case .vi: "Xóa"
+        }
+    }
+
+    var clearAllCoachMemoryTitle: String {
+        switch self {
+        case .en: "Clear all coach memory"
+        case .ja: "すべてのコーチメモリーを消去"
+        case .vi: "Xóa toàn bộ bộ nhớ Coach"
+        }
+    }
+
+    var saveTitle: String {
+        switch self {
+        case .en: "Save"
+        case .ja: "保存"
+        case .vi: "Lưu"
+        }
+    }
+
+    var backTitle: String {
+        switch self {
+        case .en: "Back"
+        case .ja: "戻る"
+        case .vi: "Quay lại"
+        }
+    }
+
+    var cancelTitle: String {
+        switch self {
+        case .en: "Cancel"
+        case .ja: "キャンセル"
+        case .vi: "Hủy"
+        }
+    }
+
+    var suggestedExamplesTitle: String {
+        switch self {
+        case .en: "Suggested examples"
+        case .ja: "例"
+        case .vi: "Gợi ý"
+        }
+    }
+
+    var noCoachMemoriesTitle: String {
+        switch self {
+        case .en: "No Coach memories yet"
+        case .ja: "Coach のメモリーはまだありません"
+        case .vi: "Coach chưa ghi nhớ thông tin nào"
+        }
+    }
+
+    var noCoachMemoriesMessage: String {
+        switch self {
+        case .en: "Add useful facts such as your training schedule, injuries, preferences, or race goals. Memory is optional and under your control."
+        case .ja: "練習スケジュール、怪我、好み、レース目標など、役立つ安定情報を追加できます。メモリーは任意で、いつでも管理できます。"
+        case .vi: "Thêm thông tin hữu ích như lịch tập, chấn thương, sở thích hoặc mục tiêu race. Bộ nhớ là tùy chọn và anh kiểm soát được."
+        }
+    }
+
+    var memoryEditorIntro: String {
+        switch self {
+        case .en: "Add a stable fact about your training, body, preferences, schedule, or constraints."
+        case .ja: "練習、身体、好み、予定、制約に関する安定した情報を追加します。"
+        case .vi: "Thêm một thông tin ổn định về tập luyện, cơ thể, sở thích, lịch trình hoặc ràng buộc của anh."
+        }
+    }
+
+    var memoryEditorPlaceholder: String {
+        switch self {
+        case .en: "Write something Coach should remember..."
+        case .ja: "Coach に覚えてほしいことを書く..."
+        case .vi: "Viết điều Coach nên ghi nhớ..."
+        }
+    }
+
+    var coachMemorySuggestedExamples: [String] {
+        switch self {
+        case .en:
+            [
+                "I can train 8-10 hours per week.",
+                "I prefer running in the morning.",
+                "My shin hurts when mileage increases quickly.",
+                "I am training for a marathon on Oct 25, 2026.",
+                "I travel frequently on weekends."
+            ]
+        case .ja:
+            [
+                "週に8-10時間トレーニングできます。",
+                "朝に走るのが好きです。",
+                "走行距離を急に増やすとすねが痛みます。",
+                "2026年10月25日のマラソンに向けて練習しています。",
+                "週末に移動が多いです。"
+            ]
+        case .vi:
+            [
+                "Tôi có thể tập 8-10 giờ mỗi tuần.",
+                "Tôi thích chạy vào buổi sáng.",
+                "Ống chân của tôi đau khi tăng mileage quá nhanh.",
+                "Tôi đang tập cho marathon ngày 25/10/2026.",
+                "Tôi thường xuyên đi xa vào cuối tuần."
+            ]
+        }
+    }
+
+    var deleteMemoryConfirmationTitle: String {
+        switch self {
+        case .en: "Delete this memory?"
+        case .ja: "このメモリーを削除しますか？"
+        case .vi: "Xóa ghi nhớ này?"
+        }
+    }
+
+    var deleteMemoryConfirmationMessage: String {
+        switch self {
+        case .en: "Coach will no longer use this fact in future advice."
+        case .ja: "Coach は今後の助言でこの情報を使わなくなります。"
+        case .vi: "Coach sẽ không dùng thông tin này cho lời khuyên sau này nữa."
+        }
+    }
+
+    var clearAllConfirmationTitle: String {
+        switch self {
+        case .en: "Clear all Coach Memory?"
+        case .ja: "すべての Coach メモリーを消去しますか？"
+        case .vi: "Xóa toàn bộ bộ nhớ Coach?"
+        }
+    }
+
+    var clearAllConfirmationMessage: String {
+        switch self {
+        case .en: "Coach will forget all manually added and chat-learned athlete context. This cannot be undone."
+        case .ja: "手動追加およびチャットから学習したアスリート情報をすべて忘れます。元に戻せません。"
+        case .vi: "Coach sẽ quên toàn bộ thông tin vận động viên do anh thêm và học từ chat. Không thể hoàn tác."
+        }
+    }
+
+    var clearAllConfirmationAction: String {
+        switch self {
+        case .en: "Clear all"
+        case .ja: "すべて消去"
+        case .vi: "Xóa tất cả"
+        }
+    }
+
+    var discardChangesTitle: String {
+        switch self {
+        case .en: "Discard changes?"
+        case .ja: "変更を破棄しますか？"
+        case .vi: "Bỏ thay đổi?"
+        }
+    }
+
+    var keepEditingTitle: String {
+        switch self {
+        case .en: "Keep editing"
+        case .ja: "編集を続ける"
+        case .vi: "Sửa tiếp"
+        }
+    }
+
+    var discardTitle: String {
+        switch self {
+        case .en: "Discard"
+        case .ja: "破棄"
+        case .vi: "Bỏ"
+        }
+    }
+
+    var replaceMemoryDraftTitle: String {
+        switch self {
+        case .en: "Replace current text?"
+        case .ja: "現在の文章を置き換えますか？"
+        case .vi: "Thay nội dung đang nhập?"
+        }
+    }
+
+    var replaceMemoryDraftMessage: String {
+        switch self {
+        case .en: "This example will replace the text already in the editor."
+        case .ja: "この例はエディタ内の文章を置き換えます。"
+        case .vi: "Gợi ý này sẽ thay phần đang nhập trong ô soạn."
+        }
+    }
+
+    var replaceTitle: String {
+        switch self {
+        case .en: "Replace"
+        case .ja: "置き換え"
+        case .vi: "Thay"
+        }
+    }
+
+    var learnedFromChatLabel: String {
+        switch self {
+        case .en: "Learned from chat"
+        case .ja: "チャットから学習"
+        case .vi: "Học từ chat"
+        }
+    }
+
+    var errorTitle: String {
+        switch self {
+        case .en: "Coach Memory"
+        case .ja: "Coach メモリー"
+        case .vi: "Bộ nhớ Coach"
+        }
+    }
+
+    var saveMemoryErrorTitle: String {
+        switch self {
+        case .en: "Could not save this memory"
+        case .ja: "このメモリーを保存できませんでした"
+        case .vi: "Không thể lưu ghi nhớ này"
+        }
+    }
+
+    var memoryTextNotLostMessage: String {
+        switch self {
+        case .en: "Your text has not been lost."
+        case .ja: "入力した文章は失われていません。"
+        case .vi: "Nội dung anh nhập chưa bị mất."
+        }
+    }
+
+    var deleteMemoryErrorMessage: String {
+        switch self {
+        case .en: "Could not delete this memory. The memory is still available."
+        case .ja: "このメモリーを削除できませんでした。メモリーはまだ残っています。"
+        case .vi: "Không thể xóa ghi nhớ này. Ghi nhớ vẫn còn."
+        }
+    }
+
+    var loadMemoryErrorTitle: String {
+        switch self {
+        case .en: "Could not load Coach Memory"
+        case .ja: "Coach メモリーを読み込めませんでした"
+        case .vi: "Không thể tải bộ nhớ Coach"
+        }
+    }
+
+    var tryAgainTitle: String {
+        switch self {
+        case .en: "Try again"
+        case .ja: "再試行"
+        case .vi: "Thử lại"
+        }
+    }
+
+    var addCoachMemoryAccessibilityLabel: String {
+        switch self {
+        case .en: "Add Coach memory"
+        case .ja: "Coach メモリーを追加"
+        case .vi: "Thêm ghi nhớ Coach"
+        }
+    }
+
+    var moreActionsForMemoryAccessibilityLabel: String {
+        switch self {
+        case .en: "More actions for memory"
+        case .ja: "メモリーのその他の操作"
+        case .vi: "Thêm thao tác cho ghi nhớ"
+        }
+    }
+
+    var clearAllCoachMemoryAccessibilityLabel: String {
+        switch self {
+        case .en: "Clear all Coach Memory"
+        case .ja: "すべての Coach メモリーを消去"
+        case .vi: "Xóa toàn bộ bộ nhớ Coach"
+        }
+    }
+
+    var saveMemoryAccessibilityLabel: String {
+        switch self {
+        case .en: "Save memory"
+        case .ja: "メモリーを保存"
+        case .vi: "Lưu ghi nhớ"
+        }
+    }
+
+    var memoryTextFieldAccessibilityLabel: String {
+        switch self {
+        case .en: "Memory text field"
+        case .ja: "メモリー入力欄"
+        case .vi: "Ô nhập nội dung ghi nhớ"
         }
     }
 }
