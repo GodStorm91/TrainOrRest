@@ -555,11 +555,12 @@ final class ChatFeatureTests: XCTestCase {
             $0.kind == .long && $0.status == .planned && $0.date > today
         })
         let client = MockClaudeClient(responses: [])
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
+        let contextualToday = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: selected.date)))
+        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { contextualToday })
         let store = CoachChatStore(
             client: client,
             calendar: calendar,
-            now: { self.today },
+            now: { contextualToday },
             replacementCoordinator: coordinator
         )
 
@@ -577,7 +578,7 @@ final class ChatFeatureTests: XCTestCase {
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertNil(coordinator.pending)
         XCTAssertFalse(messages.map(\.text).joined(separator: "\n").contains("cụ thể hơn"))
-        XCTAssertTrue(messages.map(\.text).joined(separator: "\n").contains("tải tập tăng quá nhanh"))
+        XCTAssertTrue(messages.map(\.text).joined(separator: "\n").contains("Buổi tập chưa thay đổi"))
     }
 
     func testContextualVietnameseDistanceShortcutBypassesModelForClearReplacementRequest() async throws {
@@ -588,15 +589,16 @@ final class ChatFeatureTests: XCTestCase {
             $0.kind == .long && $0.status == .planned && $0.date > today
         })
         let client = MockClaudeClient(responses: [])
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
+        let contextualToday = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: selected.date)))
+        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { contextualToday })
         let store = CoachChatStore(
             client: client,
             calendar: calendar,
-            now: { self.today },
+            now: { contextualToday },
             replacementCoordinator: coordinator
         )
 
-        let targetKm = max(1, selected.distanceKm - 1)
+        let targetKm = selected.distanceKm + 0.5
 
         await store.send(
             text: "đổi cự ly thành \(targetKm) km",
@@ -614,6 +616,80 @@ final class ChatFeatureTests: XCTestCase {
             XCTAssertEqual(pending.proposed.distanceKm, targetKm, accuracy: 0.001)
             XCTAssertEqual(pending.proposed.kind, selected.kind)
         }
+    }
+
+    func testContextualTomorrowDistanceShortcutHandlesNaturalVietnamesePhrasing() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let selected = try XCTUnwrap(try context.fetch(FetchDescriptor<PlannedWorkout>()).first {
+            $0.kind == .long && $0.status == .planned && $0.date > today
+        })
+        let client = MockClaudeClient(responses: [])
+        let contextualToday = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: selected.date))
+        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { contextualToday })
+        let store = CoachChatStore(
+            client: client,
+            calendar: calendar,
+            now: { contextualToday },
+            replacementCoordinator: coordinator
+        )
+
+        let targetKm = selected.distanceKm + 0.5
+
+        await store.send(
+            text: "tăng cự li buổi ngày mai lên \(targetKm) km",
+            model: "claude-test",
+            attachments: [.plannedWorkout(selected.uuid)],
+            apiKey: "test-key",
+            in: context
+        )
+
+        XCTAssertTrue(client.requests.isEmpty)
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        XCTAssertFalse(messages.map(\.text).joined(separator: "\n").contains("cụ thể hơn"))
+        if let pending = coordinator.pending {
+            XCTAssertEqual(pending.expected.uuid, selected.uuid)
+            XCTAssertEqual(pending.proposed.distanceKm, targetKm, accuracy: 0.001)
+            XCTAssertEqual(pending.proposed.kind, selected.kind)
+        } else {
+            let transcript = messages.map(\.text).joined(separator: "\n")
+            XCTAssertTrue(transcript.contains("Em hiểu anh muốn đổi buổi này lên"))
+            XCTAssertTrue(transcript.contains("Buổi tập chưa thay đổi"))
+        }
+    }
+
+    func testContextualDistanceShortcutDoesNotAskForSpecificsWhenValidationBlocks() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let selected = try XCTUnwrap(try context.fetch(FetchDescriptor<PlannedWorkout>()).first {
+            $0.kind == .long && $0.status == .planned && $0.date > today
+        })
+        let client = MockClaudeClient(responses: [])
+        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
+        let store = CoachChatStore(
+            client: client,
+            calendar: calendar,
+            now: { self.today },
+            replacementCoordinator: coordinator
+        )
+
+        await store.send(
+            text: "tăng cự li buổi ngày mai lên 100 km",
+            model: "claude-test",
+            attachments: [.plannedWorkout(selected.uuid)],
+            apiKey: "test-key",
+            in: context
+        )
+
+        XCTAssertTrue(client.requests.isEmpty)
+        XCTAssertNil(coordinator.pending)
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        let transcript = messages.map(\.text).joined(separator: "\n")
+        XCTAssertTrue(transcript.contains("Em hiểu anh muốn đổi buổi này lên 100 km"))
+        XCTAssertTrue(transcript.contains("Buổi tập chưa thay đổi"))
+        XCTAssertFalse(transcript.contains("cụ thể hơn"))
     }
 
     /// End-to-end: user asks, model calls the tool, the app builds and saves a

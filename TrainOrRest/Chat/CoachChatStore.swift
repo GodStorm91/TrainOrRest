@@ -137,7 +137,17 @@ final class CoachChatStore: ObservableObject {
                 return
             }
         } catch {
-            assistantTurn.text = Self.userFacingPlanToolRejection(technicalErrorMessage(error))
+            if attachments.contains(where: {
+                if case .plannedWorkout = $0 { return true }
+                return false
+            }), let targetKm = Self.contextualDistanceTarget(from: trimmed) {
+                assistantTurn.text = Self.userFacingContextualDistanceRejection(
+                    targetKm: targetKm,
+                    raw: technicalErrorMessage(error)
+                )
+            } else {
+                assistantTurn.text = Self.userFacingPlanToolRejection(technicalErrorMessage(error))
+            }
             assistantTurn.assistantStatus = .completed
             assistantTurn.isIncomplete = false
             assistantTurn.errorCategory = nil
@@ -623,15 +633,26 @@ final class CoachChatStore: ObservableObject {
         let folded = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "vi_VN"))
             .replacingOccurrences(of: ",", with: ".")
         let lower = folded.lowercased()
+        let mutationNeedles = [
+            "doi", "tang", "giam", "nang", "ha", "cap nhat", "sua",
+            "change", "update", "set", "make", "increase", "decrease"
+        ]
+        let contextualNeedles = [
+            "buoi nay", "buoi tap nay", "workout nay", "this workout",
+            "ngay mai", "tomorrow", "tmr"
+        ]
         let distanceNeedles = [
             "cu li", "cu ly", "quang duong", "distance", "kilometer", "kilometre",
             "thanh", "to ", "len", "xuong"
         ]
-        guard distanceNeedles.contains(where: { lower.contains($0) }) else { return nil }
+
+        let hasEditCue = mutationNeedles.contains { lower.contains($0) }
+            || distanceNeedles.contains { lower.contains($0) }
+            || contextualNeedles.contains { lower.contains($0) }
 
         let patterns = [
             #"(?<![\d.])(\d+(?:\.\d+)?)\s*(?:km|kilometer|kilometre|k)(?![a-z])"#,
-            #"(?:thanh|to|len|xuong)\s+(\d+(?:\.\d+)?)"#
+            #"(?:thanh|to|len|xuong|set|make|increase|decrease)\s+(\d+(?:\.\d+)?)"#
         ]
         for pattern in patterns {
             guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { continue }
@@ -640,7 +661,8 @@ final class CoachChatStore: ObservableObject {
                   match.numberOfRanges > 1,
                   let valueRange = Range(match.range(at: 1), in: lower),
                   let value = Double(lower[valueRange]),
-                  value > 0
+                  value > 0,
+                  hasEditCue || pattern.contains("km")
             else { continue }
             return value
         }
@@ -714,7 +736,24 @@ final class CoachChatStore: ObservableObject {
         if lower.contains("stale") || lower.contains("changed") || lower.contains("current") {
             return "Kế hoạch đã thay đổi so với lúc Coach tạo đề xuất. Anh mở lại lịch hiện tại rồi gửi yêu cầu mới nhé."
         }
-        return "Em chưa thể áp dụng thay đổi này vào lịch. Anh thử yêu cầu một thay đổi cụ thể hơn, ví dụ ngày nào, đổi sang buổi gì, quãng đường bao nhiêu."
+        return "Em chưa thể áp dụng thay đổi này vào lịch. Buổi tập chưa thay đổi; anh gửi lại với ngày và mục tiêu mới, hoặc mở đúng workout rồi dùng Edit with Coach."
+    }
+
+    private static func userFacingContextualDistanceRejection(targetKm: Double, raw: String) -> String {
+        let lower = raw.lowercased()
+        let target = targetKm.rounded() == targetKm
+            ? "\(Int(targetKm)) km"
+            : String(format: "%.1f km", targetKm)
+        if lower.contains("volume") || lower.contains("load") || lower.contains("ramp") || lower.contains("safe") {
+            return "Em hiểu anh muốn đổi buổi này lên \(target), nhưng validation đang chặn vì tải tập có thể tăng quá nhanh. Buổi tập chưa thay đổi."
+        }
+        if lower.contains("locked") || lower.contains("fixed") {
+            return "Em hiểu anh muốn đổi buổi này lên \(target), nhưng buổi này đang được khóa nên chưa thể sửa trực tiếp. Buổi tập chưa thay đổi."
+        }
+        if lower.contains("stale") || lower.contains("changed") || lower.contains("current") {
+            return "Em hiểu anh muốn đổi buổi này lên \(target), nhưng buổi tập đã thay đổi sau khi Coach mở màn hình này. Anh quay lại lịch rồi mở lại buổi mới nhất nhé."
+        }
+        return "Em hiểu anh muốn đổi buổi này lên \(target), nhưng chưa tạo được proposal an toàn từ lịch hiện tại. Buổi tập chưa thay đổi."
     }
 
     private static let calendarImportDetourMessage = "Training schedule changes must update TrainOrRest Calendar through the plan tool, then sync intervals.icu from the app. Do not provide ICS/iCalendar/import instructions."
