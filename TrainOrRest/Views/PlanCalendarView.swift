@@ -18,6 +18,9 @@ struct PlanCalendarView: View {
     @Query private var goals: [Goal]
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var pushService: WorkoutPushService
+    @EnvironmentObject private var googleCalendar: GoogleCalendarSyncService
+    @Query private var googleConnections: [GoogleCalendarConnection]
+    @Query private var googleCalendarChanges: [GoogleCalendarInboundChange]
 
     @State private var mode: Mode = .month
     @State private var monthAnchor: Date = .now
@@ -26,12 +29,15 @@ struct PlanCalendarView: View {
     @State private var isEditingGoal = false
     @State private var revertError: String?
     @State private var forceSyncStatus: String?
+    @State private var isShowingGoogleCalendarStatus = false
+    @State private var didCheckGoogleCalendarOnOpen = false
 
     private let calendar = Calendar.current
 
     var body: some View {
         VStack(spacing: 0) {
             topBar
+            googleCalendarStatusRow
             ForceIntervalsSyncStatusView(status: forceSyncStatus)
             RecentCoachChangesView(
                 edits: recentCoachEdits,
@@ -66,6 +72,20 @@ struct PlanCalendarView: View {
             }
         }
         .sheet(isPresented: $isEditingGoal) { GoalEntryView() }
+        .sheet(isPresented: $isShowingGoogleCalendarStatus) {
+            GoogleCalendarStatusSheet()
+        }
+        .task {
+            guard !didCheckGoogleCalendarOnOpen,
+                  googleConnection?.allowsSchedulingFromGoogle == true || googleConnection?.smartSchedulingEnabled == true else { return }
+            didCheckGoogleCalendarOnOpen = true
+            if googleConnection?.allowsSchedulingFromGoogle == true {
+                await googleCalendar.reconcile(reason: "openTrainingCalendar")
+            }
+            if googleConnection?.smartSchedulingEnabled == true {
+                await googleCalendar.refreshAvailability(reason: "openTrainingCalendar")
+            }
+        }
     }
 
     @ViewBuilder
@@ -101,6 +121,30 @@ struct PlanCalendarView: View {
         .padding(.bottom, 6)
     }
 
+    private var googleCalendarStatusRow: some View {
+        Button {
+            isShowingGoogleCalendarStatus = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: googleCalendarStatusIcon)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(googleCalendarStatusTint)
+                Text(googleCalendarStatusText)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.dim)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.up")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Theme.faint)
+            }
+            .frame(minHeight: 36)
+            .padding(.horizontal, 16)
+            .background(Theme.card)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(googleCalendarAccessibilityLabel)
+    }
+
     private var modeToggle: some View {
         HStack(spacing: 4) {
             ForEach(Mode.allCases) { option in
@@ -133,6 +177,70 @@ struct PlanCalendarView: View {
 
     private var goalButtonTitle: String {
         goals.isEmpty ? "Set race goal" : "Change goal"
+    }
+
+    private var googleConnection: GoogleCalendarConnection? {
+        googleConnections.first
+    }
+
+    private var googleCalendarStatusText: String {
+        guard let connection = googleConnection else { return "Connect Google Calendar" }
+        switch connection.connectionStatus {
+        case .connected:
+            if pendingGoogleCalendarReviews > 0 {
+                return "Google Calendar · \(pendingGoogleCalendarReviews) changes need review"
+            }
+            return "Google Calendar · Up to date"
+        case .syncing, .initialSync:
+            return "Google Calendar · Syncing"
+        case .needsReconnect:
+            return "Google Calendar · Reconnect required"
+        case .offlineQueued:
+            return "Google Calendar · Waiting for connection"
+        case .partialFailure, .calendarMissing:
+            return "Google Calendar · Needs attention"
+        default:
+            return "Connect Google Calendar"
+        }
+    }
+
+    private var googleCalendarStatusIcon: String {
+        guard let connection = googleConnection else { return "calendar.badge.plus" }
+        switch connection.connectionStatus {
+        case .connected: return "calendar.badge.checkmark"
+        case .syncing, .initialSync: return "arrow.triangle.2.circlepath"
+        case .needsReconnect, .offlineQueued, .partialFailure, .calendarMissing: return "exclamationmark.triangle"
+        default: return "calendar.badge.plus"
+        }
+    }
+
+    private var googleCalendarStatusTint: Color {
+        guard let connection = googleConnection else { return Theme.accent }
+        if pendingGoogleCalendarReviews > 0 { return Theme.warn }
+        switch connection.connectionStatus {
+        case .connected: return Theme.good
+        case .needsReconnect, .offlineQueued, .partialFailure, .calendarMissing: return Theme.warn
+        default: return Theme.accent
+        }
+    }
+
+    private var googleCalendarAccessibilityLabel: String {
+        if pendingGoogleCalendarReviews > 0 {
+            return "Google Calendar changes need review"
+        }
+        switch googleConnection?.connectionStatus {
+        case .connected: return "Google Calendar connected"
+        case .syncing, .initialSync: return "Google Calendar syncing"
+        case .needsReconnect: return "Google Calendar needs reconnect"
+        default: return "Manage Google Calendar sync"
+        }
+    }
+
+    private var pendingGoogleCalendarReviews: Int {
+        guard let connection = googleConnection else { return 0 }
+        return googleCalendarChanges.filter {
+            $0.connectionID == connection.uuid && $0.status == .pendingReview
+        }.count
     }
 
     private var recentCoachEdits: [PlanEdit] {

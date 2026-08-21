@@ -17,8 +17,10 @@ enum CoachContextBuilder {
             "Every tool date must be an absolute local calendar date formatted YYYY-MM-DD. Resolve relative wording like 'tomorrow' or 'Saturday' against today's date yourself; never pass relative text to a tool.",
             "For move requests, date is the source day that already has the workout and detail is the target day to move it to. The target day is normally empty and may be a rest/unavailable day; user intent overrides availability for one-off calendar edits. Do not set date to the empty target. If the user only names a target day but not which existing workout to move, ask which workout/date to move.",
             "For create requests, date is the free target day and workout is required. The free date may be a normal rest/unavailable day if the user explicitly wants to add a workout there. Use create only when adding a new workout rather than moving an existing one.",
+            "For replace requests, date is the existing workout day and workout is required. Use replace when the user asks to change an existing workout into a different workout type, for example changing a tempo run on 2026-08-25 into shorter intervals. Do not use downgrade with a workout payload; downgrade only means make the existing workout an easy run at the same distance.",
             "If a plan tool call is rejected for missing or malformed fields, fix the JSON and call the tool again immediately. Do not ask the user to confirm the tool schema or JSON format.",
-            "You may create easy, long, tempo, and interval workouts. A race distance or target time can be context for a training request: for example, ‘create a workout to help me run a half marathon under 1:50’ means create a safe non-race workout, not a goal change or race workout. Use the stated training day; if no day is stated, ask which day to schedule it. You cannot create or edit a race workout, and you cannot change the goal."
+            "You may create easy, long, tempo, and interval workouts. A race distance or target time can be context for a training request: for example, ‘create a workout to help me run a half marathon under 1:50’ means create a safe non-race workout, not a goal change or race workout. Use the stated training day; if no day is stated, ask which day to schedule it. You cannot create or edit a race workout, and you cannot change the goal.",
+            "For questions about running history, yearly totals, monthly totals, or which month the user ran most, answer from the run history sections. Do not say monthly data is unavailable when those sections are present."
         ]
 
         let goal = try PlanStore.activeGoal(in: context)?.spec
@@ -28,7 +30,9 @@ enum CoachContextBuilder {
         lines += watchPushSection()
         lines += goalSection(goal: goal, fitness: fitness, today: today, calendar: calendar)
         lines += try trainingLoadSection(in: context, today: today, calendar: calendar, fitness: fitness)
+        lines += try currentYearRunHistorySection(in: context, today: today, calendar: calendar)
         lines += try planSection(in: context, today: today, calendar: calendar)
+        lines += try smartSchedulingSection(in: context, today: today, calendar: calendar)
         lines += try activitySection(in: context, today: today, calendar: calendar)
         lines += try readinessSection(in: context, today: today, calendar: calendar)
         lines += try freshnessSection(in: context)
@@ -96,6 +100,47 @@ enum CoachContextBuilder {
         return lines
     }
 
+    private static func currentYearRunHistorySection(
+        in context: ModelContext,
+        today: Date,
+        calendar: Calendar
+    ) throws -> [String] {
+        guard let yearInterval = calendar.dateInterval(of: .year, for: today) else {
+            return ["Current-year run history: unavailable because the calendar year could not be resolved."]
+        }
+        let activities = try context.fetch(FetchDescriptor<CompletedActivity>(
+            predicate: #Predicate { $0.date >= yearInterval.start && $0.date < yearInterval.end },
+            sortBy: [SortDescriptor(\.date)]
+        ))
+        let year = calendar.component(.year, from: today)
+        guard !activities.isEmpty else {
+            return ["Current-year run history (\(year)): no synced runs."]
+        }
+
+        let total = RunHistorySummary(activities: activities)
+        let months = monthlyRunSummaries(from: activities, calendar: calendar)
+        let topMonth = months.max {
+            if abs($0.distanceMeters - $1.distanceMeters) > 0.001 {
+                return $0.distanceMeters < $1.distanceMeters
+            }
+            return $0.runCount < $1.runCount
+        }
+
+        var lines = [
+            "Current-year run history (\(year)): \(String(format: "%.1f", total.totalDistanceMeters / 1000)) km, \(total.runCount) run(s), \(wholeNumber(total.totalDurationSeconds / 60)) min."
+        ]
+        if let topMonth {
+            lines.append(
+                "Top distance month so far: \(monthLabel(topMonth.monthStart, calendar: calendar)) with \(String(format: "%.1f", topMonth.distanceMeters / 1000)) km across \(topMonth.runCount) run(s)."
+            )
+        }
+        let monthly = months.map {
+            "\(monthLabel($0.monthStart, calendar: calendar)) \(String(format: "%.1f", $0.distanceMeters / 1000)) km/\($0.runCount) run(s)"
+        }
+        lines.append("Monthly run totals: \(monthly.joined(separator: "; ")).")
+        return [lines.joined(separator: "\n")]
+    }
+
     private static func planSection(in context: ModelContext, today: Date, calendar: Calendar) throws -> [String] {
         let dayStart = calendar.startOfDay(for: today)
         let workouts = try context.fetch(FetchDescriptor<PlannedWorkout>(sortBy: [SortDescriptor(\.date)]))
@@ -107,6 +152,32 @@ enum CoachContextBuilder {
             "- \(day(workout.date, calendar: calendar)): \(workout.kind?.displayName ?? workout.kindRaw), \(String(format: "%.1f", workout.distanceKm)) km, \(workout.details)"
         }
         return lines
+    }
+
+    private static func smartSchedulingSection(in context: ModelContext, today: Date, calendar: Calendar) throws -> [String] {
+        guard let connection = try context.fetch(FetchDescriptor<GoogleCalendarConnection>()).first,
+              connection.smartSchedulingEnabled else {
+            return ["Smart Scheduling: off."]
+        }
+        let start = calendar.startOfDay(for: today)
+        let end = calendar.date(byAdding: .day, value: 7, to: start) ?? start
+        let days = try context.fetch(FetchDescriptor<DayAvailability>(sortBy: [SortDescriptor(\.date)]))
+            .filter { $0.connectionID == connection.uuid && $0.date >= start && $0.date < end }
+        guard !days.isEmpty else {
+            return ["Smart Scheduling: enabled, but no current availability cache. Ask the app to refresh availability before making calendar-aware recommendations."]
+        }
+        var lines = [
+            "Smart Scheduling availability context. This is normalized busy/free data only; event titles, descriptions, attendees, locations and meeting links are not available and must not be inferred."
+        ]
+        for day in days.prefix(7) {
+            let available = day.availableWindows
+                .filter { $0.durationMinutes >= 30 }
+                .prefix(4)
+                .map { "\(time($0.start, calendar: calendar))-\(time($0.end, calendar: calendar))" }
+                .joined(separator: ", ")
+            lines.append("- \(weekdayName(day.date, calendar: calendar)) \(Self.day(day.date, calendar: calendar)): available \(available.isEmpty ? "none" : available)")
+        }
+        return [lines.joined(separator: "\n")]
     }
 
     private static func trainingLoadSection(
@@ -202,6 +273,30 @@ enum CoachContextBuilder {
         formatter(calendar: calendar, format: "EEEE").string(from: date)
     }
 
+    static func time(_ date: Date, calendar: Calendar = .current) -> String {
+        formatter(calendar: calendar, format: "HH:mm").string(from: date)
+    }
+
+    private static func monthlyRunSummaries(
+        from activities: [CompletedActivity],
+        calendar: Calendar
+    ) -> [MonthlyRunSummary] {
+        var summaries: [Date: MonthlyRunSummary] = [:]
+        for activity in activities {
+            guard let monthStart = calendar.dateInterval(of: .month, for: activity.date)?.start else { continue }
+            var summary = summaries[monthStart] ?? MonthlyRunSummary(monthStart: monthStart)
+            summary.runCount += 1
+            summary.distanceMeters += activity.distanceMeters ?? 0
+            summary.durationSeconds += activity.durationSeconds
+            summaries[monthStart] = summary
+        }
+        return summaries.values.sorted { $0.monthStart < $1.monthStart }
+    }
+
+    private static func monthLabel(_ date: Date, calendar: Calendar) -> String {
+        formatter(calendar: calendar, format: "yyyy-MM").string(from: date)
+    }
+
     private static func formatter(calendar: Calendar, format: String) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.calendar = calendar
@@ -209,5 +304,12 @@ enum CoachContextBuilder {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = format
         return formatter
+    }
+
+    private struct MonthlyRunSummary {
+        let monthStart: Date
+        var runCount: Int = 0
+        var distanceMeters: Double = 0
+        var durationSeconds: Double = 0
     }
 }

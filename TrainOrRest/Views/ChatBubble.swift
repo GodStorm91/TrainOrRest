@@ -31,10 +31,20 @@ struct ChatBubble: View {
     var showsAvatar: Bool = true
     var showsSource: Bool = true
     var isGroupedWithPrevious: Bool = false
+    var language: CoachLanguage = .current
+    var onRetry: (ChatMessage) -> Void = { _ in }
+    var onDismissFailure: (ChatMessage) -> Void = { _ in }
+    var onCancelRetry: (ChatMessage) -> Void = { _ in }
 
     @State private var showsGroundingSummary = false
 
     private var isUser: Bool { message.role == .user }
+    private var hasVisibleAssistantText: Bool {
+        !isUser && !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    private var showsInlineFailureState: Bool {
+        !isUser && [.failed, .retrying, .reconciling].contains(message.assistantStatus)
+    }
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 9) {
@@ -48,19 +58,40 @@ struct ChatBubble: View {
             }
 
             VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
-                messageBody
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(bubbleShape.fill(isUser ? Theme.accent : Theme.card))
-                    .overlay { if !isUser { bubbleShape.strokeBorder(Theme.border, lineWidth: 1) } }
-                    .shadow(color: isUser ? .clear : Color.black.opacity(0.045), radius: 10, x: 0, y: 4)
+                if isUser || hasVisibleAssistantText {
+                    messageBody
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .background(bubbleShape.fill(isUser ? Theme.accent : Theme.card))
+                        .overlay { if !isUser { bubbleShape.strokeBorder(Theme.border, lineWidth: 1) } }
+                        .shadow(color: isUser ? .clear : Color.black.opacity(0.045), radius: 10, x: 0, y: 4)
+                }
+
+                if message.isIncomplete && hasVisibleAssistantText {
+                    Label(language.incompleteResponseLabel, systemImage: "clock.badge.exclamationmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.warn)
+                        .padding(.top, 2)
+                        .accessibilityLabel(language.incompleteResponseLabel)
+                }
+
+                if showsInlineFailureState {
+                    CoachInlineFailureCard(
+                        message: message,
+                        language: language,
+                        onRetry: { onRetry(message) },
+                        onDismiss: { onDismissFailure(message) },
+                        onCancel: { onCancelRetry(message) }
+                    )
+                    .padding(.top, hasVisibleAssistantText ? 6 : 0)
+                }
 
                 if let applied = message.appliedAdjustment, !message.text.hasPrefix("Applied:") {
                     appliedBadge(applied)
                         .padding(.top, 1)
                 }
 
-                if showsSource, !hidesSources, !isUser, let footnote = message.groundingFootnote, let summary = message.groundingSummary {
+                if showsSource, !hidesSources, !isUser, message.assistantStatus == .completed, let footnote = message.groundingFootnote, let summary = message.groundingSummary {
                     groundingFootnote(footnote, summary: summary)
                         .padding(.top, 2)
                 }
@@ -96,6 +127,9 @@ struct ChatBubble: View {
                 subtitle: sourceLine(for: message.groundingFootnote),
                 rows: sourceRows(summary: message.groundingSummary ?? "")
             )
+        }
+        .onAppear {
+            announceInlineFailureIfNeeded()
         }
     }
 
@@ -185,5 +219,140 @@ struct ChatBubble: View {
         if line.localizedCaseInsensitiveContains("workout") { return "Buổi tập gần nhất" }
         if line.localizedCaseInsensitiveContains("photo") { return "Ảnh đính kèm" }
         return "Nguồn dữ liệu"
+    }
+
+    private func announceInlineFailureIfNeeded() {
+        guard showsInlineFailureState, !message.announcedFailure else { return }
+        message.announcedFailure = true
+        UIAccessibility.post(
+            notification: .announcement,
+            argument: message.assistantStatus == .retrying ? language.retryingInlineTitle : language.interruptedFailureTitle
+        )
+    }
+}
+
+private struct CoachInlineFailureCard: View {
+    let message: ChatMessage
+    let language: CoachLanguage
+    let onRetry: () -> Void
+    let onDismiss: () -> Void
+    let onCancel: () -> Void
+
+    private var category: CoachErrorCategory {
+        message.errorCategory ?? .retryableResponse
+    }
+
+    private var title: String {
+        if message.assistantStatus == .retrying { return language.retryingInlineTitle }
+        if message.assistantStatus == .reconciling { return language.mutationReconciliationTitle }
+        if category == .missingAttachment { return language.missingAttachmentFailureTitle }
+        return language.interruptedFailureTitle
+    }
+
+    private var bodyText: String {
+        if message.assistantStatus == .retrying { return language.retryingInlineMessage }
+        if message.assistantStatus == .reconciling { return language.mutationReconciliationMessage }
+        return message.errorMessage ?? language.interruptedFailureMessage
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 9) {
+                Image(systemName: iconName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .frame(width: 22, height: 24)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(Theme.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(bodyText)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Theme.dim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            HStack(spacing: 10) {
+                if message.assistantStatus == .retrying {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(accent)
+                        .accessibilityHidden(true)
+                    Spacer(minLength: 0)
+                    inlineButton(language.cancelRetryLabel, role: .secondary, action: onCancel)
+                        .accessibilityLabel("Hủy thử lại")
+                } else if message.assistantStatus == .reconciling || category == .mutationUnknown {
+                    Spacer(minLength: 0)
+                    inlineButton(language.checkStatusLabel, role: .primary, action: {})
+                        .accessibilityLabel("Kiểm tra trạng thái cập nhật")
+                } else if category == .missingAttachment {
+                    inlineButton(language.dismissInlineErrorLabel, role: .secondary, action: onDismiss)
+                    Spacer(minLength: 0)
+                    inlineButton(language.chooseDataAgainLabel, role: .primary, action: {})
+                } else if category == .authentication {
+                    inlineButton(language.dismissInlineErrorLabel, role: .secondary, action: onDismiss)
+                    Spacer(minLength: 0)
+                    inlineButton(language.checkConnectionLabel, role: .primary, action: {})
+                } else {
+                    inlineButton(language.dismissInlineErrorLabel, role: .secondary, action: onDismiss)
+                        .accessibilityLabel("Bỏ qua lỗi phản hồi")
+                    Spacer(minLength: 0)
+                    inlineButton(language.retryLabel, role: .primary, action: onRetry)
+                        .accessibilityLabel("Thử lại phản hồi")
+                }
+            }
+            .frame(minHeight: 44)
+        }
+        .padding(12)
+        .frame(maxWidth: 310, alignment: .leading)
+        .background(surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(accent.opacity(0.28), lineWidth: 1)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Phản hồi của Coach bị gián đoạn")
+    }
+
+    private func inlineButton(_ title: String, role: ButtonRole, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(role == .primary ? accent : Theme.dim)
+                .frame(minHeight: 44)
+                .padding(.horizontal, 4)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var iconName: String {
+        switch message.assistantStatus {
+        case .retrying:
+            return "arrow.triangle.2.circlepath"
+        case .reconciling:
+            return "checkmark.shield"
+        default:
+            return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var accent: Color {
+        category == .mutationUnknown ? Theme.warn : Theme.bad
+    }
+
+    private var surface: Color {
+        Color(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(hex: 0x252228).withAlphaComponent(0.98)
+                : UIColor(hex: 0xFFF7F2).withAlphaComponent(0.99)
+        })
+    }
+
+    private enum ButtonRole {
+        case primary, secondary
     }
 }

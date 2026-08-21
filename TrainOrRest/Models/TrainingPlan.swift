@@ -10,6 +10,9 @@ final class TrainingPlan {
     var weekPhasesRaw: [String]
     var weekTargetVolumesKm: [Double]
     var weekIsDown: [Bool]
+    /// Optional so existing stores can lightweight-migrate. When set, the
+    /// visible plan week is evaluated at the pause date until the plan resumes.
+    var pausedAt: Date?
     @Relationship(deleteRule: .cascade, inverse: \PlannedWorkout.plan)
     var workouts: [PlannedWorkout] = []
 
@@ -19,6 +22,7 @@ final class TrainingPlan {
         self.weekPhasesRaw = spec.weeks.map(\.phase.rawValue)
         self.weekTargetVolumesKm = spec.weeks.map(\.targetVolumeKm)
         self.weekIsDown = spec.weeks.map(\.isDownWeek)
+        self.pausedAt = nil
     }
 
     func phase(forWeek index: Int) -> TrainingPhase? {

@@ -26,7 +26,12 @@ targets:
       path: TrainOrRest/Info.plist
       properties:
         CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "202608182252"
+        CFBundleVersion: "202608212014"
+        GoogleCalendarOAuthClientID: "119351365161-2vtfr02trs185c4u2aah2lcomtad9m5b.apps.googleusercontent.com"
+        GoogleCalendarOAuthRedirectScheme: "com.googleusercontent.apps.119351365161-2vtfr02trs185c4u2aah2lcomtad9m5b"
+        CFBundleURLTypes:
+          - CFBundleURLSchemes:
+              - com.googleusercontent.apps.119351365161-2vtfr02trs185c4u2aah2lcomtad9m5b
         NSHealthShareUsageDescription: >-
           TrainOrRest reads your Garmin workouts and wellness data from Apple
           Health to build and adapt your training plan.

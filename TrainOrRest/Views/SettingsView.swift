@@ -11,6 +11,7 @@ struct SettingsView: View {
 
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var pushService: WorkoutPushService
+    @EnvironmentObject private var googleCalendar: GoogleCalendarSyncService
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \CoachMemoryItem.updatedAt, order: .reverse) private var memoryItems: [CoachMemoryItem]
     @State private var intervalsAPIKey = ""
@@ -45,6 +46,12 @@ struct SettingsView: View {
             Section("Connected Services") {
                 settingsRow("Apple Health", systemImage: "heart", value: "Connected")
                 settingsRow("Garmin", systemImage: "figure.run", value: "via Apple Health")
+                NavigationLink {
+                    CalendarsSettingsView()
+                } label: {
+                    settingsRow("Calendars", systemImage: "calendar.badge.clock", value: googleCalendarSummary)
+                }
+                .accessibilityLabel("Manage calendar connections")
                 NavigationLink {
                     IntervalsConnectionSettingsView()
                 } label: {
@@ -131,6 +138,17 @@ struct SettingsView: View {
         return "On"
     }
 
+    private var googleCalendarSummary: String {
+        let connection = googleCalendar.connection()
+        switch connection.connectionStatus {
+        case .connected: return "Google connected"
+        case .syncing, .initialSync: return "Syncing"
+        case .needsReconnect, .calendarMissing, .partialFailure: return "Needs attention"
+        case .offlineQueued: return "Queued"
+        default: return "Not connected"
+        }
+    }
+
     private var memorySummary: String {
         let count = memoryItems.count
         if count == 0 { return "Empty" }
@@ -140,6 +158,32 @@ struct SettingsView: View {
     private func clean(_ raw: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+struct CalendarsSettingsView: View {
+    var body: some View {
+        Form {
+            Section {
+                NavigationLink {
+                    GoogleCalendarSettingsView()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                            .frame(width: 24)
+                        Text("Google Calendar")
+                        Spacer()
+                    }
+                    .frame(minHeight: 44)
+                }
+            } footer: {
+                Text("Calendar integrations mirror RestOrTrain workouts outward. RestOrTrain stays the source of truth.")
+            }
+        }
+        .navigationTitle("Calendars")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -291,7 +335,7 @@ struct IntervalsConnectionSettingsView: View {
     }
 
     private var lastSyncText: String {
-        if let error = pushService.lastPushError { return "Last sync failed" }
+        if pushService.lastPushError != nil { return "Last sync failed" }
         if let last = pushService.lastPushAt { return "Last sync \(last.formatted(date: .abbreviated, time: .shortened))" }
         return "Ready to sync"
     }

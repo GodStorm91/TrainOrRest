@@ -1,28 +1,15 @@
 import Foundation
 import SwiftData
 
-struct CoachChatErrorEvent: Identifiable, Equatable {
-    let id: UUID
-    let title: String
+private struct CoachRetryUnavailableError: LocalizedError {
     let message: String
-    let retryTitle: String
-    let canRetry: Bool
-}
-
-private struct PendingCoachRetry {
-    let model: String
-    let apiKey: String
-    let attachments: [CoachContextAttachment]
-    let groundingSnapshot: GroundingSnapshot
-    let today: Date
-    let threadID: UUID?
+    var errorDescription: String? { message }
 }
 
 @MainActor
 final class CoachChatStore: ObservableObject {
     @Published private(set) var isSending = false
     @Published private(set) var isRetrying = false
-    @Published private(set) var errorEvent: CoachChatErrorEvent?
     @Published var lastError: String?
 
     private let anthropicClient: ClaudeServicing
@@ -30,7 +17,6 @@ final class CoachChatStore: ObservableObject {
     private let calendar: Calendar
     private let now: () -> Date
     private let replacementCoordinator: WorkoutReplacementCoordinator?
-    private var pendingRetry: PendingCoachRetry?
 
     init(
         client: ClaudeServicing? = nil,
@@ -58,10 +44,7 @@ final class CoachChatStore: ObservableObject {
     ) async {
         let account = CoachModelProvider.apiKeyAccount(for: model)
         guard let apiKey = try? KeychainStore.load(account: account), !apiKey.isEmpty else {
-            showError(
-                CoachLanguage.current.missingCoachKeyError(provider: CoachModelProvider.displayName(for: model)),
-                canRetry: false
-            )
+            lastError = CoachLanguage.current.missingCoachKeyError(provider: CoachModelProvider.displayName(for: model))
             return
         }
         await send(
@@ -89,116 +72,132 @@ final class CoachChatStore: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         guard replacementCoordinator?.hasPendingDecision != true else {
-            showError(CoachLanguage.current.replacementPendingMessage, canRetry: false)
+            lastError = CoachLanguage.current.replacementPendingMessage
             return
         }
-        let today = now()
-        let snapshot: GroundingSnapshot
+
+        let submittedAt = now()
+        let messageDate = Date()
+        let selectedEvidence = evidence ?? EvidenceSelection(attachments: attachments)
+        let grounding: GroundingSnapshot
         do {
-            if let groundingSnapshot {
-                snapshot = groundingSnapshot
-            } else {
-                snapshot = try CoachGrounding.snapshot(
-                    evidence: evidence ?? EvidenceSelection(attachments: attachments),
-                    in: context,
-                    today: today,
-                    calendar: calendar
-                )
-            }
+            grounding = try groundingSnapshot ?? CoachGrounding.snapshot(
+                evidence: selectedEvidence,
+                in: context,
+                today: submittedAt,
+                calendar: calendar
+            )
         } catch {
-            showError(error)
+            lastError = technicalErrorMessage(error)
             return
         }
+
         isSending = true
-        clearError()
-        context.insert(ChatMessage(
-            role: .user,
-            text: trimmed,
-            date: .now,
-            threadID: threadID
-        ))
-        updateThread(threadID, titleFrom: trimmed, in: context)
-        try? context.save()
-        let retry = PendingCoachRetry(
-            model: model,
-            apiKey: apiKey,
-            attachments: attachments,
-            groundingSnapshot: snapshot,
-            today: today,
+        lastError = nil
+
+        let userTurn = ChatMessage(role: .user, text: trimmed, date: messageDate, threadID: threadID)
+        context.insert(userTurn)
+        let snapshot = CoachRequestSnapshot(
+            userTurnID: userTurn.turnID,
+            messageText: trimmed,
+            attachmentReferences: attachments.map(CoachAttachmentReference.init),
+            selectedEvidenceSources: selectedEvidence,
+            contextBoundaryMessageID: userTurn.turnID,
+            locale: CoachLanguage.current.rawValue,
+            createdAt: submittedAt,
+            actionType: classifyAction(trimmed),
+            groundingSnapshot: grounding,
             threadID: threadID
         )
+        context.insert(snapshot)
+        let assistantTurn = ChatMessage(
+            role: .assistant,
+            text: "",
+            date: messageDate.addingTimeInterval(0.001),
+            groundingFootnote: grounding.footnoteLine,
+            groundingSummary: grounding.summary,
+            threadID: threadID,
+            parentUserTurnID: userTurn.turnID,
+            requestSnapshotID: snapshot.id,
+            status: .queued,
+            operationID: snapshot.operationID
+        )
+        context.insert(assistantTurn)
+        updateThread(threadID, titleFrom: trimmed, in: context)
+        try? context.save()
 
-        do {
-            try await runLoop(
-                apiKey: apiKey,
-                model: model,
-                attachments: attachments,
-                groundingSnapshot: snapshot,
-                today: today,
-                threadID: threadID,
-                in: context
-            )
-            clearRetry()
-        } catch {
-            showError(error, retry: shouldPersistFailure(error) ? nil : retry)
-            if shouldPersistFailure(error) {
-                context.insert(assistantMessage(text: technicalErrorMessage(error), groundingSnapshot: snapshot, threadID: threadID))
-                try? context.save()
-            }
-        }
+        await executeAttempt(
+            assistantTurn,
+            snapshot: snapshot,
+            model: model,
+            apiKey: apiKey,
+            in: context,
+            statusBeforeStreaming: .streaming
+        )
         isSending = false
     }
 
-    func dismissError(_ id: UUID) {
-        guard errorEvent?.id == id else { return }
-        errorEvent = nil
+    func retryFailedResponse(_ assistantTurnID: UUID, model: String, apiKey: String, in context: ModelContext) async {
+        guard !isSending, !isRetrying,
+              let assistantTurn = message(assistantTurnID, in: context),
+              assistantTurn.role == .assistant,
+              let snapshot = snapshot(assistantTurn.requestSnapshotID, in: context) else { return }
+        guard assistantTurn.assistantStatus == .failed else { return }
+
+        guard isLatestUnresolvedAssistantTurn(assistantTurn, in: context) else {
+            assistantTurn.errorCategory = .nonRetryable
+            assistantTurn.errorMessage = CoachLanguage.current.olderFailureRetryMessage
+            try? context.save()
+            return
+        }
+
+        isRetrying = true
+        isSending = true
+        await executeAttempt(
+            assistantTurn,
+            snapshot: snapshot,
+            model: model,
+            apiKey: apiKey,
+            in: context,
+            statusBeforeStreaming: .retrying
+        )
+        isSending = false
+        isRetrying = false
+    }
+
+    func retryFailedResponse(_ assistantTurnID: UUID, model: String, in context: ModelContext) async {
+        let account = CoachModelProvider.apiKeyAccount(for: model)
+        guard let apiKey = try? KeychainStore.load(account: account), !apiKey.isEmpty else {
+            lastError = CoachLanguage.current.missingCoachKeyError(provider: CoachModelProvider.displayName(for: model))
+            return
+        }
+        await retryFailedResponse(assistantTurnID, model: model, apiKey: apiKey, in: context)
+    }
+
+    func dismissFailedResponse(_ assistantTurnID: UUID, in context: ModelContext) {
+        guard let assistantTurn = message(assistantTurnID, in: context), assistantTurn.role == .assistant else { return }
+        assistantTurn.assistantStatus = .dismissed
+        assistantTurn.errorCategory = nil
+        assistantTurn.errorMessage = nil
+        assistantTurn.activeAttemptID = nil
+        try? context.save()
+    }
+
+    func cancelRetry(_ assistantTurnID: UUID, in context: ModelContext) {
+        guard let assistantTurn = message(assistantTurnID, in: context), assistantTurn.assistantStatus == .retrying else { return }
+        assistantTurn.assistantStatus = .failed
+        assistantTurn.errorCategory = .retryableResponse
+        assistantTurn.errorMessage = CoachLanguage.current.interruptedFailureMessage
+        assistantTurn.activeAttemptID = nil
+        try? context.save()
     }
 
     func resetError() {
-        clearError()
-        clearRetry()
+        lastError = nil
     }
 
     func presentError(_ message: String) {
-        showError(message, canRetry: false)
-    }
-
-    func retryFailedResponse(in context: ModelContext) async {
-        guard !isSending, !isRetrying, let retry = pendingRetry else { return }
-        isRetrying = true
-        isSending = true
-        errorEvent = CoachChatErrorEvent(
-            id: errorEvent?.id ?? UUID(),
-            title: CoachLanguage.current.retryingCoachErrorTitle,
-            message: CoachLanguage.current.retryingCoachErrorMessage,
-            retryTitle: CoachLanguage.current.retryLabel,
-            canRetry: false
-        )
-        do {
-            try await runLoop(
-                apiKey: retry.apiKey,
-                model: retry.model,
-                attachments: retry.attachments,
-                groundingSnapshot: retry.groundingSnapshot,
-                today: retry.today,
-                threadID: retry.threadID,
-                in: context
-            )
-            clearRetry()
-            clearError()
-        } catch {
-            showError(error, retry: shouldPersistFailure(error) ? nil : retry)
-            if shouldPersistFailure(error) {
-                context.insert(assistantMessage(
-                    text: technicalErrorMessage(error),
-                    groundingSnapshot: retry.groundingSnapshot,
-                    threadID: retry.threadID
-                ))
-                try? context.save()
-            }
-        }
-        isSending = false
-        isRetrying = false
+        lastError = message
     }
 
     func testConnection(apiKey: String, model: String) async -> String {
@@ -212,31 +211,72 @@ final class CoachChatStore: ObservableObject {
             _ = try await CoachModelProvider.client(for: model, anthropicClient: anthropicClient, openAIClient: openAIClient).send(request, apiKey: apiKey)
             return "Connection OK"
         } catch {
-            return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            return technicalErrorMessage(error)
+        }
+    }
+
+    private func executeAttempt(
+        _ assistantTurn: ChatMessage,
+        snapshot: CoachRequestSnapshot,
+        model: String,
+        apiKey: String,
+        in context: ModelContext,
+        statusBeforeStreaming: AssistantTurnStatus
+    ) async {
+        let attemptID = UUID()
+        assistantTurn.activeAttemptID = attemptID
+        assistantTurn.attemptCount += 1
+        assistantTurn.assistantStatus = statusBeforeStreaming
+        assistantTurn.errorCategory = nil
+        assistantTurn.errorMessage = nil
+        try? context.save()
+
+        do {
+            try await runLoop(
+                apiKey: apiKey,
+                model: model,
+                snapshot: snapshot,
+                assistantTurn: assistantTurn,
+                attemptID: attemptID,
+                in: context
+            )
+            guard assistantTurn.activeAttemptID == attemptID else { return }
+            assistantTurn.assistantStatus = .completed
+            assistantTurn.isIncomplete = false
+            assistantTurn.errorCategory = nil
+            assistantTurn.errorMessage = nil
+            assistantTurn.activeAttemptID = nil
+            lastError = nil
+            try context.save()
+        } catch {
+            guard assistantTurn.activeAttemptID == attemptID else { return }
+            markFailure(error, on: assistantTurn, snapshot: snapshot, in: context)
         }
     }
 
     private func runLoop(
         apiKey: String,
         model: String,
-        attachments: [CoachContextAttachment],
-        groundingSnapshot: GroundingSnapshot,
-        today: Date,
-        threadID: UUID?,
+        snapshot: CoachRequestSnapshot,
+        assistantTurn: ChatMessage,
+        attemptID: UUID,
         in context: ModelContext
     ) async throws {
+        let today = snapshot.createdAt
         var system = try CoachContextBuilder.build(in: context, today: today, calendar: calendar)
-        let directive = CoachLanguage.current.systemPromptDirective
+        let directive = CoachLanguage(rawValue: snapshot.locale)?.systemPromptDirective ?? CoachLanguage.current.systemPromptDirective
         if !directive.isEmpty {
             system += "\n\n\(directive)"
         }
-        var conversation = try messageHistory(threadID: threadID, in: context)
+        let attachments = try attachments(from: snapshot, in: context)
+        var conversation = try messageHistory(
+            threadID: snapshot.threadID,
+            boundaryMessageID: snapshot.contextBoundaryMessageID,
+            in: context
+        )
         if !attachments.isEmpty, var last = conversation.last, last.role == "user" {
-            let text = last.content.textContent
-                .components(separatedBy: "\n\nAttached:")
-                .first ?? last.content.textContent
             last.content = CoachAttachmentContextBuilder.content(
-                text: text,
+                text: snapshot.messageText,
                 attachments: attachments,
                 in: context,
                 today: today,
@@ -244,24 +284,26 @@ final class CoachChatStore: ObservableObject {
             )
             conversation[conversation.count - 1] = last
         }
-        var applied: [String] = []
+        let applied: [String] = []
         var lastToolRejection: String?
 
         for _ in 0..<CoachChatConfig.maxToolRounds {
             let request = ClaudeRequest(model: model, system: system, tools: [CoachTools.tool], messages: conversation)
             let client = CoachModelProvider.client(for: model, anthropicClient: anthropicClient, openAIClient: openAIClient)
             let events = try await client.stream(request, apiKey: apiKey)
-            var streamingMessage: ChatMessage?
+            var replacementStarted = false
             var lastStreamSave = Date.distantPast
             let streamSaveInterval: TimeInterval = 0.15
             let assembler = CoachStreamAssembler(
                 onText: { delta in
-                    if streamingMessage == nil {
-                        let message = self.assistantMessage(text: "", groundingSnapshot: groundingSnapshot, threadID: threadID)
-                        streamingMessage = message
-                        context.insert(message)
+                    guard assistantTurn.activeAttemptID == attemptID else { return }
+                    if !replacementStarted {
+                        assistantTurn.text = ""
+                        assistantTurn.assistantStatus = .streaming
+                        assistantTurn.isIncomplete = false
+                        replacementStarted = true
                     }
-                    streamingMessage?.text += delta
+                    assistantTurn.text += delta
                     let saveTime = Date()
                     if saveTime.timeIntervalSince(lastStreamSave) >= streamSaveInterval {
                         lastStreamSave = saveTime
@@ -269,47 +311,20 @@ final class CoachChatStore: ObservableObject {
                     }
                 }
             )
-            let assembled: AssembledResponse
-            do {
-                assembled = try await assembler.assemble(events)
-            } catch {
-                if let streamingMessage {
-                    context.delete(streamingMessage)
-                    try? context.save()
-                }
-                throw error
-            }
+            let assembled = try await assembler.assemble(events)
             if let error = assembled.error {
-                if let streamingMessage {
-                    context.delete(streamingMessage)
-                    try? context.save()
-                }
                 throw CoachTools.ValidationError(error)
             }
             let response = assembled.response
 
-            // A truncated turn can carry a half-written tool input. Never decode
-            // or apply it; a refusal must not be treated as a plan edit either.
             if response.stopReason == "max_tokens" {
-                if let streamingMessage {
-                    context.delete(streamingMessage)
-                    try? context.save()
-                }
                 throw CoachTools.ValidationError(
                     "Claude's reply was cut off before the plan edit was complete. Ask again."
                 )
             }
             if response.stopReason == "refusal" {
-                let text = response.content.textContent
-                if let streamingMessage {
-                    streamingMessage.text = text.isEmpty ? "Claude declined to answer that." : text
-                } else {
-                    context.insert(assistantMessage(
-                        text: text.isEmpty ? "Claude declined to answer that." : text,
-                        groundingSnapshot: groundingSnapshot,
-                        threadID: threadID
-                    ))
-                }
+                assistantTurn.text = response.content.textContent.isEmpty ? "Claude declined to answer that." : response.content.textContent
+                assistantTurn.appliedAdjustment = nil
                 try context.save()
                 return
             }
@@ -321,23 +336,12 @@ final class CoachChatStore: ObservableObject {
             if toolUses.isEmpty {
                 let text = response.content.textContent
                 if lastToolRejection != nil, Self.containsPlanToolRetryDetour(text) {
-                    if let streamingMessage {
-                        context.delete(streamingMessage)
-                        try context.save()
-                    }
                     let retryMessage = "Plan edits must be submitted with \(CoachTools.toolName). Fix the rejected JSON and call the tool again; do not ask the user to confirm the tool schema."
                     lastToolRejection = retryMessage
-                    conversation.append(ClaudeMessageParam(
-                        role: "user",
-                        content: [.text("Rejected: \(retryMessage)")]
-                    ))
+                    conversation.append(ClaudeMessageParam(role: "user", content: [.text("Rejected: \(retryMessage)")]))
                     continue
                 }
                 if Self.containsCalendarImportDetour(text) {
-                    if let streamingMessage {
-                        context.delete(streamingMessage)
-                        try context.save()
-                    }
                     lastToolRejection = Self.calendarImportDetourMessage
                     conversation.append(ClaudeMessageParam(
                         role: "user",
@@ -345,34 +349,18 @@ final class CoachChatStore: ObservableObject {
                     ))
                     continue
                 }
-                if let streamingMessage {
-                    streamingMessage.text = text.isEmpty ? "I could not produce a response." : text
-                    streamingMessage.appliedAdjustment = applied.isEmpty ? nil : applied.joined(separator: "; ")
-                } else {
-                    context.insert(assistantMessage(
-                        text: text.isEmpty ? "I could not produce a response." : text,
-                        appliedAdjustment: applied.isEmpty ? nil : applied.joined(separator: "; "),
-                        groundingSnapshot: groundingSnapshot,
-                        threadID: threadID
-                    ))
-                }
+                assistantTurn.text = text.isEmpty ? "I could not produce a response." : text
+                assistantTurn.appliedAdjustment = applied.isEmpty ? nil : applied.joined(separator: "; ")
                 try context.save()
                 return
             }
 
-            if let streamingMessage {
-                context.delete(streamingMessage)
-                try context.save()
-            }
+            assistantTurn.text = ""
             conversation.append(ClaudeMessageParam(role: "assistant", content: response.content))
             guard toolUses.count == 1 else {
                 lastToolRejection = "Submit one plan adjustment at a time."
                 conversation.append(ClaudeMessageParam(role: "user", content: toolUses.map {
-                    .toolResult(
-                        toolUseID: $0.0,
-                        content: "Rejected: submit one plan adjustment at a time.",
-                        isError: true
-                    )
+                    .toolResult(toolUseID: $0.0, content: "Rejected: submit one plan adjustment at a time.", isError: true)
                 }))
                 continue
             }
@@ -388,40 +376,27 @@ final class CoachChatStore: ObservableObject {
 
             do {
                 let proposal = try toolUse.2.decoded(PlanAdjustmentProposal.self)
-                if let replacement = try CoachTools.pendingReplacement(
-                    for: proposal,
-                    in: context,
-                    today: today,
-                    calendar: calendar,
-                    language: .current
-                ) {
+                if let replacement = try CoachTools.pendingReplacement(for: proposal, in: context, today: today, calendar: calendar, language: .current) {
                     guard let replacementCoordinator else {
                         throw CoachTools.ValidationError("Workout replacement confirmation is unavailable.")
                     }
+                    assistantTurn.text = "I prepared this workout replacement. Review it below before I save it."
                     replacementCoordinator.stage(replacement)
+                    try context.save()
                     return
                 }
 
                 guard let replacementCoordinator else {
                     throw CoachTools.ValidationError("Plan update confirmation is unavailable.")
                 }
-                let validated = try CoachTools.validateForConfirmation(
-                    proposal: proposal,
-                    in: context,
-                    today: today,
-                    calendar: calendar
-                )
+                let validated = try CoachTools.validateForConfirmation(proposal: proposal, in: context, today: today, calendar: calendar)
                 let summary = validated.summary.isEmpty ? CoachTools.summary(for: proposal) : validated.summary
-                context.insert(assistantMessage(
-                    text: "I prepared this calendar update. Review it below before I save it: \(summary)",
-                    groundingSnapshot: groundingSnapshot,
-                    threadID: threadID
-                ))
+                assistantTurn.text = "I prepared this calendar update. Review it below before I save it: \(summary)"
                 try context.save()
-                replacementCoordinator.stage(proposal, summary: summary, threadID: threadID)
+                replacementCoordinator.stage(proposal, summary: summary, threadID: snapshot.threadID)
                 return
             } catch {
-                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                let message = technicalErrorMessage(error)
                 lastToolRejection = message
                 conversation.append(ClaudeMessageParam(role: "user", content: [
                     .toolResult(toolUseID: toolUse.0, content: "Rejected: \(message)", isError: true)
@@ -430,26 +405,122 @@ final class CoachChatStore: ObservableObject {
         }
 
         if !applied.isEmpty {
-            context.insert(assistantMessage(
-                text: "Applied: \(applied.joined(separator: "; "))",
-                appliedAdjustment: applied.joined(separator: "; "),
-                groundingSnapshot: groundingSnapshot,
-                threadID: threadID
-            ))
+            assistantTurn.text = "Applied: \(applied.joined(separator: "; "))"
+            assistantTurn.appliedAdjustment = applied.joined(separator: "; ")
         } else if let lastToolRejection {
-            context.insert(assistantMessage(
-                text: Self.userFacingPlanToolRejection(lastToolRejection),
-                groundingSnapshot: groundingSnapshot,
-                threadID: threadID
-            ))
+            assistantTurn.text = Self.userFacingPlanToolRejection(lastToolRejection)
         } else {
-            context.insert(assistantMessage(
-                text: "I could not safely finish the plan adjustment. Please try one specific change at a time.",
-                groundingSnapshot: groundingSnapshot,
-                threadID: threadID
-            ))
+            assistantTurn.text = "I could not safely finish the plan adjustment. Please try one specific change at a time."
         }
         try context.save()
+    }
+
+    private func markFailure(
+        _ error: Error,
+        on assistantTurn: ChatMessage,
+        snapshot: CoachRequestSnapshot,
+        in context: ModelContext
+    ) {
+        let message = technicalErrorMessage(error)
+        let category = failureCategory(for: error, snapshot: snapshot)
+        assistantTurn.assistantStatus = category == .mutationUnknown ? .reconciling : .failed
+        assistantTurn.errorCategory = category
+        assistantTurn.errorMessage = userFacingInlineError(for: category, raw: message)
+        assistantTurn.isIncomplete = !assistantTurn.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        assistantTurn.activeAttemptID = nil
+        lastError = message
+        try? context.save()
+    }
+
+    private func failureCategory(for error: Error, snapshot: CoachRequestSnapshot) -> CoachErrorCategory {
+        if snapshot.actionType == .planMutation {
+            return .mutationUnknown
+        }
+        if error is CoachRetryUnavailableError {
+            return .missingAttachment
+        }
+        guard let clientError = error as? ClaudeClientError else { return .retryableResponse }
+        switch clientError {
+        case .offline:
+            return .offline
+        case .badKey:
+            return .authentication
+        case .connectionLost, .rateLimited, .invalidResponse, .api:
+            return .retryableResponse
+        }
+    }
+
+    private func userFacingInlineError(for category: CoachErrorCategory, raw: String) -> String {
+        switch category {
+        case .retryableResponse, .offline:
+            return CoachLanguage.current.interruptedFailureMessage
+        case .missingAttachment:
+            return CoachLanguage.current.missingAttachmentFailureMessage
+        case .authentication:
+            return CoachLanguage.current.authenticationFailureMessage
+        case .mutationUnknown:
+            return CoachLanguage.current.mutationReconciliationMessage
+        case .nonRetryable:
+            return raw
+        }
+    }
+
+    private func attachments(from snapshot: CoachRequestSnapshot, in context: ModelContext) throws -> [CoachContextAttachment] {
+        try snapshot.attachmentReferences.map { reference in
+            switch reference.kind {
+            case .health:
+                return .health
+            case .plannedWorkout:
+                guard let uuid = reference.uuid,
+                      (try? context.fetch(FetchDescriptor<PlannedWorkout>()).contains(where: { $0.uuid == uuid })) == true else {
+                    throw CoachRetryUnavailableError(message: CoachLanguage.current.missingAttachmentFailureMessage)
+                }
+                return .plannedWorkout(uuid)
+            case .completedActivity:
+                guard let uuid = reference.uuid,
+                      (try? context.fetch(FetchDescriptor<CompletedActivity>()).contains(where: { $0.hkUUID == uuid })) == true else {
+                    throw CoachRetryUnavailableError(message: CoachLanguage.current.missingAttachmentFailureMessage)
+                }
+                return .completedActivity(uuid)
+            case .image:
+                guard let data = reference.imageData, let mediaType = reference.mediaType, let filename = reference.filename else {
+                    throw CoachRetryUnavailableError(message: CoachLanguage.current.missingAttachmentFailureMessage)
+                }
+                return .image(CoachImageAttachment(data: data, mediaType: mediaType, filename: filename))
+            }
+        }
+    }
+
+    private func classifyAction(_ text: String) -> CoachRequestActionType {
+        let lower = text.lowercased()
+        let mutationNeedles = [
+            "create workout", "add workout", "update plan", "delete workout", "modify calendar",
+            "save settings", "push workout", "thêm bài", "tạo bài", "sửa lịch", "đổi lịch", "xóa bài"
+        ]
+        return mutationNeedles.contains { lower.contains($0) } ? .planMutation : .readOnly
+    }
+
+    private func message(_ id: UUID?, in context: ModelContext) -> ChatMessage? {
+        guard let id else { return nil }
+        var descriptor = FetchDescriptor<ChatMessage>()
+        descriptor.fetchLimit = 200
+        return (try? context.fetch(descriptor))?.first { $0.turnID == id }
+    }
+
+    private func snapshot(_ id: UUID?, in context: ModelContext) -> CoachRequestSnapshot? {
+        guard let id else { return nil }
+        var descriptor = FetchDescriptor<CoachRequestSnapshot>()
+        descriptor.fetchLimit = 200
+        return (try? context.fetch(descriptor))?.first { $0.id == id }
+    }
+
+    private func isLatestUnresolvedAssistantTurn(_ assistantTurn: ChatMessage, in context: ModelContext) -> Bool {
+        let messages = ((try? context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))) ?? [])
+            .filter { $0.threadID == assistantTurn.threadID && !$0.text.hasPrefix("Applied:") }
+        guard let index = messages.firstIndex(where: { $0.turnID == assistantTurn.turnID }) else { return false }
+        return !messages[(index + 1)...].contains { message in
+            message.role == .user || (message.role == .assistant && message.assistantStatus == .completed)
+        }
     }
 
     private static func userFacingPlanToolRejection(_ raw: String) -> String {
@@ -470,22 +541,8 @@ final class CoachChatStore: ObservableObject {
 
     private static func containsPlanToolRetryDetour(_ text: String) -> Bool {
         let lowercased = text.lowercased()
-        let schemaNeedles = [
-            "plan_adjustment",
-            "tool",
-            "json",
-            "schema",
-            "format",
-            "định dạng",
-            "cấu trúc"
-        ]
-        let confirmationNeedles = [
-            "confirm",
-            "confirmation",
-            "xác nhận",
-            "cho mình biết",
-            "bạn có thể"
-        ]
+        let schemaNeedles = ["plan_adjustment", "tool", "json", "schema", "format", "định dạng", "cấu trúc"]
+        let confirmationNeedles = ["confirm", "confirmation", "xác nhận", "cho mình biết", "bạn có thể"]
         return schemaNeedles.contains { lowercased.contains($0) }
             && confirmationNeedles.contains { lowercased.contains($0) }
     }
@@ -493,89 +550,25 @@ final class CoachChatStore: ObservableObject {
     private static func containsCalendarImportDetour(_ text: String) -> Bool {
         let lowercased = text.lowercased()
         let needles = [
-            "begin:vcalendar",
-            "end:vcalendar",
-            "dtstart",
-            "dtend",
-            "vevent",
-            ".ics",
-            "icalendar",
-            "google calendar",
-            "import calendar",
-            "calendar import",
-            "import ics"
+            "begin:vcalendar", "end:vcalendar", "dtstart", "dtend", "vevent",
+            ".ics", "icalendar", "google calendar", "import calendar", "calendar import", "import ics"
         ]
         return needles.contains { lowercased.contains($0) }
-    }
-
-    private func shouldPersistFailure(_ error: Error) -> Bool {
-        guard let clientError = error as? ClaudeClientError else { return true }
-        switch clientError {
-        case .offline, .connectionLost, .rateLimited, .badKey, .invalidResponse:
-            return false
-        case .api:
-            return true
-        }
-    }
-
-    private func clearError() {
-        lastError = nil
-        errorEvent = nil
-    }
-
-    private func clearRetry() {
-        pendingRetry = nil
-    }
-
-    private func showError(_ error: Error, retry: PendingCoachRetry? = nil) {
-        let technical = technicalErrorMessage(error)
-        showError(technical, canRetry: retry != nil)
-        pendingRetry = retry
-    }
-
-    private func showError(_ message: String, canRetry: Bool) {
-        lastError = message
-        let copy = CoachLanguage.current.chatErrorCopy(for: message)
-        errorEvent = CoachChatErrorEvent(
-            id: UUID(),
-            title: copy.title,
-            message: copy.message,
-            retryTitle: CoachLanguage.current.retryLabel,
-            canRetry: canRetry
-        )
-        if !canRetry {
-            pendingRetry = nil
-        }
     }
 
     private func technicalErrorMessage(_ error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 
-    private func assistantMessage(
-        text: String,
-        appliedAdjustment: String? = nil,
-        groundingSnapshot: GroundingSnapshot,
-        threadID: UUID? = nil
-    ) -> ChatMessage {
-        ChatMessage(
-            role: .assistant,
-            text: text,
-            date: .now,
-            appliedAdjustment: appliedAdjustment,
-            groundingFootnote: groundingSnapshot.footnoteLine,
-            groundingSummary: groundingSnapshot.summary,
-            threadID: threadID
-        )
-    }
-
-    private func messageHistory(threadID: UUID?, in context: ModelContext) throws -> [ClaudeMessageParam] {
-        var descriptor = FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date, order: .reverse)])
-        descriptor.fetchLimit = CoachChatConfig.historyLimit * 4
-        return try context.fetch(descriptor)
+    private func messageHistory(threadID: UUID?, boundaryMessageID: UUID, in context: ModelContext) throws -> [ClaudeMessageParam] {
+        let all = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
             .filter { $0.threadID == threadID }
-            .prefix(CoachChatConfig.historyLimit)
-            .reversed()
+        guard let boundaryIndex = all.firstIndex(where: { $0.turnID == boundaryMessageID }) else { return [] }
+        return all[...boundaryIndex]
+            .suffix(CoachChatConfig.historyLimit)
+            .filter { message in
+                message.role == .user || message.assistantStatus == .completed
+            }
             .map { ClaudeMessageParam(role: $0.role.rawValue, content: [.text($0.text)]) }
     }
 
@@ -644,6 +637,21 @@ private extension CoachContextAttachment {
             return .completed(uuid)
         case .health, .image:
             return nil
+        }
+    }
+}
+
+private extension CoachAttachmentReference {
+    init(_ attachment: CoachContextAttachment) {
+        switch attachment {
+        case .health:
+            self.init(kind: .health, uuid: nil, filename: nil, mediaType: nil, imageData: nil)
+        case .plannedWorkout(let uuid):
+            self.init(kind: .plannedWorkout, uuid: uuid, filename: nil, mediaType: nil, imageData: nil)
+        case .completedActivity(let uuid):
+            self.init(kind: .completedActivity, uuid: uuid, filename: nil, mediaType: nil, imageData: nil)
+        case .image(let image):
+            self.init(kind: .image, uuid: nil, filename: image.filename, mediaType: image.mediaType, imageData: image.data)
         }
     }
 }

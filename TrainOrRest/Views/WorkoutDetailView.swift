@@ -4,6 +4,11 @@ import SwiftUI
 struct WorkoutDetailView: View {
     @Bindable var workout: PlannedWorkout
     @Query private var activities: [CompletedActivity]
+    @Query private var googleLinks: [GoogleCalendarEventLink]
+    @Query private var googleConnections: [GoogleCalendarConnection]
+    @EnvironmentObject private var googleCalendar: GoogleCalendarSyncService
+    @State private var smartCandidates: [SchedulingCandidate] = []
+    @State private var smartSchedulingMessage: String?
 
     var body: some View {
         List {
@@ -17,6 +22,74 @@ struct WorkoutDetailView: View {
                 Text(workout.details)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+            }
+
+            if let scheduleUpdatedAt = workout.scheduleUpdatedAt, workout.scheduleUpdatedFrom == "googleCalendar" {
+                Section("Schedule history") {
+                    LabeledContent("Scheduled from", value: "Google Calendar")
+                    LabeledContent("Updated", value: scheduleUpdatedAt.formatted(date: .abbreviated, time: .shortened))
+                }
+            }
+
+            if isNotVisibleInGoogleCalendar {
+                Section {
+                    Label("Not shown in Google Calendar", systemImage: "calendar.badge.exclamationmark")
+                        .foregroundStyle(Theme.warn)
+                    Text("This workout still exists in your RestOrTrain plan.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button {
+                        googleCalendar.addBackToGoogleCalendar(workoutID: workout.uuid)
+                    } label: {
+                        Label("Add back to Google Calendar", systemImage: "calendar.badge.plus")
+                    }
+                }
+            }
+
+            if smartSchedulingEnabled {
+                Section("Smart Scheduling") {
+                    Toggle("Keep this workout fixed", isOn: Binding(
+                        get: { workout.isScheduleLocked },
+                        set: { workout.scheduleLock = $0 }
+                    ))
+                    .accessibilityLabel("Keep workout fixed")
+                    if smartCandidates.isEmpty {
+                        Button {
+                            refreshSmartCandidates()
+                        } label: {
+                            Label("Find a time", systemImage: "sparkles")
+                        }
+                        .accessibilityLabel("Find a time")
+                    } else {
+                        ForEach(smartCandidates) { candidate in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Label(candidate.id == smartCandidates.first?.id ? "Best scheduling option" : "Scheduling option", systemImage: "clock")
+                                    .font(.subheadline.weight(.semibold))
+                                Text("\(candidate.startTime.formatted(date: .abbreviated, time: .shortened))-\(candidate.endTime.formatted(date: .omitted, time: .shortened))")
+                                    .font(.headline)
+                                ForEach(candidate.reasons.prefix(3), id: \.self) { reason in
+                                    Text("• \(reason)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Button {
+                                    googleCalendar.acceptSmartSchedulingCandidate(candidate)
+                                    smartSchedulingMessage = "\(workout.kind?.displayName ?? "Workout") scheduled for \(candidate.startTime.formatted(date: .omitted, time: .shortened))"
+                                    smartCandidates = []
+                                } label: {
+                                    Label("Use \(candidate.startTime.formatted(date: .omitted, time: .shortened))", systemImage: "checkmark.circle")
+                                }
+                                .accessibilityLabel("Schedule \(workout.kind?.displayName ?? "workout") at \(candidate.startTime.formatted(date: .omitted, time: .shortened))")
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                    if let smartSchedulingMessage {
+                        Text(smartSchedulingMessage)
+                            .font(.caption)
+                            .foregroundStyle(Theme.good)
+                    }
+                }
             }
 
             if let matched = matchedActivity {
@@ -37,11 +110,39 @@ struct WorkoutDetailView: View {
         .background(Theme.bg)
         .navigationTitle(workout.date.formatted(.dateTime.month(.abbreviated).day()))
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            if smartSchedulingEnabled && !isTimed(workout.date) {
+                refreshSmartCandidates()
+            }
+        }
     }
 
     private var matchedActivity: CompletedActivity? {
         guard let uuid = workout.matchedActivityUUID else { return nil }
         return activities.first { $0.hkUUID == uuid }
+    }
+
+    private var isNotVisibleInGoogleCalendar: Bool {
+        googleLinks.contains {
+            $0.localEntityID == workout.uuid && $0.syncState == .notVisibleInGoogleCalendar
+        }
+    }
+
+    private var smartSchedulingEnabled: Bool {
+        googleConnections.first?.smartSchedulingEnabled == true
+    }
+
+    private func refreshSmartCandidates() {
+        smartCandidates = googleCalendar.smartSchedulingCandidates(for: workout)
+        if smartCandidates.isEmpty {
+            smartSchedulingMessage = "No safe available slot found."
+        } else {
+            smartSchedulingMessage = nil
+        }
+    }
+
+    private func isTimed(_ date: Date) -> Bool {
+        !Calendar.current.isDate(date, equalTo: Calendar.current.startOfDay(for: date), toGranularity: .minute)
     }
 
     private var statusButtons: some View {

@@ -153,6 +153,134 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         }
     }
 
+    var interruptedFailureTitle: String {
+        switch self {
+        case .en: "Response interrupted"
+        case .ja: "返信が中断されました"
+        case .vi: "Phản hồi bị gián đoạn"
+        }
+    }
+
+    var interruptedFailureMessage: String {
+        switch self {
+        case .en: "The connection to Coach was interrupted.\nYour message and attached data are still safe."
+        case .ja: "Coach との接続が中断されました。\n送信済みのメッセージとデータは保持されています。"
+        case .vi: "Kết nối với Coach đã bị ngắt.\nTin nhắn và dữ liệu đã gửi vẫn được giữ nguyên."
+        }
+    }
+
+    var retryingInlineTitle: String {
+        switch self {
+        case .en: "Retrying..."
+        case .ja: "再試行中…"
+        case .vi: "Đang thử lại…"
+        }
+    }
+
+    var retryingInlineMessage: String {
+        switch self {
+        case .en: "Coach is processing your request again."
+        case .ja: "Coach がもう一度リクエストを処理しています。"
+        case .vi: "Coach đang xử lý lại yêu cầu của anh."
+        }
+    }
+
+    var dismissInlineErrorLabel: String {
+        switch self {
+        case .en: "Dismiss"
+        case .ja: "閉じる"
+        case .vi: "Bỏ qua"
+        }
+    }
+
+    var cancelRetryLabel: String {
+        switch self {
+        case .en: "Cancel"
+        case .ja: "キャンセル"
+        case .vi: "Hủy"
+        }
+    }
+
+    var incompleteResponseLabel: String {
+        switch self {
+        case .en: "Incomplete response"
+        case .ja: "未完了の返信"
+        case .vi: "Phản hồi chưa hoàn tất"
+        }
+    }
+
+    var missingAttachmentFailureTitle: String {
+        switch self {
+        case .en: "Cannot retry with old data"
+        case .ja: "古いデータでは再試行できません"
+        case .vi: "Không thể thử lại với dữ liệu cũ"
+        }
+    }
+
+    var missingAttachmentFailureMessage: String {
+        switch self {
+        case .en: "The attached health data is no longer available."
+        case .ja: "添付されたヘルスデータはもう利用できません。"
+        case .vi: "Dữ liệu sức khỏe đính kèm không còn khả dụng."
+        }
+    }
+
+    var chooseDataAgainLabel: String {
+        switch self {
+        case .en: "Choose data again"
+        case .ja: "データを選び直す"
+        case .vi: "Chọn lại dữ liệu"
+        }
+    }
+
+    var authenticationFailureMessage: String {
+        switch self {
+        case .en: "Coach needs permission again. Check Settings before retrying."
+        case .ja: "Coach の権限を確認してください。設定を確認してから再試行してください。"
+        case .vi: "Coach cần kiểm tra lại kết nối. Vào Cài đặt rồi thử lại."
+        }
+    }
+
+    var checkConnectionLabel: String {
+        switch self {
+        case .en: "Check connection"
+        case .ja: "接続を確認"
+        case .vi: "Kiểm tra kết nối"
+        }
+    }
+
+    var mutationReconciliationTitle: String {
+        switch self {
+        case .en: "Update confirmation missing"
+        case .ja: "更新確認を受信できませんでした"
+        case .vi: "Chưa nhận được xác nhận cập nhật"
+        }
+    }
+
+    var mutationReconciliationMessage: String {
+        switch self {
+        case .en: "Coach is checking whether the change was applied."
+        case .ja: "変更が適用済みか Coach が確認しています。"
+        case .vi: "Coach đang kiểm tra xem thay đổi đã được áp dụng hay chưa."
+        }
+    }
+
+    var checkStatusLabel: String {
+        switch self {
+        case .en: "Check status"
+        case .ja: "状態を確認"
+        case .vi: "Kiểm tra trạng thái"
+        }
+    }
+
+    var olderFailureRetryMessage: String {
+        switch self {
+        case .en: "This failed turn is no longer the latest message. Start a new branch from here to retry safely."
+        case .ja: "この失敗した返信の後に新しいメッセージがあります。安全に再試行するにはここから新しい分岐を作ってください。"
+        case .vi: "Lượt lỗi này không còn là tin nhắn mới nhất. Muốn thử lại an toàn thì tạo nhánh mới từ đây."
+        }
+    }
+
     func missingCoachKeyError(provider: String) -> String {
         switch self {
         case .en: "Add your \(provider) API key in Settings first."

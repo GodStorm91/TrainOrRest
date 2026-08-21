@@ -53,6 +53,31 @@ final class PlanEditTests: XCTestCase {
         XCTAssertEqual(edit.source, "coach")
     }
 
+    func testReplaceActionStagesExistingWorkoutReplacement() throws {
+        let container = try makeContainer(withHistory: true)
+        let context = container.mainContext
+        let existing = try XCTUnwrap(workout(on: occupiedDay, in: context))
+
+        let pending = try CoachTools.pendingReplacement(
+            for: PlanAdjustmentProposal(changes: [.init(
+                date: CoachContextBuilder.day(occupiedDay, calendar: calendar),
+                action: .replace,
+                detail: nil,
+                workout: intervalsWorkout()
+            )]),
+            in: context,
+            today: today,
+            calendar: calendar,
+            language: .en
+        )
+
+        let replacement = try XCTUnwrap(pending)
+        XCTAssertEqual(replacement.expected.uuid, existing.uuid)
+        XCTAssertEqual(replacement.existing.kind, .tempo)
+        XCTAssertEqual(replacement.proposed.kind, .intervals)
+        XCTAssertTrue(replacement.presentation.title.contains("Replace"))
+    }
+
     func testRevertRestoresWorkoutFieldsAndWeekTargetVolume() throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -150,16 +175,47 @@ final class PlanEditTests: XCTestCase {
         ))
     }
 
-    private func makeContainer() throws -> ModelContainer {
+    private func intervalsWorkout() -> PlanAdjustmentProposal.CreateWorkout {
+        .init(kind: "intervals", blocks: [
+            .init(repeatCount: 1, steps: [.init(
+                role: "warm_up", targetType: "distance_km", targetValue: 2, paceZone: "easy"
+            )]),
+            .init(repeatCount: 3, steps: [
+                .init(role: "work", targetType: "distance_km", targetValue: 1, paceZone: "interval"),
+                .init(role: "recovery", targetType: "duration_seconds", targetValue: 150, paceZone: "easy")
+            ]),
+            .init(repeatCount: 1, steps: [.init(
+                role: "cool_down", targetType: "distance_km", targetValue: 2, paceZone: "easy"
+            )])
+        ])
+    }
+
+    private func makeContainer(withHistory: Bool = false) throws -> ModelContainer {
         let schema = Schema([
             CompletedActivity.self, DailyWellness.self, SyncState.self, Goal.self,
             TrainingPlan.self, PlannedWorkout.self, DailyReadiness.self, DailyCheckIn.self,
-            RuleOverride.self, PlanSnapshot.self, ChatThread.self, ChatMessage.self, PlanEdit.self
+            RuleOverride.self, PlanSnapshot.self, ChatThread.self, ChatMessage.self, CoachRequestSnapshot.self, PlanEdit.self
         ])
         let container = try ModelContainer(
             for: schema,
             configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)]
         )
+        if withHistory {
+            for step in 0..<11 {
+                let offset = -(1 + step * 3)
+                container.mainContext.insert(CompletedActivity(
+                    hkUUID: UUID(),
+                    date: calendar.date(byAdding: .day, value: offset, to: today)!,
+                    distanceMeters: 12_000,
+                    durationSeconds: 3_960,
+                    avgHeartRate: 145,
+                    maxHeartRate: 168,
+                    avgPaceSecondsPerKm: 330,
+                    sourceName: "Garmin"
+                ))
+            }
+            try container.mainContext.save()
+        }
         let goal = GoalSpec(
             distance: .halfMarathon,
             targetTimeSeconds: 105 * 60,

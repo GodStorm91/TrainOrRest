@@ -108,92 +108,99 @@ struct ProfileView: View {
 
     @ViewBuilder
     private var goalAndPlanCard: some View {
-        if let goal = goals.first?.spec {
-            TorCard {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            TorEyebrow("\(goal.distance.displayName) goal")
-                            Text(goalTitle(for: goal))
-                                .font(.torHeading(22, .bold))
-                                .foregroundStyle(Theme.text)
-                            Text(goal.raceDate.formatted(date: .long, time: .omitted))
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(Theme.dim)
-                        }
-                        Spacer()
-                        Button {
-                            showGoalEntry = true
-                        } label: {
-                            Image(systemName: "ellipsis")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(Theme.dim)
-                                .frame(width: 44, height: 44)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Edit race goal")
-                    }
-
-                    VStack(spacing: 9) {
-                        profileRow("Target", Formatters.duration(goal.targetTimeSeconds))
-                        profileRow("Running days", "\(goal.availableDays.count)/week")
-                        profileRow("Current phase", currentPhaseText)
-                        profileRow("Time remaining", timeRemainingText(until: goal.raceDate))
-                    }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        ProgressView(value: planProgress)
-                            .tint(Theme.accent)
-                            .accessibilityLabel("Training plan progress")
-                            .accessibilityValue("Phase \(currentPhaseNumber) of \(totalPhaseCount)")
-                        Text("Phase \(currentPhaseNumber) of \(totalPhaseCount)")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Theme.faint)
-                    }
-
-                    NavigationLink {
-                        PlanCalendarView()
-                    } label: {
-                        HStack {
-                            Text("View training plan")
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 12, weight: .bold))
-                        }
-                        .font(.torHeading(15, .bold))
-                        .foregroundStyle(Theme.accent)
-                        .frame(minHeight: 44)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("View training plan")
-                }
-            }
-        } else {
-            Button { showGoalEntry = true } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "target")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(Theme.accent)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Set a race goal")
-                            .font(.torHeading(18, .bold))
-                            .foregroundStyle(Theme.text)
-                        Text("Tell RestOrTrain what you are training for.")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Theme.dim)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .foregroundStyle(Theme.faint)
-                }
-                .padding(16)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+        if let summary = activePlanSummary {
+            NavigationLink {
+                TrainingPlanDetailView()
+            } label: {
+                activePlanCard(summary)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Set a race goal")
+            .accessibilityLabel("Open active training plan details")
+        } else {
+            Button { showGoalEntry = true } label: {
+                emptyPlanCard
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Create training plan")
         }
+    }
+
+    private func activePlanCard(_ summary: ActivePlanSummary) -> some View {
+        TorCard {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        TorEyebrow(summary.health.status.eyebrowText)
+                            .foregroundStyle(statusColor(summary.health.status))
+                        Text(summary.title)
+                            .font(.torHeading(22, .bold))
+                            .foregroundStyle(Theme.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(raceLine(summary))
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Theme.dim)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Theme.faint)
+                        .frame(width: 44, height: 44)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Week \(summary.currentWeek) of \(summary.totalWeeks)")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.text)
+                        Spacer()
+                        Text("Timeline")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Theme.faint)
+                    }
+                    ProgressView(value: summary.timelineProgress)
+                        .tint(Theme.accent)
+                        .accessibilityLabel("Week \(summary.currentWeek) of \(summary.totalWeeks)")
+                }
+
+                VStack(spacing: 9) {
+                    if let phase = summary.currentPhase {
+                        profileRow("Current phase", phase.displayName)
+                    }
+                    if let thisWeek = summary.thisWeek, thisWeek.plannedSessions > 0 {
+                        profileRow("This week", thisWeekLine(thisWeek))
+                    }
+                    profileRow("Next workout", nextWorkoutLine(summary))
+                }
+            }
+        }
+    }
+
+    private var emptyPlanCard: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "target")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 42, height: 42)
+                .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            VStack(alignment: .leading, spacing: 4) {
+                TorEyebrow("PLAN")
+                Text("Set a goal and let Coach create a structured plan around your schedule.")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Theme.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Create training plan")
+                    .font(.torHeading(15, .bold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(minHeight: 28, alignment: .leading)
+            }
+            Spacer(minLength: 8)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.faint)
+        }
+        .padding(16)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
     }
 
     private var personalNavigationRows: some View {
@@ -300,46 +307,52 @@ struct ProfileView: View {
 
     private var activePlan: TrainingPlan? { plans.first }
 
-    private var currentWeekIndex: Int {
-        guard let plan = activePlan else { return 0 }
-        let today = calendar.startOfDay(for: .now)
-        let sorted = plan.workouts.sorted { $0.date < $1.date }
-        if let upcoming = sorted.first(where: { calendar.startOfDay(for: $0.date) >= today }) {
-            return upcoming.weekIndex
+    private var activePlanSummary: ActivePlanSummary? {
+        ActivePlanSummaryBuilder.build(goal: goals.first, plan: activePlan, activities: activities, calendar: calendar)
+    }
+
+    private func raceLine(_ summary: ActivePlanSummary) -> String {
+        if summary.isRaceDay {
+            return "\(summary.raceDate.formatted(date: .long, time: .omitted)) · Race day"
         }
-        return sorted.last?.weekIndex ?? 0
-    }
-
-    private var currentPhaseText: String {
-        activePlan?.phase(forWeek: currentWeekIndex)?.displayName ?? "Plan setup"
-    }
-
-    private var totalPhaseCount: Int {
-        max(activePlan?.weekPhasesRaw.count ?? 1, 1)
-    }
-
-    private var currentPhaseNumber: Int {
-        min(max(currentWeekIndex + 1, 1), totalPhaseCount)
-    }
-
-    private var planProgress: Double {
-        guard totalPhaseCount > 0 else { return 0 }
-        return Double(currentPhaseNumber) / Double(totalPhaseCount)
-    }
-
-    private func timeRemainingText(until raceDate: Date) -> String {
-        let today = calendar.startOfDay(for: .now)
-        let raceDay = calendar.startOfDay(for: raceDate)
-        let days = max(calendar.dateComponents([.day], from: today, to: raceDay).day ?? 0, 0)
-        if days >= 14 { return "\(Int((Double(days) / 7).rounded())) weeks" }
-        return "\(days) days"
-    }
-
-    private func goalTitle(for goal: GoalSpec) -> String {
-        if goal.distance == .marathon, goal.targetTimeSeconds <= 4 * 3600 {
-            return "Sub-4:00 Marathon"
+        if summary.health.status == .completed {
+            return "\(summary.raceDate.formatted(date: .long, time: .omitted)) · Completed"
         }
-        return "\(goal.distance.displayName) in \(Formatters.duration(goal.targetTimeSeconds))"
+        if let days = summary.daysRemaining {
+            return "\(summary.raceDate.formatted(date: .long, time: .omitted)) · \(days) days left"
+        }
+        return summary.raceDate.formatted(date: .long, time: .omitted)
+    }
+
+    private func thisWeekLine(_ week: ActivePlanWeekSummary) -> String {
+        "\(week.completedSessions) of \(week.plannedSessions) runs · \(distanceText(week.completedDistanceKm)) of \(distanceText(week.plannedDistanceKm))"
+    }
+
+    private func nextWorkoutLine(_ summary: ActivePlanSummary) -> String {
+        if summary.health.status == .completed { return "Plan completed" }
+        if summary.health.status == .paused { return "Plan is paused" }
+        guard let next = summary.nextWorkout else { return "No upcoming workout" }
+        return "\(next.displayName) \(distanceText(next.distanceKm)) · \(relativeDay(next.date))"
+    }
+
+    private func distanceText(_ km: Double) -> String {
+        String(format: "%.1f km", km)
+    }
+
+    private func relativeDay(_ date: Date) -> String {
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInTomorrow(date) { return "Tomorrow" }
+        return date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+    }
+
+    private func statusColor(_ status: ActivePlanStatus) -> Color {
+        switch status {
+        case .onTrack: Theme.good
+        case .needsAttention: Theme.warn
+        case .paused: Theme.dim
+        case .completed: Theme.accent
+        case .active: Theme.accent
+        }
     }
 
     private func cleanDouble(_ raw: String) -> Double? {

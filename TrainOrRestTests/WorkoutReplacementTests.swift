@@ -216,7 +216,7 @@ final class WorkoutReplacementTests: XCTestCase {
         let schema = Schema([
             CompletedActivity.self, DailyWellness.self, SyncState.self, Goal.self,
             TrainingPlan.self, PlannedWorkout.self, DailyReadiness.self, DailyCheckIn.self,
-            PlanSnapshot.self, ChatThread.self, ChatMessage.self, PlanEdit.self
+            PlanSnapshot.self, ChatThread.self, ChatMessage.self, CoachRequestSnapshot.self, PlanEdit.self
         ])
         let container = try ModelContainer(
             for: schema, configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)]

@@ -6,7 +6,7 @@ struct PlanAdjustmentProposal: Codable, Equatable {
 
     struct Change: Codable, Equatable {
         enum Action: String, Codable {
-            case swap, downgrade, rest, move, create
+            case swap, downgrade, rest, move, create, replace
         }
 
         var date: String
@@ -38,7 +38,7 @@ struct PlanAdjustmentProposal: Codable, Equatable {
             // obvious shape so the user sees a real confirmation card instead
             // of a low-level JSON "missing data" failure. Still leave truly
             // incomplete creates nil so Swift validation blocks persistence.
-            if action == .create, workout == nil,
+            if (action == .create || action == .replace), workout == nil,
                let blocks = try? container.decodeIfPresent([CreateWorkout.Block].self, forKey: .blocks),
                let kind = Self.decodeCreateKind(from: container) {
                 workout = CreateWorkout(kind: kind, blocks: blocks)
@@ -164,8 +164,8 @@ enum CoachTools {
                 ]),
                 "action": .object([
                     "type": .string("string"),
-                    "enum": .array(["swap", "downgrade", "rest", "move", "create"].map(JSONValue.string)),
-                    "description": .string("create adds a new workout on a free date, including an explicit rest/unavailable day; move uses date as the existing source workout day and detail as the empty target day; swap/rest/downgrade edit the workout already on date")
+                    "enum": .array(["swap", "downgrade", "rest", "move", "create", "replace"].map(JSONValue.string)),
+                    "description": .string("replace changes the existing workout on date to the supplied workout payload and must be used for requests like changing a tempo run into intervals; create adds a new workout on a free date, including an explicit rest/unavailable day; move uses date as the existing source workout day and detail as the empty target day; swap/rest/downgrade edit the workout already on date")
                 ]),
                 "detail": .object([
                     "type": .string("string"),
@@ -181,7 +181,7 @@ enum CoachTools {
         .object([
             "type": .string("object"),
             "additionalProperties": .bool(false),
-            "description": .string("Required for action=create; forbidden otherwise. Race workouts cannot be created."),
+            "description": .string("Required for action=create and action=replace; forbidden otherwise. Race workouts cannot be created or used as replacements."),
             "properties": .object([
                 "kind": .object([
                     "type": .string("string"),
@@ -258,6 +258,9 @@ enum CoachTools {
                 return "Downgrade \(change.date)"
             case .move:
                 return "Move \(change.date) to \(change.detail ?? "another day")"
+            case .replace:
+                let kind = change.workout?.kind ?? "workout"
+                return "Replace \(change.date) with \(kind)"
             case .swap:
                 return "Swap \(change.date) with \(change.detail ?? "another day")"
             }
@@ -447,9 +450,9 @@ enum CoachTools {
     /// Swift stays authoritative.
     private static func validateFields(_ change: PlanAdjustmentProposal.Change) throws {
         switch change.action {
-        case .create:
-            guard change.workout != nil else { throw ValidationError("create requires a workout.") }
-            guard change.detail == nil else { throw ValidationError("create does not take a detail date.") }
+        case .create, .replace:
+            guard change.workout != nil else { throw ValidationError("\(change.action.rawValue) requires a workout.") }
+            guard change.detail == nil else { throw ValidationError("\(change.action.rawValue) does not take a detail date.") }
         case .move, .swap:
             guard change.detail != nil else {
                 throw ValidationError("\(change.action.rawValue) requires a target date.")
@@ -484,7 +487,7 @@ enum CoachTools {
     ) throws -> PendingWorkoutReplacement? {
         guard proposal.changes.count == 1,
               let change = proposal.changes.first,
-              change.action == .create else { return nil }
+              change.action == .create || change.action == .replace else { return nil }
         try validateFields(change)
 
         guard let goal = try PlanStore.activeGoal(in: context)?.spec,
@@ -905,6 +908,8 @@ enum CoachTools {
         switch change.action {
         case .create:
             throw ValidationError("create is handled as its own batch.")
+        case .replace:
+            throw ValidationError("replace requires workout replacement confirmation.")
         case .rest:
             spec.weeks[location.week].workouts.remove(at: location.workout)
             return "Rested \(change.date)"

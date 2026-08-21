@@ -18,9 +18,33 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertLessThanOrEqual(text.count, CoachContextBuilder.maxCharacters)
         XCTAssertTrue(text.contains("Goal: Half Marathon"))
         XCTAssertTrue(text.contains("Plan next 14 days:"))
+        XCTAssertTrue(text.contains("Current-year run history (2026):"))
         XCTAssertTrue(text.contains("Last 14 days runs:"))
         XCTAssertTrue(text.contains("Readiness today: train"))
         XCTAssertTrue(text.contains("Data freshness:"))
+    }
+
+    func testCoachContextIncludesCurrentYearMonthlyRunTotals() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        context.insert(activity(on: PlanEngineTestSupport.date(2025, 12, 30), km: 50, minutes: 250))
+        context.insert(activity(on: PlanEngineTestSupport.date(2026, 1, 4), km: 8, minutes: 42))
+        context.insert(activity(on: PlanEngineTestSupport.date(2026, 2, 6), km: 12, minutes: 64))
+        context.insert(activity(on: PlanEngineTestSupport.date(2026, 2, 16), km: 15, minutes: 80))
+        context.insert(activity(on: PlanEngineTestSupport.date(2026, 8, 18), km: 21.1, minutes: 118))
+        try context.save()
+
+        let text = try CoachContextBuilder.build(
+            in: context,
+            today: PlanEngineTestSupport.date(2026, 8, 19),
+            calendar: calendar
+        )
+
+        XCTAssertTrue(text.contains("For questions about running history"))
+        XCTAssertTrue(text.contains("Current-year run history (2026): 56.1 km, 4 run(s)"))
+        XCTAssertTrue(text.contains("Top distance month so far: 2026-02 with 27.0 km across 2 run(s)."))
+        XCTAssertTrue(text.contains("Monthly run totals: 2026-01 8.0 km/1 run(s); 2026-02 27.0 km/2 run(s); 2026-08 21.1 km/1 run(s)."))
+        XCTAssertFalse(text.contains("2025-12 50.0 km"))
     }
 
     func testCoachContextTreatsRaceTargetAsWorkoutContext() throws {
@@ -853,40 +877,46 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
     }
 
-    func testTransientConnectionFailureIsNotPersistedAsAssistantMessage() async throws {
+    func testTransientConnectionFailurePersistsInlineFailedAssistantTurn() async throws {
         let container = try makeContainer()
         let context = container.mainContext
         try seedTrainingData(in: context)
         let client = MockClaudeClient(error: ClaudeClientError.connectionLost)
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Create a long run tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.send(text: "Create workout tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
 
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
-        XCTAssertEqual(messages.map(\.role), [.user])
+        XCTAssertEqual(messages.map(\.role), [.user, .assistant])
+        let failed = try XCTUnwrap(messages.last)
+        XCTAssertEqual(failed.assistantStatus, .reconciling)
+        XCTAssertEqual(failed.errorCategory, .mutationUnknown)
+        XCTAssertEqual(failed.parentUserTurnID, messages.first?.turnID)
+        XCTAssertEqual(failed.attemptCount, 1)
+        XCTAssertEqual(failed.text, "")
         XCTAssertEqual(store.lastError, ClaudeClientError.connectionLost.errorDescription)
-        XCTAssertEqual(store.errorEvent?.title, "The connection to Coach was interrupted.")
-        XCTAssertEqual(store.errorEvent?.message, "Your chat history is safe.")
-        XCTAssertEqual(store.errorEvent?.canRetry, true)
+        let snapshots = try context.fetch(FetchDescriptor<CoachRequestSnapshot>())
+        XCTAssertEqual(snapshots.count, 1)
+        XCTAssertEqual(snapshots.first?.messageText, "Create workout tomorrow.")
     }
 
-    func testDismissingChatErrorHidesOnlyCurrentBanner() async throws {
+    func testDismissingInlineFailurePersistsDismissedTurn() async throws {
         let container = try makeContainer()
         let context = container.mainContext
         try seedTrainingData(in: context)
         let client = MockClaudeClient(error: ClaudeClientError.connectionLost)
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Create a long run tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.send(text: "Create workout tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
 
-        let eventID = try XCTUnwrap(store.errorEvent?.id)
-        store.dismissError(eventID)
+        let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        store.dismissFailedResponse(failed.turnID, in: context)
 
-        XCTAssertNil(store.errorEvent)
         XCTAssertEqual(store.lastError, ClaudeClientError.connectionLost.errorDescription)
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
-        XCTAssertEqual(messages.map(\.role), [.user])
-        XCTAssertEqual(messages.first?.text, "Create a long run tomorrow.")
+        XCTAssertEqual(messages.map(\.role), [.user, .assistant])
+        XCTAssertEqual(messages.first?.text, "Create workout tomorrow.")
+        XCTAssertEqual(messages.last?.assistantStatus, .dismissed)
     }
 
     func testRetryFailedCoachResponseDoesNotDuplicateUserMessage() async throws {
@@ -900,19 +930,22 @@ final class ChatFeatureTests: XCTestCase {
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
         await store.send(text: "What should I do today?", model: "claude-test", apiKey: "test-key", in: context)
-        XCTAssertNotNil(store.errorEvent)
+        let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertEqual(failed.assistantStatus, .failed)
 
-        await store.retryFailedResponse(in: context)
+        await store.retryFailedResponse(failed.turnID, model: "claude-test", apiKey: "test-key", in: context)
 
-        XCTAssertNil(store.errorEvent)
         XCTAssertNil(store.lastError)
         XCTAssertEqual(client.requests.count, 2)
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertEqual(messages.map(\.role), [.user, .assistant])
         XCTAssertEqual(messages.map(\.text), ["What should I do today?", "Run easy today."])
+        XCTAssertEqual(messages.last?.turnID, failed.turnID)
+        XCTAssertEqual(messages.last?.attemptCount, 2)
+        XCTAssertEqual(messages.last?.assistantStatus, .completed)
     }
 
-    func testFailedRetryCreatesNewDismissibleErrorEvent() async throws {
+    func testFailedRetryReusesSameInlineCard() async throws {
         let container = try makeContainer()
         let context = container.mainContext
         try seedTrainingData(in: context)
@@ -923,16 +956,128 @@ final class ChatFeatureTests: XCTestCase {
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
         await store.send(text: "What should I do today?", model: "claude-test", apiKey: "test-key", in: context)
-        let firstID = try XCTUnwrap(store.errorEvent?.id)
+        let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertEqual(failed.assistantStatus, .failed)
 
-        await store.retryFailedResponse(in: context)
+        await store.retryFailedResponse(failed.turnID, model: "claude-test", apiKey: "test-key", in: context)
 
-        let second = try XCTUnwrap(store.errorEvent)
-        XCTAssertNotEqual(second.id, firstID)
-        XCTAssertEqual(second.title, "The connection to Coach was interrupted.")
-        XCTAssertEqual(second.canRetry, true)
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
-        XCTAssertEqual(messages.map(\.role), [.user])
+        XCTAssertEqual(messages.map(\.role), [.user, .assistant])
+        XCTAssertEqual(messages.last?.turnID, failed.turnID)
+        XCTAssertEqual(messages.last?.assistantStatus, .failed)
+        XCTAssertEqual(messages.last?.attemptCount, 2)
+        XCTAssertEqual(messages.last?.errorCategory, .offline)
+    }
+
+    func testPartialStreamingFailureKeepsIncompleteTextAndRetryReplacesIt() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(streamScripts: [
+            .partialTextThenFailure("Dựa trên tải tập tuần này, cơ thể anh đang", ClaudeClientError.connectionLost),
+            .response(ClaudeResponse(content: [.text("Hôm nay chạy easy 6 km là hợp lý.")], stopReason: "end_turn"))
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(text: "Tải tập tuần này thế nào?", model: "claude-test", apiKey: "test-key", in: context)
+
+        let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertEqual(failed.assistantStatus, .failed)
+        XCTAssertTrue(failed.isIncomplete)
+        XCTAssertEqual(failed.text, "Dựa trên tải tập tuần này, cơ thể anh đang")
+
+        await store.retryFailedResponse(failed.turnID, model: "claude-test", apiKey: "test-key", in: context)
+
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        XCTAssertEqual(messages.map(\.role), [.user, .assistant])
+        XCTAssertEqual(messages.last?.turnID, failed.turnID)
+        XCTAssertEqual(messages.last?.text, "Hôm nay chạy easy 6 km là hợp lý.")
+        XCTAssertEqual(messages.last?.assistantStatus, .completed)
+        XCTAssertFalse(messages.last?.isIncomplete ?? true)
+    }
+
+    func testRetryUsesSnapshotAttachmentsNotCurrentComposerState() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let activity = try XCTUnwrap(try context.fetch(FetchDescriptor<CompletedActivity>()).first)
+        let client = MockClaudeClient(results: [
+            .failure(ClaudeClientError.connectionLost),
+            .success(ClaudeResponse(content: [.text("Snapshot data reused.")], stopReason: "end_turn"))
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(
+            text: "Review original run.",
+            model: "claude-test",
+            attachments: [.health, .completedActivity(activity.hkUUID)],
+            evidence: EvidenceSelection(readinessSnapshot: true, weekPlan: true, workout: .completed(activity.hkUUID)),
+            apiKey: "test-key",
+            in: context
+        )
+        let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+
+        await store.retryFailedResponse(failed.turnID, model: "claude-test", apiKey: "test-key", in: context)
+
+        let retryRequest = try XCTUnwrap(client.requests.last)
+        XCTAssertTrue(retryRequest.messages.last?.content.textContent.contains("Completed run:") == true)
+        XCTAssertTrue(retryRequest.messages.last?.content.textContent.contains("Health snapshot:") == true)
+        let snapshots = try context.fetch(FetchDescriptor<CoachRequestSnapshot>())
+        XCTAssertEqual(snapshots.first?.attachmentReferences.map(\.kind), [.health, .completedActivity])
+    }
+
+    func testRetryShowsMissingAttachmentWhenOriginalReferenceExpired() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let activity = try XCTUnwrap(try context.fetch(FetchDescriptor<CompletedActivity>()).first)
+        let client = MockClaudeClient(results: [
+            .failure(ClaudeClientError.connectionLost),
+            .success(ClaudeResponse(content: [.text("Should not run.")], stopReason: "end_turn"))
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(
+            text: "Review this run.",
+            model: "claude-test",
+            attachments: [.completedActivity(activity.hkUUID)],
+            apiKey: "test-key",
+            in: context
+        )
+        let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        context.delete(activity)
+        try context.save()
+
+        await store.retryFailedResponse(failed.turnID, model: "claude-test", apiKey: "test-key", in: context)
+
+        XCTAssertEqual(failed.assistantStatus, .failed)
+        XCTAssertEqual(failed.errorCategory, .missingAttachment)
+        XCTAssertTrue(failed.errorMessage?.contains("Dữ liệu sức khỏe") == true || failed.errorMessage?.contains("attached health data") == true)
+        XCTAssertEqual(client.requests.count, 1, "expired required data must not silently retry")
+    }
+
+    func testOlderFailedTurnCannotRewriteLaterConversation() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(results: [
+            .failure(ClaudeClientError.connectionLost),
+            .success(ClaudeResponse(content: [.text("Later answer.")], stopReason: "end_turn")),
+            .success(ClaudeResponse(content: [.text("Should not replace older.")], stopReason: "end_turn"))
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(text: "First question?", model: "claude-test", apiKey: "test-key", in: context)
+        let olderFailed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        await store.send(text: "Second question?", model: "claude-test", apiKey: "test-key", in: context)
+
+        await store.retryFailedResponse(olderFailed.turnID, model: "claude-test", apiKey: "test-key", in: context)
+
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        XCTAssertEqual(messages.map(\.role), [.user, .assistant, .user, .assistant])
+        XCTAssertEqual(olderFailed.assistantStatus, .failed)
+        XCTAssertEqual(olderFailed.errorCategory, .nonRetryable)
+        XCTAssertEqual(client.requests.count, 2)
     }
 
     /// A truncated turn may carry a half-written tool input: never execute it.
@@ -960,7 +1105,7 @@ final class ChatFeatureTests: XCTestCase {
             CompletedActivity.self, DailyWellness.self, SyncState.self,
             Goal.self, TrainingPlan.self, PlannedWorkout.self,
             DailyReadiness.self, DailyCheckIn.self, PlanSnapshot.self, ChatThread.self, ChatMessage.self,
-            CoachMemoryItem.self
+            CoachRequestSnapshot.self, CoachMemoryItem.self
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: [configuration])
@@ -969,15 +1114,12 @@ final class ChatFeatureTests: XCTestCase {
     private func seedTrainingData(in context: ModelContext) throws {
         try seedGoalOnly(in: context)
 
-        context.insert(CompletedActivity(
-            hkUUID: UUID(),
-            date: calendar.date(byAdding: .day, value: -1, to: today)!,
-            distanceMeters: 10_000,
-            durationSeconds: 3_300,
+        context.insert(activity(
+            on: calendar.date(byAdding: .day, value: -1, to: today)!,
+            km: 10,
+            minutes: 55,
             avgHeartRate: 145,
-            maxHeartRate: 168,
-            avgPaceSecondsPerKm: 330,
-            sourceName: "Garmin"
+            maxHeartRate: 168
         ))
         context.insert(SyncState(domain: SyncState.workoutsDomain, lastSyncAt: today))
         context.insert(DailyReadiness(
@@ -996,6 +1138,25 @@ final class ChatFeatureTests: XCTestCase {
             computedAt: today
         ))
         try context.save()
+    }
+
+    private func activity(
+        on date: Date,
+        km: Double,
+        minutes: Double,
+        avgHeartRate: Double? = nil,
+        maxHeartRate: Double? = nil
+    ) -> CompletedActivity {
+        CompletedActivity(
+            hkUUID: UUID(),
+            date: date,
+            distanceMeters: km * 1000,
+            durationSeconds: minutes * 60,
+            avgHeartRate: avgHeartRate,
+            maxHeartRate: maxHeartRate,
+            avgPaceSecondsPerKm: minutes * 60 / km,
+            sourceName: "Garmin"
+        )
     }
 
     /// Every weekday available, which leaves the generator a genuinely free day
@@ -1034,21 +1195,37 @@ final class ChatFeatureTests: XCTestCase {
 
 @MainActor
 private final class MockClaudeClient: ClaudeServicing {
+    enum StreamScript {
+        case response(ClaudeResponse)
+        case failure(Error)
+        case partialTextThenFailure(String, Error)
+    }
+
     private var responses: [ClaudeResponse]
     private let error: Error?
     private var results: [Result<ClaudeResponse, Error>]
+    private var streamScripts: [StreamScript]
     private(set) var requests: [ClaudeRequest] = []
 
     init(responses: [ClaudeResponse] = [], error: Error? = nil) {
         self.responses = responses
         self.error = error
         self.results = []
+        self.streamScripts = []
     }
 
     init(results: [Result<ClaudeResponse, Error>]) {
         self.responses = []
         self.error = nil
         self.results = results
+        self.streamScripts = []
+    }
+
+    init(streamScripts: [StreamScript]) {
+        self.responses = []
+        self.error = nil
+        self.results = []
+        self.streamScripts = streamScripts
     }
 
     func send(_ request: ClaudeRequest, apiKey: String) async throws -> ClaudeResponse {
@@ -1058,5 +1235,96 @@ private final class MockClaudeClient: ClaudeServicing {
         }
         if let error { throw error }
         return responses.removeFirst()
+    }
+
+    func stream(_ request: ClaudeRequest, apiKey: String) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error> {
+        requests.append(request)
+        if !streamScripts.isEmpty {
+            let script = streamScripts.removeFirst()
+            return AsyncThrowingStream { continuation in
+                switch script {
+                case .response(let response):
+                    continuation.yield(.messageStart)
+                    for (index, block) in response.content.enumerated() {
+                        switch block {
+                        case .text(let text):
+                            continuation.yield(.contentBlockStart(index: index, kind: .text))
+                            continuation.yield(.textDelta(index: index, text))
+                            continuation.yield(.contentBlockStop(index: index))
+                        case let .toolUse(id, name, input):
+                            continuation.yield(.contentBlockStart(index: index, kind: .toolUse(id: id, name: name)))
+                            if let data = try? JSONEncoder().encode(input),
+                               let json = String(data: data, encoding: .utf8) {
+                                continuation.yield(.inputJSONDelta(index: index, json))
+                            }
+                            continuation.yield(.contentBlockStop(index: index))
+                        case .image, .toolResult, .passthrough:
+                            break
+                        }
+                    }
+                    continuation.yield(.messageDelta(stopReason: response.stopReason))
+                    continuation.yield(.messageStop)
+                    continuation.finish()
+                case .failure(let error):
+                    continuation.finish(throwing: error)
+                case .partialTextThenFailure(let text, let error):
+                    continuation.yield(.messageStart)
+                    continuation.yield(.contentBlockStart(index: 0, kind: .text))
+                    continuation.yield(.textDelta(index: 0, text))
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+        if !results.isEmpty {
+            let result = results.removeFirst()
+            return AsyncThrowingStream { continuation in
+                do {
+                    let response = try result.get()
+                    continuation.yield(.messageStart)
+                    for (index, block) in response.content.enumerated() {
+                        if case .text(let text) = block {
+                            continuation.yield(.contentBlockStart(index: index, kind: .text))
+                            continuation.yield(.textDelta(index: index, text))
+                            continuation.yield(.contentBlockStop(index: index))
+                        }
+                    }
+                    continuation.yield(.messageDelta(stopReason: response.stopReason))
+                    continuation.yield(.messageStop)
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+        if let error {
+            return AsyncThrowingStream { $0.finish(throwing: error) }
+        }
+        return Self.stream(from: responses.removeFirst())
+    }
+
+    private static func stream(from response: ClaudeResponse) -> AsyncThrowingStream<AnthropicStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(.messageStart)
+            for (index, block) in response.content.enumerated() {
+                switch block {
+                case .text(let text):
+                    continuation.yield(.contentBlockStart(index: index, kind: .text))
+                    continuation.yield(.textDelta(index: index, text))
+                    continuation.yield(.contentBlockStop(index: index))
+                case let .toolUse(id, name, input):
+                    continuation.yield(.contentBlockStart(index: index, kind: .toolUse(id: id, name: name)))
+                    if let data = try? JSONEncoder().encode(input),
+                       let json = String(data: data, encoding: .utf8) {
+                        continuation.yield(.inputJSONDelta(index: index, json))
+                    }
+                    continuation.yield(.contentBlockStop(index: index))
+                case .image, .toolResult, .passthrough:
+                    break
+                }
+            }
+            continuation.yield(.messageDelta(stopReason: response.stopReason))
+            continuation.yield(.messageStop)
+            continuation.finish()
+        }
     }
 }

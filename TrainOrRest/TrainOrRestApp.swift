@@ -11,6 +11,7 @@ struct TrainOrRestApp: App {
     private let container: ModelContainer
     @StateObject private var engine: SyncEngine
     @StateObject private var pushService: WorkoutPushService
+    @StateObject private var googleCalendarService: GoogleCalendarSyncService
     @StateObject private var chatStore: CoachChatStore
     @StateObject private var chatSession: CoachChatSessionState
     @StateObject private var replacementCoordinator: WorkoutReplacementCoordinator
@@ -24,13 +25,17 @@ struct TrainOrRestApp: App {
                 Goal.self, TrainingPlan.self, PlannedWorkout.self,
                 DailyReadiness.self, DailyCheckIn.self, RuleOverride.self,
                 PlanSnapshot.self, ChatThread.self, ChatMessage.self, PlanEdit.self,
-                CoachMemoryItem.self
+                CoachRequestSnapshot.self, CoachMemoryItem.self,
+                GoogleCalendarConnection.self, GoogleCalendarEventLink.self,
+                GoogleCalendarInboundChange.self, ScheduleChangeOperation.self,
+                GoogleAvailabilityCalendar.self, DayAvailability.self
             )
         } catch {
             fatalError("Failed to create SwiftData container: \(error)")
         }
         self.container = container
         let pushService = WorkoutPushService(modelContext: container.mainContext)
+        let googleCalendarService = GoogleCalendarSyncService(modelContext: container.mainContext)
         let replacementCoordinator = WorkoutReplacementCoordinator(container: container)
         let chatStore = CoachChatStore(replacementCoordinator: replacementCoordinator)
         let chatSession = CoachChatSessionState()
@@ -46,6 +51,7 @@ struct TrainOrRestApp: App {
         engine.startObserving()
         _engine = StateObject(wrappedValue: engine)
         _pushService = StateObject(wrappedValue: pushService)
+        _googleCalendarService = StateObject(wrappedValue: googleCalendarService)
         _chatStore = StateObject(wrappedValue: chatStore)
         _chatSession = StateObject(wrappedValue: chatSession)
         _replacementCoordinator = StateObject(wrappedValue: replacementCoordinator)
@@ -63,6 +69,7 @@ struct TrainOrRestApp: App {
             RootView()
                 .environmentObject(engine)
                 .environmentObject(pushService)
+                .environmentObject(googleCalendarService)
                 .environmentObject(chatStore)
                 .environmentObject(chatSession)
                 .environmentObject(replacementCoordinator)
@@ -70,6 +77,9 @@ struct TrainOrRestApp: App {
         .modelContainer(container)
         .onChange(of: scenePhase) { _, phase in
             engine.isForeground = phase == .active
+            if phase == .active, googleCalendarService.connection().smartSchedulingEnabled {
+                Task { await googleCalendarService.refreshAvailability(reason: "foreground") }
+            }
             if phase == .background {
                 Self.scheduleMorningRefresh()
             }
