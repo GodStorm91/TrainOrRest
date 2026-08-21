@@ -692,6 +692,58 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertFalse(transcript.contains("cụ thể hơn"))
     }
 
+    func testVietnameseTodayLongRunDistanceShortcutStagesReplacementWithoutWorkoutAttachment() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let plan = try XCTUnwrap(try PlanStore.activePlan(in: context))
+        for workout in try plannedWorkouts(on: today, in: context) {
+            context.delete(workout)
+        }
+        let selected = PlannedWorkout(
+            spec: PlannedWorkoutSpec(
+                date: calendar.startOfDay(for: today),
+                kind: .long,
+                distanceKm: 5,
+                paceBand: nil,
+                details: "Long run"
+            ),
+            weekIndex: 0,
+            phase: .base
+        )
+        selected.plan = plan
+        context.insert(selected)
+        try context.save()
+
+        let client = MockClaudeClient(responses: [])
+        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
+        let store = CoachChatStore(
+            client: client,
+            calendar: calendar,
+            now: { self.today },
+            replacementCoordinator: coordinator
+        )
+
+        await store.send(
+            text: "chuyển bài long run hnay cự li 5km thành 8km",
+            model: "claude-test",
+            attachments: [.health],
+            apiKey: "test-key",
+            in: context
+        )
+
+        XCTAssertTrue(client.requests.isEmpty)
+        let pending = try XCTUnwrap(coordinator.pending)
+        XCTAssertEqual(pending.expected.uuid, selected.uuid)
+        XCTAssertEqual(pending.existing.distanceKm, 5, accuracy: 0.001)
+        XCTAssertEqual(pending.proposed.distanceKm, 8, accuracy: 0.001)
+        XCTAssertEqual(pending.proposed.kind, .long)
+        let transcript = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+            .map(\.text)
+            .joined(separator: "\n")
+        XCTAssertFalse(transcript.contains("cụ thể hơn"))
+    }
+
     /// End-to-end: user asks, model calls the tool, the app builds and saves a
     /// canonical workout, and the second round summarizes it.
     func testChatStoreCreatesStructuredWorkoutEndToEnd() async throws {

@@ -132,6 +132,12 @@ final class CoachChatStore: ObservableObject {
                 snapshot: snapshot,
                 assistantTurn: assistantTurn,
                 in: context
+            ) || handleExplicitDistanceShortcut(
+                trimmed,
+                attachments: attachments,
+                snapshot: snapshot,
+                assistantTurn: assistantTurn,
+                in: context
             ) {
                 isSending = false
                 return
@@ -209,6 +215,61 @@ final class CoachChatStore: ObservableObject {
         guard let replacement else { return false }
 
         assistantTurn.text = "Em đã chuẩn bị đề xuất đổi cự li cho buổi này. Anh xem card bên dưới rồi xác nhận trước khi em lưu vào lịch."
+        assistantTurn.assistantStatus = .completed
+        assistantTurn.isIncomplete = false
+        assistantTurn.errorCategory = nil
+        assistantTurn.errorMessage = nil
+        assistantTurn.activeAttemptID = nil
+        replacementCoordinator.stage(replacement)
+        try context.save()
+        return true
+    }
+
+    private func handleExplicitDistanceShortcut(
+        _ text: String,
+        attachments: [CoachContextAttachment],
+        snapshot: CoachRequestSnapshot,
+        assistantTurn: ChatMessage,
+        in context: ModelContext
+    ) throws -> Bool {
+        guard let replacementCoordinator,
+              !attachments.contains(where: {
+                if case .plannedWorkout = $0 { return true }
+                return false
+              }),
+              let request = Self.distanceEditRequest(from: text),
+              let day = request.day(relativeTo: snapshot.createdAt, calendar: calendar),
+              let workout = try Self.matchPlannedWorkout(
+                on: day,
+                kind: request.kind,
+                sourceKm: request.sourceKm,
+                in: context,
+                calendar: calendar
+              ),
+              workout.status == .planned,
+              workout.isScheduleLocked == false,
+              workout.kind != .race,
+              let kind = workout.kind,
+              let payload = Self.sameKindPayload(kind: kind, distanceKm: request.targetKm)
+        else {
+            return false
+        }
+
+        let proposal = PlanAdjustmentProposal(changes: [.init(
+            date: CoachContextBuilder.day(workout.date, calendar: calendar),
+            action: .replace,
+            workout: payload
+        )])
+        let replacement = try CoachTools.pendingReplacement(
+            for: proposal,
+            in: context,
+            today: snapshot.createdAt,
+            calendar: calendar,
+            language: CoachLanguage(rawValue: snapshot.locale) ?? .current
+        )
+        guard let replacement else { return false }
+
+        assistantTurn.text = "Em đã chuẩn bị đề xuất đổi cự li cho \(Self.dayLabel(for: day, relativeTo: snapshot.createdAt, calendar: calendar)). Anh xem card bên dưới rồi xác nhận trước khi em lưu vào lịch."
         assistantTurn.assistantStatus = .completed
         assistantTurn.isIncomplete = false
         assistantTurn.errorCategory = nil
@@ -629,17 +690,44 @@ final class CoachChatStore: ObservableObject {
         return mutationNeedles.contains { lower.contains($0) } ? .planMutation : .readOnly
     }
 
+    private struct DistanceEditRequest {
+        enum RelativeDay {
+            case today
+            case tomorrow
+        }
+
+        var targetKm: Double
+        var sourceKm: Double?
+        var kind: WorkoutKind?
+        var relativeDay: RelativeDay?
+
+        func day(relativeTo today: Date, calendar: Calendar) -> Date? {
+            switch relativeDay {
+            case .today:
+                return calendar.startOfDay(for: today)
+            case .tomorrow:
+                return calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: today))
+            case nil:
+                return nil
+            }
+        }
+    }
+
     private static func contextualDistanceTarget(from text: String) -> Double? {
+        distanceEditRequest(from: text)?.targetKm
+    }
+
+    private static func distanceEditRequest(from text: String) -> DistanceEditRequest? {
         let folded = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "vi_VN"))
             .replacingOccurrences(of: ",", with: ".")
         let lower = folded.lowercased()
         let mutationNeedles = [
-            "doi", "tang", "giam", "nang", "ha", "cap nhat", "sua",
+            "doi", "chuyen", "thay", "tang", "giam", "nang", "ha", "cap nhat", "sua",
             "change", "update", "set", "make", "increase", "decrease"
         ]
         let contextualNeedles = [
             "buoi nay", "buoi tap nay", "workout nay", "this workout",
-            "ngay mai", "tomorrow", "tmr"
+            "hom nay", "hnay", "h nay", "today", "ngay mai", "tomorrow", "tmr"
         ]
         let distanceNeedles = [
             "cu li", "cu ly", "quang duong", "distance", "kilometer", "kilometre",
@@ -650,23 +738,103 @@ final class CoachChatStore: ObservableObject {
             || distanceNeedles.contains { lower.contains($0) }
             || contextualNeedles.contains { lower.contains($0) }
 
-        let patterns = [
-            #"(?<![\d.])(\d+(?:\.\d+)?)\s*(?:km|kilometer|kilometre|k)(?![a-z])"#,
-            #"(?:thanh|to|len|xuong|set|make|increase|decrease)\s+(\d+(?:\.\d+)?)"#
+        let range = NSRange(lower.startIndex..<lower.endIndex, in: lower)
+        let targetPatterns = [
+            #"(?:thanh|to|len|xuong|set|make|increase\s+to|decrease\s+to)\s+(\d+(?:\.\d+)?)\s*(?:km|kilometer|kilometre|k)?"#,
+            #"(?:from|tu)\s+\d+(?:\.\d+)?\s*(?:km|kilometer|kilometre|k)?\s+(?:to|den|thanh)\s+(\d+(?:\.\d+)?)\s*(?:km|kilometer|kilometre|k)?"#
         ]
-        for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { continue }
-            let range = NSRange(lower.startIndex..<lower.endIndex, in: lower)
+        let explicitTarget = targetPatterns.compactMap { pattern -> (value: Double, location: Int)? in
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
             guard let match = regex.firstMatch(in: lower, options: [], range: range),
                   match.numberOfRanges > 1,
                   let valueRange = Range(match.range(at: 1), in: lower),
                   let value = Double(lower[valueRange]),
-                  value > 0,
-                  hasEditCue || pattern.contains("km")
-            else { continue }
-            return value
+                  value > 0
+            else { return nil }
+            return (value, match.range(at: 1).location)
+        }.first
+
+        let kmValues = Self.distanceValues(in: lower)
+        guard let target = explicitTarget?.value ?? kmValues.last?.value,
+              target > 0,
+              hasEditCue || !kmValues.isEmpty
+        else { return nil }
+
+        let targetLocation = explicitTarget?.location ?? kmValues.last?.location
+        let source = kmValues.first { value in
+            guard let targetLocation else { return value.value != target }
+            return value.location < targetLocation && value.value != target
+        }?.value
+
+        return DistanceEditRequest(
+            targetKm: target,
+            sourceKm: source,
+            kind: workoutKind(from: lower),
+            relativeDay: relativeDay(from: lower)
+        )
+    }
+
+    private static func distanceValues(in lower: String) -> [(value: Double, location: Int)] {
+        let pattern = #"(?<![\d.])(\d+(?:\.\d+)?)\s*(?:km|kilometer|kilometre|k)(?![a-z])"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
+        let range = NSRange(lower.startIndex..<lower.endIndex, in: lower)
+        return regex.matches(in: lower, options: [], range: range).compactMap { match in
+            guard match.numberOfRanges > 1,
+                  let valueRange = Range(match.range(at: 1), in: lower),
+                  let value = Double(lower[valueRange]),
+                  value > 0
+            else { return nil }
+            return (value, match.range(at: 1).location)
+        }
+    }
+
+    private static func workoutKind(from lower: String) -> WorkoutKind? {
+        if lower.contains("long run") || lower.contains("bai dai") { return .long }
+        if lower.contains("tempo") { return .tempo }
+        if lower.contains("interval") || lower.contains("intervals") || lower.contains("bien toc") { return .intervals }
+        if lower.contains("easy") || lower.contains("nhe") { return .easy }
+        return nil
+    }
+
+    private static func relativeDay(from lower: String) -> DistanceEditRequest.RelativeDay? {
+        if lower.contains("ngay mai") || lower.contains("tomorrow") || lower.contains("tmr") {
+            return .tomorrow
+        }
+        if lower.contains("hom nay") || lower.contains("hnay") || lower.contains("h nay") || lower.contains("today") {
+            return .today
         }
         return nil
+    }
+
+    private static func matchPlannedWorkout(
+        on day: Date,
+        kind: WorkoutKind?,
+        sourceKm: Double?,
+        in context: ModelContext,
+        calendar: Calendar
+    ) throws -> PlannedWorkout? {
+        var candidates = try context.fetch(FetchDescriptor<PlannedWorkout>()).filter {
+            calendar.isDate($0.date, inSameDayAs: day)
+                && $0.status == .planned
+                && $0.isScheduleLocked == false
+                && $0.kind != .race
+        }
+        if let kind {
+            candidates = candidates.filter { $0.kind == kind }
+        }
+        if let sourceKm {
+            candidates = candidates.filter { abs($0.distanceKm - sourceKm) <= 0.15 }
+        }
+        return candidates.count == 1 ? candidates[0] : nil
+    }
+
+    private static func dayLabel(for day: Date, relativeTo today: Date, calendar: Calendar) -> String {
+        if calendar.isDate(day, inSameDayAs: today) { return "buổi hôm nay" }
+        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: today)),
+           calendar.isDate(day, inSameDayAs: tomorrow) {
+            return "buổi ngày mai"
+        }
+        return "buổi \(CoachContextBuilder.day(day, calendar: calendar))"
     }
 
     private static func sameKindPayload(kind: WorkoutKind, distanceKm: Double) -> PlanAdjustmentProposal.CreateWorkout? {

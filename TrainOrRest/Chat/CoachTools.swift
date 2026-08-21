@@ -497,7 +497,7 @@ enum CoachTools {
         let date = try parseDay(change.date, calendar: calendar)
         let todayStart = calendar.startOfDay(for: today)
         let raceDay = calendar.startOfDay(for: goal.raceDate)
-        guard date > todayStart else { return nil }
+        guard date >= todayStart else { return nil }
         guard date != raceDay, date < raceDay else { return nil }
 
         var spec = try currentPlanSpec(in: context, today: today, calendar: calendar)
