@@ -319,26 +319,15 @@ private struct RecentCoachChangesView: View {
 
     var body: some View {
         if !edits.isEmpty {
-            TorCard(padding: 12, cornerRadius: 16) {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.uturn.backward.circle")
-                            .foregroundStyle(Theme.accent)
-                        Text("Recent coach changes")
-                            .font(.torHeading(16, .semibold))
-                            .foregroundStyle(Theme.text)
-                    }
-
-                    ForEach(edits) { edit in
-                        row(edit)
-                    }
-
-                    if let error {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(Theme.bad)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(edits.prefix(1)) { edit in
+                    row(edit)
+                }
+                if let error {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(Theme.bad)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding(.horizontal, 16)
@@ -348,28 +337,33 @@ private struct RecentCoachChangesView: View {
 
     private func row(_ edit: PlanEdit) -> some View {
         HStack(alignment: .center, spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(summary(for: edit))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.text)
-                    .lineLimit(2)
-                Text(edit.appliedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
-                    .font(.caption)
-                    .foregroundStyle(Theme.faint)
-            }
+            Image(systemName: "arrow.uturn.backward")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Theme.accent)
+                .accessibilityHidden(true)
+            Text("Coach updated 1 workout · \(summary(for: edit))")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
             Spacer(minLength: 8)
             Button {
                 onRevert(edit)
             } label: {
-                Label("Revert", systemImage: "arrow.uturn.backward")
-                    .labelStyle(.titleAndIcon)
+                Text("Undo")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(minWidth: 54, minHeight: 36)
             }
-            .font(.caption.weight(.semibold))
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .accessibilityLabel("Revert coach change")
+            .buttonStyle(.plain)
+            .accessibilityLabel("Undo Coach workout change")
         }
-        .padding(.vertical, 2)
+        .padding(.leading, 12)
+        .padding(.trailing, 8)
+        .padding(.vertical, 6)
+        .frame(minHeight: 44)
+        .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
     }
 
     private func summary(for edit: PlanEdit) -> String {

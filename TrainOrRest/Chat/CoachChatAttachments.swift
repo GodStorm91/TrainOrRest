@@ -82,17 +82,23 @@ enum CoachAttachmentContextBuilder {
         case .plannedWorkout(let uuid):
             guard let workout = plannedWorkout(uuid, in: context) else { return nil }
             return [
-                "Planned workout:",
+                "Selected workout context. This is the workout the user opened from Calendar; do not ask which workout they mean unless this row becomes unavailable:",
+                "- Workout ID: \(workout.uuid.uuidString)",
                 "- Date: \(CoachContextBuilder.day(workout.date, calendar: calendar))",
                 "- Kind: \(workout.kind?.displayName ?? workout.kindRaw)",
                 "- Distance: \(String(format: "%.1f", workout.distanceKm)) km",
+                "- Estimated duration: \(workout.expectedDurationSeconds.map(Formatters.duration) ?? "unknown")",
+                "- Pace band: \(workout.paceBand.map(Formatters.paceBand) ?? "none")",
                 "- Details: \(workout.details)",
-                "- Status: \(workout.status.rawValue)"
+                "- Status: \(workout.status.rawValue)",
+                "- Schedule locked: \(workout.isScheduleLocked ? "yes" : "no")",
+                "- Plan week: \(workout.weekIndex + 1)",
+                "If the user asks to change this workout, use \(CoachTools.toolName) with this absolute date. The app will validate and ask for confirmation before applying."
             ].joined(separator: "\n")
         case .completedActivity(let uuid):
             guard let activity = completedActivity(uuid, in: context) else { return nil }
             return [
-                "Completed run:",
+                "Selected completed run context. This is for review, not direct workout-plan mutation:",
                 "- Date: \(CoachContextBuilder.day(activity.date, calendar: calendar))",
                 "- Distance: \(Formatters.kilometers(activity.distanceMeters))",
                 "- Duration: \(Formatters.duration(activity.durationSeconds))",

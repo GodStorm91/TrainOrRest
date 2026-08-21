@@ -197,6 +197,7 @@ struct PlanMonthView: View {
                     activity: activity,
                     plannedWorkout: matchedWorkout(for: activity) ?? dayWorkouts.first,
                     compact: false,
+                    reviewDestination: AnyView(ChatView(contextualCompletedActivityID: activity.hkUUID)),
                     onReview: { onReviewRunInChat(activity) }
                 )
             }
@@ -217,9 +218,7 @@ struct PlanMonthView: View {
     }
 
     private func detailCard(_ workout: PlannedWorkout, highlighted: Bool) -> some View {
-        NavigationLink {
-            WorkoutDetailView(workout: workout)
-        } label: {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 Image(systemName: workout.kind?.symbolName ?? "figure.run")
                     .font(.system(size: 22))
@@ -243,18 +242,63 @@ struct PlanMonthView: View {
                 }
                 Spacer(minLength: 8)
                 statusBadge(workout, isToday: highlighted)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.faint)
             }
-            .padding(14)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .strokeBorder(highlighted ? Theme.accent : Theme.border, lineWidth: 1)
-            )
+
+            HStack(spacing: 8) {
+                if contextualCoachActionTitle(for: workout) != nil {
+                    NavigationLink {
+                        ChatView(contextualWorkoutID: workout.uuid)
+                    } label: {
+                        Label(contextualCoachActionTitle(for: workout) ?? "Edit with Coach", systemImage: "sparkles")
+                            .font(.torHeading(13, .bold))
+                            .foregroundStyle(Theme.accent)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.82)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(contextualCoachAccessibilityLabel(for: workout))
+                }
+
+                NavigationLink {
+                    WorkoutDetailView(workout: workout)
+                } label: {
+                    Label("Details", systemImage: "chevron.right")
+                        .font(.torHeading(13, .semibold))
+                        .foregroundStyle(Theme.text)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                        .frame(width: 104, height: 44)
+                        .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open workout details")
+            }
         }
-        .buttonStyle(.plain)
+        .padding(14)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(highlighted ? Theme.accent : Theme.border, lineWidth: 1)
+        )
+    }
+
+    private func contextualCoachActionTitle(for workout: PlannedWorkout) -> String? {
+        switch workout.status {
+        case .planned:
+            return workout.isScheduleLocked || workout.kind == .race ? "Review with Coach" : "Edit with Coach"
+        case .done:
+            return "Review with Coach"
+        case .skipped:
+            return nil
+        }
+    }
+
+    private func contextualCoachAccessibilityLabel(for workout: PlannedWorkout) -> String {
+        let name = workout.kind?.displayName ?? "workout"
+        return "\(contextualCoachActionTitle(for: workout) ?? "Ask Coach") \(name)"
     }
 
     @ViewBuilder

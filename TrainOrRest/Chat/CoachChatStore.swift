@@ -376,6 +376,7 @@ final class CoachChatStore: ObservableObject {
 
             do {
                 let proposal = try toolUse.2.decoded(PlanAdjustmentProposal.self)
+                try validateContextualProposal(proposal, attachments: attachments, in: context)
                 if let replacement = try CoachTools.pendingReplacement(for: proposal, in: context, today: today, calendar: calendar, language: .current) {
                     guard let replacementCoordinator else {
                         throw CoachTools.ValidationError("Workout replacement confirmation is unavailable.")
@@ -490,6 +491,51 @@ final class CoachChatStore: ObservableObject {
             }
         }
     }
+
+    private func validateContextualProposal(
+        _ proposal: PlanAdjustmentProposal,
+        attachments: [CoachContextAttachment],
+        in context: ModelContext
+    ) throws {
+        if attachments.contains(where: {
+            if case .completedActivity = $0 { return true }
+            return false
+        }) {
+            throw CoachTools.ValidationError("Completed runs can be reviewed with Coach, but this flow cannot apply workout-plan changes to a completed activity.")
+        }
+
+        guard let selectedWorkoutID = attachments.compactMap({ attachment -> UUID? in
+            if case .plannedWorkout(let uuid) = attachment { return uuid }
+            return nil
+        }).first else { return }
+
+        guard let selected = try context.fetch(FetchDescriptor<PlannedWorkout>()).first(where: { $0.uuid == selectedWorkoutID }) else {
+            throw CoachTools.ValidationError("The selected workout is no longer available.")
+        }
+        let selectedDay = calendar.startOfDay(for: selected.date)
+        for change in proposal.changes {
+            guard let proposalDay = Self.planToolDateFormatter.date(from: change.date) else {
+                throw CoachTools.ValidationError("The contextual workout proposal used an invalid date.")
+            }
+            guard calendar.isDate(proposalDay, inSameDayAs: selectedDay) else {
+                throw CoachTools.ValidationError("This proposal targets a different workout. Switch context before editing another workout.")
+            }
+            if selected.isScheduleLocked || selected.kind == .race {
+                throw CoachTools.ValidationError("This workout is fixed. Ask Coach to review alternatives or explicitly unlock it before applying changes.")
+            }
+            guard selected.status == .planned else {
+                throw CoachTools.ValidationError("Only planned workouts can be changed from this contextual edit flow.")
+            }
+        }
+    }
+
+    private static let planToolDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 
     private func classifyAction(_ text: String) -> CoachRequestActionType {
         let lower = text.lowercased()

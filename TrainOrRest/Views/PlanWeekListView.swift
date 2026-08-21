@@ -105,15 +105,11 @@ struct PlanWeekListView: View {
                         activity: activity,
                         plannedWorkout: matchedWorkout(for: activity) ?? workouts(on: date).first,
                         compact: true,
+                        reviewDestination: AnyView(ChatView(contextualCompletedActivityID: activity.hkUUID)),
                         onReview: { onReviewRunInChat(activity) }
                     )
                 } else if let workout = workouts(on: date).first {
-                    NavigationLink {
-                        WorkoutDetailView(workout: workout)
-                    } label: {
-                        plannedDayCard(workout)
-                    }
-                    .buttonStyle(.plain)
+                    plannedDayCard(workout)
                 } else {
                     restPlaceholder
                 }
@@ -139,34 +135,77 @@ struct PlanWeekListView: View {
     }
 
     private func plannedDayCard(_ workout: PlannedWorkout) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: workout.kind?.symbolName ?? "figure.run")
-                .font(.system(size: 21, weight: .semibold))
-                .foregroundStyle(workout.kind?.styleColor ?? Theme.accent)
-                .frame(width: 46, height: 46)
-                .background(Theme.soft(workout.kind?.styleColor ?? Theme.accent), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: workout.kind?.symbolName ?? "figure.run")
+                    .font(.system(size: 21, weight: .semibold))
+                    .foregroundStyle(workout.kind?.styleColor ?? Theme.accent)
+                    .frame(width: 46, height: 46)
+                    .background(Theme.soft(workout.kind?.styleColor ?? Theme.accent), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 7) {
-                    Circle().fill(workout.kind?.styleColor ?? Theme.dim).frame(width: 7, height: 7)
-                    TorEyebrow(workout.kind?.displayName ?? "Session").tracking(1.5)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 7) {
+                        Circle().fill(workout.kind?.styleColor ?? Theme.dim).frame(width: 7, height: 7)
+                        TorEyebrow(workout.kind?.displayName ?? "Session").tracking(1.5)
+                    }
+                    Text(workout.kind?.displayName ?? "Run")
+                        .font(.torHeading(17, .bold))
+                        .foregroundStyle(Theme.text)
+                    Text(plannedSubtitle(workout))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.dim)
                 }
-                Text(workout.kind?.displayName ?? "Run")
-                    .font(.torHeading(17, .bold))
-                    .foregroundStyle(Theme.text)
-                Text(plannedSubtitle(workout))
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.dim)
+                Spacer(minLength: 8)
+                statusBadge(workout)
             }
-            Spacer(minLength: 8)
-            statusBadge(workout)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.faint)
+
+            HStack(spacing: 8) {
+                if let actionTitle = contextualCoachActionTitle(for: workout) {
+                    NavigationLink {
+                        ChatView(contextualWorkoutID: workout.uuid)
+                    } label: {
+                        Label(actionTitle, systemImage: "sparkles")
+                            .font(.torHeading(13, .bold))
+                            .foregroundStyle(Theme.accent)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.82)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(actionTitle) \(workout.kind?.displayName ?? "workout")")
+                }
+
+                NavigationLink {
+                    WorkoutDetailView(workout: workout)
+                } label: {
+                    Label("Details", systemImage: "chevron.right")
+                        .font(.torHeading(13, .semibold))
+                        .foregroundStyle(Theme.text)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                        .frame(width: 104, height: 44)
+                        .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open workout details")
+            }
         }
         .padding(14)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(calendar.isDateInToday(workout.date) ? Theme.accent : Theme.border, lineWidth: 1))
+    }
+
+    private func contextualCoachActionTitle(for workout: PlannedWorkout) -> String? {
+        switch workout.status {
+        case .planned:
+            return workout.isScheduleLocked || workout.kind == .race ? "Review with Coach" : "Edit with Coach"
+        case .done:
+            return "Review with Coach"
+        case .skipped:
+            return nil
+        }
     }
 
     private var restPlaceholder: some View {

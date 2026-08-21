@@ -24,6 +24,34 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertTrue(text.contains("Data freshness:"))
     }
 
+    func testCoachContextHighlightsTomorrowWorkoutForRelativeEditRequests() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let tomorrow = try XCTUnwrap(calendar.date(byAdding: .day, value: 1, to: today))
+        let workout = PlannedWorkout(
+            spec: PlannedWorkoutSpec(
+                date: tomorrow,
+                kind: .easy,
+                distanceKm: 8,
+                paceBand: nil,
+                details: "Easy aerobic run"
+            ),
+            weekIndex: 0,
+            phase: .base
+        )
+        context.insert(workout)
+        try context.save()
+
+        let text = try CoachContextBuilder.build(in: context, today: today, calendar: calendar)
+
+        XCTAssertTrue(text.contains("'buổi training ngày mai'"))
+        XCTAssertTrue(text.contains("resolve it to the Tomorrow workout section"))
+        XCTAssertTrue(text.contains("Tomorrow workout: 2026-01-06 (Tuesday):"))
+        XCTAssertTrue(text.contains("Easy aerobic run"))
+        XCTAssertTrue(text.contains("use replace on tomorrow's absolute date"))
+    }
+
     func testCoachContextIncludesCurrentYearMonthlyRunTotals() throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -440,13 +468,83 @@ final class ChatFeatureTests: XCTestCase {
         let content = try XCTUnwrap(client.requests.first?.messages.last?.content)
         XCTAssertTrue(content.textContent.contains("Attached context:"))
         XCTAssertTrue(content.textContent.contains("Health snapshot:"))
-        XCTAssertTrue(content.textContent.contains("Planned workout:"))
+        XCTAssertTrue(content.textContent.contains("Selected workout context"))
+        XCTAssertTrue(content.textContent.contains("Workout ID: \(workout.uuid.uuidString)"))
         XCTAssertTrue(content.contains {
             if case .image(let mediaType, let data) = $0 {
                 return mediaType == "image/jpeg" && data == image.base64String
             }
             return false
         })
+    }
+
+    func testContextualCoachRejectsProposalForDifferentWorkoutDate() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let selected = try XCTUnwrap(try plannedWorkouts(on: qualityDay, in: context).first)
+        let friday = PlanEngineTestSupport.date(2026, 1, 9)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [
+                .toolUse(id: "toolu_1", name: CoachTools.toolName, input: .object([
+                    "changes": .array([
+                        .object([
+                            "date": .string(CoachContextBuilder.day(friday, calendar: calendar)),
+                            "action": .string("downgrade")
+                        ])
+                    ])
+                ]))
+            ], stopReason: "tool_use"),
+            ClaudeResponse(content: [.text("I will keep the selected workout in context.")], stopReason: "end_turn")
+        ])
+        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
+
+        await store.send(
+            text: "Make this workout easier.",
+            model: "claude-test",
+            attachments: [.plannedWorkout(selected.uuid)],
+            apiKey: "test-key",
+            in: context
+        )
+
+        XCTAssertNil(coordinator.pendingProposal)
+        XCTAssertEqual(client.requests.count, 2)
+        XCTAssertFalse(try XCTUnwrap(try plannedWorkouts(on: friday, in: context).first).manuallyOverridden)
+    }
+
+    func testContextualThreadStoresWorkoutSnapshotMetadata() throws {
+        let workoutID = UUID()
+        let snapshot = WorkoutCoachContext(
+            workoutId: workoutID,
+            trainingPlanId: nil,
+            calendarDate: qualityDay,
+            workoutStatus: .planned,
+            workoutType: "tempo",
+            workoutTitle: "Tempo",
+            plannedDistanceKm: 8,
+            plannedDurationSeconds: 3200,
+            plannedPaceFastSecondsPerKm: 300,
+            plannedPaceSlowSecondsPerKm: 330,
+            plannedIntensity: "key",
+            workoutStructureSummary: "Tempo blocks",
+            isKeyWorkout: true,
+            phaseId: "base",
+            phaseName: "Base",
+            planWeek: 0,
+            nearbyWorkoutIds: [],
+            sourceScreen: "trainingCalendar"
+        )
+        let thread = ChatThread(
+            title: "Edit Tempo · Jan 7",
+            mode: .workoutEdit,
+            linkedWorkoutUUID: workoutID,
+            contextualSnapshotJSON: WorkoutCoachContext.encode(snapshot)
+        )
+
+        XCTAssertEqual(thread.mode, .workoutEdit)
+        XCTAssertEqual(thread.linkedWorkoutUUID, workoutID)
+        XCTAssertEqual(WorkoutCoachContext.decode(thread.contextualSnapshotJSON), snapshot)
     }
 
     /// End-to-end: user asks, model calls the tool, the app builds and saves a
@@ -1020,7 +1118,7 @@ final class ChatFeatureTests: XCTestCase {
         await store.retryFailedResponse(failed.turnID, model: "claude-test", apiKey: "test-key", in: context)
 
         let retryRequest = try XCTUnwrap(client.requests.last)
-        XCTAssertTrue(retryRequest.messages.last?.content.textContent.contains("Completed run:") == true)
+        XCTAssertTrue(retryRequest.messages.last?.content.textContent.contains("Selected completed run context") == true)
         XCTAssertTrue(retryRequest.messages.last?.content.textContent.contains("Health snapshot:") == true)
         let snapshots = try context.fetch(FetchDescriptor<CoachRequestSnapshot>())
         XCTAssertEqual(snapshots.first?.attachmentReferences.map(\.kind), [.health, .completedActivity])

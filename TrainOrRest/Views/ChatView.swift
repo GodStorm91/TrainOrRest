@@ -8,11 +8,14 @@ import UIKit
 struct ChatView: View {
     private let bottomNavigation: AnyView?
     private let reviewRequest: CalendarReviewChatRequest?
+    private let contextualWorkoutID: UUID?
+    private let contextualCompletedActivityID: UUID?
     private let onOpenCalendar: (Date?) -> Void
     private let onReviewRequestConsumed: (CalendarReviewChatRequest) -> Void
 
     @AppStorage("coachModel") private var model = CoachChatConfig.defaultModel
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
     @Query(sort: \ChatMessage.date) private var allMessages: [ChatMessage]
     @Query(sort: \ChatThread.updatedAt, order: .reverse) private var chatThreads: [ChatThread]
     @Query(sort: \PlannedWorkout.date) private var plannedWorkouts: [PlannedWorkout]
@@ -45,11 +48,15 @@ struct ChatView: View {
     init(
         bottomNavigation: AnyView? = nil,
         reviewRequest: CalendarReviewChatRequest? = nil,
+        contextualWorkoutID: UUID? = nil,
+        contextualCompletedActivityID: UUID? = nil,
         onOpenCalendar: @escaping (Date?) -> Void = { _ in },
         onReviewRequestConsumed: @escaping (CalendarReviewChatRequest) -> Void = { _ in }
     ) {
         self.bottomNavigation = bottomNavigation
         self.reviewRequest = reviewRequest
+        self.contextualWorkoutID = contextualWorkoutID
+        self.contextualCompletedActivityID = contextualCompletedActivityID
         self.onOpenCalendar = onOpenCalendar
         self.onReviewRequestConsumed = onReviewRequestConsumed
     }
@@ -64,10 +71,21 @@ struct ChatView: View {
     }
 
     private var isSoftwareKeyboardVisible: Bool { softwareKeyboardHeight > 80 }
+    private var isContextualSession: Bool { contextualWorkoutID != nil || contextualCompletedActivityID != nil }
 
     private var activeThread: ChatThread? {
         guard let activeThreadID = chatSession.activeThreadID else { return nil }
         return chatThreads.first { $0.uuid == activeThreadID }
+    }
+
+    private var contextualWorkout: PlannedWorkout? {
+        guard let contextualWorkoutID else { return nil }
+        return plannedWorkouts.first { $0.uuid == contextualWorkoutID }
+    }
+
+    private var contextualActivity: CompletedActivity? {
+        guard let contextualCompletedActivityID else { return nil }
+        return completedActivities.first { $0.hkUUID == contextualCompletedActivityID }
     }
 
     var body: some View {
@@ -101,20 +119,32 @@ struct ChatView: View {
             chatStore.resetError()
             migrateLegacyMessagesIfNeeded()
             removePersistedTransientErrorMessages()
-            if reviewRequest == nil {
+            if isContextualSession {
+                createOrResumeContextualThread()
+            } else if reviewRequest == nil {
                 createNewThreadForOpeningIfNeeded()
             }
             consumeReviewRequestIfNeeded()
         }
         .onAppear {
+            if isContextualSession {
+                NotificationCenter.default.post(name: .torSetBottomDockHidden, object: true)
+            }
             refreshKeyState()
             chatStore.resetError()
             migrateLegacyMessagesIfNeeded()
             removePersistedTransientErrorMessages()
-            if reviewRequest == nil {
+            if isContextualSession {
+                createOrResumeContextualThread()
+            } else if reviewRequest == nil {
                 createNewThreadForOpeningIfNeeded()
             }
             consumeReviewRequestIfNeeded()
+        }
+        .onDisappear {
+            if isContextualSession {
+                NotificationCenter.default.post(name: .torSetBottomDockHidden, object: false)
+            }
         }
         .onChange(of: allMessages.count) {
             attachUnthreadedMessagesToActiveThread()
@@ -192,12 +222,18 @@ struct ChatView: View {
 
     private var topControlDeck: some View {
         HStack(spacing: 10) {
-            Button { isChatListPresented = true } label: {
-                Image(systemName: "line.3.horizontal")
+            Button {
+                if isContextualSession {
+                    dismiss()
+                } else {
+                    isChatListPresented = true
+                }
+            } label: {
+                Image(systemName: isContextualSession ? "chevron.left" : "line.3.horizontal")
                     .torTopControlIcon()
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Mở menu")
+            .accessibilityLabel(isContextualSession ? "Quay lại Lịch" : "Mở menu")
 
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 7) {
@@ -206,8 +242,8 @@ struct ChatView: View {
                         .font(.torHeading(isHeaderCollapsed ? 16 : 18, .bold))
                         .foregroundStyle(Theme.text)
                 }
-                if !isHeaderCollapsed, let updated = latestGroundingTimeText {
-                    Text("Dữ liệu cập nhật lúc \(updated)")
+                if !isHeaderCollapsed, let subtitle = headerSubtitle {
+                    Text(subtitle)
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(Theme.dim)
                         .lineLimit(1)
@@ -216,11 +252,13 @@ struct ChatView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Menu {
-                Button { createNewThread() } label: {
-                    Label("Cuộc trò chuyện mới", systemImage: "square.and.pencil")
-                }
-                Button { isChatListPresented = true } label: {
-                    Label("Lịch sử trò chuyện", systemImage: "clock.arrow.circlepath")
+                if !isContextualSession {
+                    Button { createNewThread() } label: {
+                        Label("Cuộc trò chuyện mới", systemImage: "square.and.pencil")
+                    }
+                    Button { isChatListPresented = true } label: {
+                        Label("Lịch sử trò chuyện", systemImage: "clock.arrow.circlepath")
+                    }
                 }
                 NavigationLink { SettingsView() } label: {
                     Label("Cài đặt", systemImage: "gearshape")
@@ -230,13 +268,28 @@ struct ChatView: View {
                     .torTopControlIcon()
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Cuộc trò chuyện mới")
+            .accessibilityLabel(isContextualSession ? "Tùy chọn Coach" : "Cuộc trò chuyện mới")
         }
         .frame(height: isHeaderCollapsed ? 44 : 52)
         .padding(.horizontal, 8)
         .padding(.vertical, 2)
         .torGlass(cornerRadius: isHeaderCollapsed ? 22 : 24, tint: .subtle)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isHeaderCollapsed)
+    }
+
+    private var headerSubtitle: String? {
+        if let workout = contextualWorkout {
+            let verb = workout.status == .planned && !workout.isScheduleLocked && workout.kind != .race ? "Đang chỉnh buổi tập" : "Xem lại cùng Coach"
+            return "\(verb) · \(workout.kind?.displayName ?? "Run") · \(workout.date.formatted(.dateTime.month(.abbreviated).day()))"
+        }
+        if let activity = contextualActivity {
+            let distance = Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " ", with: "")
+            return "Xem lại cùng Coach · \(distance) · \(activity.date.formatted(.dateTime.month(.abbreviated).day()))"
+        }
+        if let updated = latestGroundingTimeText {
+            return "Dữ liệu cập nhật lúc \(updated)"
+        }
+        return nil
     }
 
     private var coachHeader: some View {
@@ -261,9 +314,15 @@ struct ChatView: View {
     private var emptyState: some View {
         ScrollView {
             VStack(spacing: 14) {
-                readinessGlassCard
-                    .padding(.top, 54)
-                suggestedPromptRows
+                if isContextualSession {
+                    contextualWorkoutCard
+                        .padding(.top, 54)
+                    contextualPromptRows
+                } else {
+                    readinessGlassCard
+                        .padding(.top, 54)
+                    suggestedPromptRows
+                }
             }
             .padding(.horizontal, 18)
             .padding(.bottom, 28)
@@ -271,6 +330,63 @@ struct ChatView: View {
         }
         .scrollIndicators(.hidden)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var contextualWorkoutCard: some View {
+        TorCard(padding: 16, cornerRadius: 18) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: contextualSymbolName)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                        .frame(width: 30, height: 30)
+                        .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    VStack(alignment: .leading, spacing: 3) {
+                        TorEyebrow(contextualEyebrow).tracking(1.4)
+                        Text(contextualTitle)
+                            .font(.torHeading(20, .bold))
+                            .foregroundStyle(Theme.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(contextualDateText)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Theme.dim)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                HStack(spacing: 8) {
+                    ForEach(contextualMetricPairs.prefix(3), id: \.0) { pair in
+                        ContextualWorkoutMetricChip(label: pair.0, value: pair.1)
+                    }
+                }
+
+                if let workout = contextualWorkout {
+                    NavigationLink {
+                        WorkoutDetailView(workout: workout)
+                    } label: {
+                        Label("View workout details", systemImage: "doc.text.magnifyingglass")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(Theme.accent)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Open workout details")
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(contextualAccessibilityLabel)
+    }
+
+    private var contextualPromptRows: some View {
+        VStack(spacing: 9) {
+            ForEach(contextualSuggestionPrompts.prefix(2), id: \.self) { prompt in
+                ChatPromptButton(prompt, systemImage: prompt.contains("Move") || prompt.contains("lịch") ? "calendar.badge.clock" : "sparkles") {
+                    draft = prompt
+                    composerFocused = true
+                }
+            }
+        }
     }
 
     private var readinessGlassCard: some View {
@@ -352,6 +468,10 @@ struct ChatView: View {
                 .frame(height: 0)
 
                 LazyVStack(spacing: 14) {
+                    if isContextualSession {
+                        compactContextChip
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                     ForEach(Array(messages.enumerated()), id: \.element.date) { index, message in
                         ChatBubble(
                             message: message,
@@ -469,7 +589,13 @@ struct ChatView: View {
             if let transaction = planTransaction {
                 PlanTransactionCard(
                     transaction: transaction,
-                    onViewCalendar: { onOpenCalendar(planTransaction?.calendarDate) },
+                    onViewCalendar: {
+                        if isContextualSession {
+                            dismiss()
+                        } else {
+                            onOpenCalendar(planTransaction?.calendarDate)
+                        }
+                    },
                     onUndo: { planTransaction = nil },
                     onRetry: retryPlanTransaction,
                     onDismiss: { planTransaction = nil }
@@ -497,6 +623,24 @@ struct ChatView: View {
                     onKeep: { replacementCoordinator.cancel() }
                 )
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else if shouldShowContextualSuggestions {
+                CoachAskNextStrip(
+                    prompts: Array(contextualSuggestionPrompts.prefix(2)),
+                    label: contextualSuggestionLabel
+                ) { prompt in
+                    draft = prompt
+                    composerFocused = true
+                }
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else if shouldShowDraftRelativeDateSuggestions {
+                CoachAskNextStrip(
+                    prompts: draftRelativeDateSuggestions,
+                    label: "MATCHED WORKOUT"
+                ) { prompt in
+                    draft = prompt
+                    composerFocused = true
+                }
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
             } else if shouldShowSuggestions {
                 CoachAskNextStrip(prompts: Array(suggestionPrompts.prefix(2)), label: language.askNextLabel) { draft = $0 }
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -519,13 +663,56 @@ struct ChatView: View {
     }
 
     private var shouldShowSuggestions: Bool {
-        !isSoftwareKeyboardVisible && !messages.isEmpty && !chatStore.isSending
+        !isContextualSession && !isSoftwareKeyboardVisible && !messages.isEmpty && !chatStore.isSending
+    }
+
+    private var shouldShowContextualSuggestions: Bool {
+        isContextualSession
+            && !isSoftwareKeyboardVisible
+            && !chatStore.isSending
+            && !replacementCoordinator.hasPendingDecision
+            && !replacementCoordinator.isConfirming
+            && messages.count <= 2
+    }
+
+    private var shouldShowDraftRelativeDateSuggestions: Bool {
+        !draftRelativeDateSuggestions.isEmpty
+            && !chatStore.isSending
+            && !replacementCoordinator.hasPendingDecision
+            && !replacementCoordinator.isConfirming
+    }
+
+    private var draftRelativeDateSuggestions: [String] {
+        let clean = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard clean.count >= 3, clean.containsTomorrowReference else { return [] }
+
+        guard let workout = tomorrowWorkout else {
+            return ["Ngày mai chưa có bài trong lịch. Tạo một buổi tập mới cho ngày mai?"]
+        }
+
+        let workoutText = "\(workout.kind?.displayName ?? "Workout") · \(kmText(workout.distanceKm))"
+        if let requestedKm = clean.requestedDistanceKmText {
+            return ["Đổi buổi training ngày mai (\(workoutText)) thành \(requestedKm), giữ cùng loại bài nếu an toàn."]
+        }
+
+        if clean.requestsTimeSuggestion {
+            return ["Tìm giờ tốt cho buổi training ngày mai (\(workoutText))."]
+        }
+
+        if clean.requestsScheduleMove {
+            return ["Cập nhật lịch cho buổi training ngày mai (\(workoutText))."]
+        }
+
+        return ["Ngày mai có \(workoutText). Anh muốn cập nhật buổi này thế nào?"]
     }
 
     @ViewBuilder
     private var attachmentChips: some View {
-        if evidence.readinessSnapshot || evidence.workout != nil || selectedImageAttachment != nil {
+        if isContextualSession || evidence.readinessSnapshot || evidence.workout != nil || selectedImageAttachment != nil {
             FlowLayout(spacing: 8, lineSpacing: 8) {
+                if isContextualSession {
+                    fixedContextChip
+                }
                 if evidence.readinessSnapshot {
                     removableChip("Dữ liệu sức khỏe", symbol: "heart.fill") { evidence.readinessSnapshot = false }
                 }
@@ -593,7 +780,7 @@ struct ChatView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Thêm nội dung")
 
-            TextField(isSoftwareKeyboardVisible ? "Nội dung đang nhập…" : "Hỏi Coach bất cứ điều gì…", text: $draft, axis: .vertical)
+            TextField(composerPlaceholder, text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.body)
                 .foregroundStyle(Theme.text)
@@ -701,6 +888,16 @@ struct ChatView: View {
             .first
     }
 
+    private var tomorrowWorkout: PlannedWorkout? {
+        guard let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: .now)) else {
+            return nil
+        }
+        return plannedWorkouts
+            .filter { calendar.isDate($0.date, inSameDayAs: tomorrow) && $0.status == .planned }
+            .sorted { $0.date < $1.date }
+            .first
+    }
+
     private var todayReadinessTint: Color {
         todayReadiness?.verdict.torColor ?? Theme.dim
     }
@@ -766,7 +963,7 @@ struct ChatView: View {
         let reviewedSnapshot = pending.reviewedSnapshot
         let threadID = chatSession.activeThreadID ?? createNewThread()
         draft = ""
-        evidence = EvidenceSelection()
+        evidence = isContextualSession ? contextualEvidenceSelection : EvidenceSelection()
         clearImageAttachment()
         composerFocused = true
         Task {
@@ -853,6 +1050,59 @@ struct ChatView: View {
         } catch {
             chatStore.presentError((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
         }
+    }
+
+    private func createOrResumeContextualThread() {
+        guard let snapshot = currentWorkoutCoachContext else {
+            chatStore.presentError("This workout is no longer available.")
+            return
+        }
+
+        let threadID: UUID
+        if let existing = existingContextualThread(for: snapshot) {
+            existing.archivedAt = nil
+            existing.updatedAt = .now
+            existing.contextualSnapshotJSON = WorkoutCoachContext.encode(snapshot)
+            threadID = existing.uuid
+        } else {
+            let thread = ChatThread(
+                title: contextualThreadTitle(for: snapshot),
+                mode: snapshot.workoutStatus == .completed ? .workoutReview : .workoutEdit,
+                linkedWorkoutUUID: snapshot.workoutId,
+                linkedPlanUUID: snapshot.trainingPlanId,
+                contextualSnapshotJSON: WorkoutCoachContext.encode(snapshot)
+            )
+            if let completedActivityId = snapshot.completedActivityId {
+                thread.reviewActivityUUID = completedActivityId
+            }
+            modelContext.insert(thread)
+            threadID = thread.uuid
+        }
+        chatSession.activeThreadID = threadID
+        evidence = contextualEvidenceSelection
+        try? modelContext.save()
+    }
+
+    private func existingContextualThread(for snapshot: WorkoutCoachContext) -> ChatThread? {
+        if let workoutId = snapshot.workoutId {
+            return chatThreads
+                .filter { $0.linkedWorkoutUUID == workoutId && $0.mode == .workoutEdit && !$0.isStale(comparedTo: snapshot) }
+                .sorted { $0.updatedAt > $1.updatedAt }
+                .first
+        }
+        if let completedActivityId = snapshot.completedActivityId {
+            return chatThreads
+                .filter { $0.reviewActivityUUID == completedActivityId && $0.mode == .workoutReview }
+                .sorted { $0.updatedAt > $1.updatedAt }
+                .first
+        }
+        return nil
+    }
+
+    private func contextualThreadTitle(for snapshot: WorkoutCoachContext) -> String {
+        let date = snapshot.calendarDate.formatted(.dateTime.month(.abbreviated).day())
+        let prefix = snapshot.workoutStatus == .completed ? "Review" : "Edit"
+        return "\(prefix) \(snapshot.workoutTitle) · \(date)"
     }
 
     private func consumeReviewRequestIfNeeded() {
@@ -980,18 +1230,228 @@ struct ChatView: View {
         hasAPIKey = !((try? KeychainStore.load(account: CoachModelProvider.apiKeyAccount(for: model))) ?? "").isEmpty
     }
 
+    private var currentWorkoutCoachContext: WorkoutCoachContext? {
+        if let workout = contextualWorkout {
+            let nearby = plannedWorkouts
+                .filter { other in
+                    other.uuid != workout.uuid
+                        && abs(calendar.dateComponents([.day], from: workout.date, to: other.date).day ?? 99) <= 3
+                }
+                .map(\.uuid)
+            return WorkoutCoachContext(
+                workoutId: workout.uuid,
+                trainingPlanId: nil,
+                calendarDate: workout.date,
+                workoutStatus: contextualStatus(for: workout),
+                workoutType: workout.kindRaw,
+                workoutTitle: workout.kind?.displayName ?? "Run",
+                plannedDistanceKm: workout.distanceKm,
+                plannedDurationSeconds: workout.expectedDurationSeconds,
+                plannedPaceFastSecondsPerKm: workout.paceFastSecondsPerKm,
+                plannedPaceSlowSecondsPerKm: workout.paceSlowSecondsPerKm,
+                plannedIntensity: workout.kind?.isQuality == true ? "key" : "easy",
+                workoutStructureSummary: workout.details,
+                isKeyWorkout: workout.kind?.isQuality == true,
+                phaseId: workout.phaseRaw,
+                phaseName: TrainingPhase(rawValue: workout.phaseRaw)?.displayName ?? workout.phaseRaw,
+                planWeek: workout.weekIndex,
+                nearbyWorkoutIds: nearby,
+                sourceScreen: "trainingCalendar"
+            )
+        }
+        if let activity = contextualActivity {
+            return WorkoutCoachContext(
+                workoutId: nil,
+                completedActivityId: activity.hkUUID,
+                trainingPlanId: nil,
+                calendarDate: activity.date,
+                workoutStatus: .completed,
+                workoutType: "completedRun",
+                workoutTitle: "Completed run",
+                plannedDistanceKm: nil,
+                actualDistanceMeters: activity.distanceMeters,
+                plannedDurationSeconds: nil,
+                actualDurationSeconds: activity.durationSeconds,
+                plannedPaceFastSecondsPerKm: nil,
+                plannedPaceSlowSecondsPerKm: nil,
+                plannedIntensity: nil,
+                workoutStructureSummary: activity.reviewNote,
+                isKeyWorkout: false,
+                phaseId: nil,
+                phaseName: nil,
+                planWeek: nil,
+                nearbyWorkoutIds: [],
+                sourceScreen: "trainingCalendar"
+            )
+        }
+        return nil
+    }
+
+    private func contextualStatus(for workout: PlannedWorkout) -> WorkoutCoachContext.Status {
+        switch workout.status {
+        case .planned:
+            return workout.isScheduleLocked || workout.kind == .race ? .locked : .planned
+        case .done:
+            return .completed
+        case .skipped:
+            return .unavailable
+        }
+    }
+
+    private var contextualEvidenceSelection: EvidenceSelection {
+        if let contextualWorkoutID {
+            return EvidenceSelection(readinessSnapshot: true, weekPlan: true, workout: .planned(contextualWorkoutID), hasPhoto: selectedImageAttachment != nil)
+        }
+        if let contextualCompletedActivityID {
+            return EvidenceSelection(readinessSnapshot: true, weekPlan: true, workout: .completed(contextualCompletedActivityID), hasPhoto: selectedImageAttachment != nil)
+        }
+        return EvidenceSelection()
+    }
+
+    private var composerPlaceholder: String {
+        if isContextualSession {
+            return isSoftwareKeyboardVisible ? "Nội dung đang nhập…" : "Ask Coach to change this workout…"
+        }
+        return isSoftwareKeyboardVisible ? "Nội dung đang nhập…" : "Hỏi Coach bất cứ điều gì…"
+    }
+
+    private var contextualSuggestionLabel: String {
+        contextualWorkout?.status == .done || contextualActivity != nil ? "REVIEW WORKOUT" : "EDIT WORKOUT"
+    }
+
+    private var contextualSuggestionPrompts: [String] {
+        if contextualActivity != nil {
+            return [
+                "Review this run against the planned target.",
+                "What should I adjust next after this run?"
+            ]
+        }
+        guard let workout = contextualWorkout else { return [] }
+        if workout.status == .done {
+            return [
+                "Review this completed workout.",
+                "What should I adjust next after this run?"
+            ]
+        }
+        if workout.isScheduleLocked || workout.kind == .race {
+            return [
+                "Review why this workout is fixed.",
+                "Ask Coach for safe alternatives."
+            ]
+        }
+        return [
+            "Change distance or duration",
+            "Move this workout"
+        ]
+    }
+
+    private var contextualEyebrow: String {
+        if contextualActivity != nil { return "Review with Coach" }
+        if contextualWorkout?.status == .done || contextualWorkout?.isScheduleLocked == true || contextualWorkout?.kind == .race { return "Review with Coach" }
+        return "Editing workout"
+    }
+
+    private var contextualTitle: String {
+        if let workout = contextualWorkout { return workout.kind?.displayName ?? "Run" }
+        if let activity = contextualActivity {
+            return Formatters.kilometers(activity.distanceMeters).isEmpty ? "Completed run" : "Completed run"
+        }
+        return "Workout unavailable"
+    }
+
+    private var contextualDateText: String {
+        if let workout = contextualWorkout {
+            return workout.date.formatted(.dateTime.weekday(.wide).month(.wide).day())
+        }
+        if let activity = contextualActivity {
+            return activity.date.formatted(.dateTime.weekday(.wide).month(.wide).day())
+        }
+        return "Return to Calendar"
+    }
+
+    private var contextualSymbolName: String {
+        contextualWorkout?.kind?.symbolName ?? "figure.run"
+    }
+
+    private var contextualMetricPairs: [(String, String)] {
+        if let workout = contextualWorkout {
+            var pairs = [("Distance", Formatters.kilometers(workout.distanceKm * 1000))]
+            if let duration = workout.expectedDurationSeconds {
+                pairs.append(("Duration", Formatters.duration(duration)))
+            }
+            if let pace = workout.paceBand {
+                pairs.append(("Pace", Formatters.paceBand(pace)))
+            }
+            return pairs
+        }
+        if let activity = contextualActivity {
+            return [
+                ("Distance", Formatters.kilometers(activity.distanceMeters)),
+                ("Duration", Formatters.duration(activity.durationSeconds)),
+                ("Pace", Formatters.pace(activity.avgPaceSecondsPerKm))
+            ]
+        }
+        return [("Status", "Unavailable")]
+    }
+
+    private var contextualAccessibilityLabel: String {
+        "\(contextualEyebrow): \(contextualTitle), \(contextualDateText)"
+    }
+
+    private var compactContextChip: some View {
+        HStack(spacing: 7) {
+            Image(systemName: contextualSymbolName)
+                .font(.caption.weight(.semibold))
+                .accessibilityHidden(true)
+            Text("\(contextualTitle) · \(contextualDateText)")
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .foregroundStyle(Theme.accent)
+        .padding(.horizontal, 10)
+        .frame(minHeight: 34)
+        .background(Theme.accentSoft, in: Capsule())
+        .accessibilityLabel("Workout context: \(contextualTitle), \(contextualDateText)")
+    }
+
+    private var fixedContextChip: some View {
+        HStack(spacing: 6) {
+            Image(systemName: contextualSymbolName)
+                .font(.caption.weight(.semibold))
+            Text(contextualTitle)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+            Image(systemName: "lock.fill")
+                .font(.caption2.weight(.bold))
+                .accessibilityHidden(true)
+        }
+        .foregroundStyle(Theme.text)
+        .padding(.horizontal, 10)
+        .frame(minHeight: 34)
+        .background(Theme.chip, in: Capsule())
+        .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
+        .accessibilityLabel("Fixed workout context: \(contextualTitle)")
+    }
+
     private var currentAttachments: [CoachContextAttachment] {
         var attachments: [CoachContextAttachment] = []
         if evidence.readinessSnapshot {
             attachments.append(.health)
         }
-        switch evidence.workout {
-        case .planned(let uuid):
-            attachments.append(.plannedWorkout(uuid))
-        case .completed(let uuid):
-            attachments.append(.completedActivity(uuid))
-        case nil:
-            break
+        if let contextualWorkoutID {
+            attachments.append(.plannedWorkout(contextualWorkoutID))
+        } else if let contextualCompletedActivityID {
+            attachments.append(.completedActivity(contextualCompletedActivityID))
+        } else {
+            switch evidence.workout {
+            case .planned(let uuid):
+                attachments.append(.plannedWorkout(uuid))
+            case .completed(let uuid):
+                attachments.append(.completedActivity(uuid))
+            case nil:
+                break
+            }
         }
         if let selectedImageAttachment {
             attachments.append(.image(selectedImageAttachment))
@@ -1405,6 +1865,54 @@ private enum ChatPlanTransaction: Equatable {
     }
 }
 
+private extension String {
+    var containsTomorrowReference: Bool {
+        let lower = lowercased()
+        return lower.contains("ngày mai")
+            || lower.contains("ngay mai")
+            || lower.contains("tomorrow")
+            || lower.contains("tmr")
+            || lower.contains("mai tập")
+            || lower.contains("mai chay")
+            || lower.contains("mai chạy")
+    }
+
+    var requestedDistanceKmText: String? {
+        let pattern = #"(?i)(\d+(?:[\.,]\d+)?)\s*(?:km|kilometer|kilometre|cây|cay)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(startIndex..<endIndex, in: self)
+        guard let match = regex.firstMatch(in: self, range: range),
+              match.numberOfRanges > 1,
+              let valueRange = Range(match.range(at: 1), in: self) else {
+            return nil
+        }
+        let value = self[valueRange].replacingOccurrences(of: ",", with: ".")
+        return "\(value) km"
+    }
+
+    var requestsTimeSuggestion: Bool {
+        let lower = lowercased()
+        return lower.contains("giờ")
+            || lower.contains("gio")
+            || lower.contains("time")
+            || lower.contains("when")
+            || lower.contains("lúc nào")
+            || lower.contains("luc nao")
+            || lower.contains("find")
+    }
+
+    var requestsScheduleMove: Bool {
+        let lower = lowercased()
+        return lower.contains("đổi")
+            || lower.contains("doi")
+            || lower.contains("cập nhật")
+            || lower.contains("cap nhat")
+            || lower.contains("update")
+            || lower.contains("move")
+            || lower.contains("schedule")
+    }
+}
+
 private struct PlanTransactionCard: View {
     let transaction: ChatPlanTransaction
     let onViewCalendar: () -> Void
@@ -1489,6 +1997,43 @@ private struct PlanTransactionCard: View {
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(prominent ? .clear : Theme.border, lineWidth: 1))
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct ContextualWorkoutMetricChip: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Theme.faint)
+            Text(value)
+                .font(.torMono(11, .medium))
+                .foregroundStyle(Theme.text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .background(Theme.chip, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private extension ChatThread {
+    func isStale(comparedTo snapshot: WorkoutCoachContext) -> Bool {
+        guard let previous = WorkoutCoachContext.decode(contextualSnapshotJSON) else { return false }
+        return previous.workoutId != snapshot.workoutId
+            || previous.completedActivityId != snapshot.completedActivityId
+            || previous.calendarDate != snapshot.calendarDate
+            || previous.workoutType != snapshot.workoutType
+            || previous.plannedDistanceKm != snapshot.plannedDistanceKm
+            || previous.plannedDurationSeconds != snapshot.plannedDurationSeconds
+            || previous.plannedPaceFastSecondsPerKm != snapshot.plannedPaceFastSecondsPerKm
+            || previous.plannedPaceSlowSecondsPerKm != snapshot.plannedPaceSlowSecondsPerKm
+            || previous.workoutStatus != snapshot.workoutStatus
     }
 }
 

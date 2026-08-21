@@ -5,6 +5,7 @@ struct CalendarRunSummaryCard: View {
     let activity: CompletedActivity
     let plannedWorkout: PlannedWorkout?
     var compact: Bool = false
+    var reviewDestination: AnyView? = nil
     var onReview: (() -> Void)? = nil
 
     private var load: Int {
@@ -62,22 +63,7 @@ struct CalendarRunSummaryCard: View {
                 metric("Pace", Formatters.pace(activity.avgPaceSecondsPerKm).replacingOccurrences(of: " /km", with: "/km"))
                 metric("Load", "\(load)")
                 Spacer(minLength: 4)
-                if let onReview {
-                    Button(action: onReview) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "message.badge")
-                            Text("Review")
-                        }
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.82)
-                        .frame(width: compact ? 78 : 92, height: 42)
-                        .background(Color.black, in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Review run")
-                }
+                reviewAction
             }
         }
         .padding(compact ? 12 : 14)
@@ -87,6 +73,38 @@ struct CalendarRunSummaryCard: View {
                 .strokeBorder(Theme.border, lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 6)
+    }
+
+    @ViewBuilder
+    private var reviewAction: some View {
+        if let reviewDestination {
+            NavigationLink {
+                reviewDestination
+            } label: {
+                reviewLabel
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Review run with Coach")
+        } else if let onReview {
+            Button(action: onReview) {
+                reviewLabel
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Review run")
+        }
+    }
+
+    private var reviewLabel: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "message.badge")
+            Text("Review")
+        }
+        .font(.system(size: 12, weight: .bold))
+        .foregroundStyle(.white)
+        .lineLimit(1)
+        .minimumScaleFactor(0.82)
+        .frame(width: compact ? 78 : 92, height: 42)
+        .background(Color.black, in: Capsule())
     }
 
     private var sourceLine: String {
