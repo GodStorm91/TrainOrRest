@@ -124,6 +124,30 @@ final class CoachChatStore: ObservableObject {
         )
         context.insert(assistantTurn)
         updateThread(threadID, titleFrom: trimmed, in: context)
+
+        do {
+            if try handleContextualDistanceShortcut(
+                trimmed,
+                attachments: attachments,
+                snapshot: snapshot,
+                assistantTurn: assistantTurn,
+                in: context
+            ) {
+                isSending = false
+                return
+            }
+        } catch {
+            assistantTurn.text = Self.userFacingPlanToolRejection(technicalErrorMessage(error))
+            assistantTurn.assistantStatus = .completed
+            assistantTurn.isIncomplete = false
+            assistantTurn.errorCategory = nil
+            assistantTurn.errorMessage = nil
+            assistantTurn.activeAttemptID = nil
+            try? context.save()
+            isSending = false
+            return
+        }
+
         try? context.save()
 
         await executeAttempt(
@@ -135,6 +159,54 @@ final class CoachChatStore: ObservableObject {
             statusBeforeStreaming: .streaming
         )
         isSending = false
+    }
+
+    private func handleContextualDistanceShortcut(
+        _ text: String,
+        attachments: [CoachContextAttachment],
+        snapshot: CoachRequestSnapshot,
+        assistantTurn: ChatMessage,
+        in context: ModelContext
+    ) throws -> Bool {
+        guard let replacementCoordinator,
+              let workoutID = attachments.compactMap({ attachment -> UUID? in
+                  if case .plannedWorkout(let uuid) = attachment { return uuid }
+                  return nil
+              }).first,
+              let targetKm = Self.contextualDistanceTarget(from: text),
+              let workout = try context.fetch(FetchDescriptor<PlannedWorkout>()).first(where: { $0.uuid == workoutID }),
+              workout.status == .planned,
+              workout.isScheduleLocked == false,
+              workout.kind != .race,
+              let kind = workout.kind,
+              let payload = Self.sameKindPayload(kind: kind, distanceKm: targetKm)
+        else {
+            return false
+        }
+
+        let proposal = PlanAdjustmentProposal(changes: [.init(
+            date: CoachContextBuilder.day(workout.date, calendar: calendar),
+            action: .replace,
+            workout: payload
+        )])
+        let replacement = try CoachTools.pendingReplacement(
+            for: proposal,
+            in: context,
+            today: snapshot.createdAt,
+            calendar: calendar,
+            language: CoachLanguage(rawValue: snapshot.locale) ?? .current
+        )
+        guard let replacement else { return false }
+
+        assistantTurn.text = "Em đã chuẩn bị đề xuất đổi cự li cho buổi này. Anh xem card bên dưới rồi xác nhận trước khi em lưu vào lịch."
+        assistantTurn.assistantStatus = .completed
+        assistantTurn.isIncomplete = false
+        assistantTurn.errorCategory = nil
+        assistantTurn.errorMessage = nil
+        assistantTurn.activeAttemptID = nil
+        replacementCoordinator.stage(replacement)
+        try context.save()
+        return true
     }
 
     func retryFailedResponse(_ assistantTurnID: UUID, model: String, apiKey: String, in context: ModelContext) async {
@@ -541,9 +613,71 @@ final class CoachChatStore: ObservableObject {
         let lower = text.lowercased()
         let mutationNeedles = [
             "create workout", "add workout", "update plan", "delete workout", "modify calendar",
-            "save settings", "push workout", "thêm bài", "tạo bài", "sửa lịch", "đổi lịch", "xóa bài"
+            "save settings", "push workout", "thêm bài", "tạo bài", "sửa lịch", "đổi lịch", "xóa bài",
+            "đổi cự li", "đổi cự ly", "đổi quãng đường", "change distance"
         ]
         return mutationNeedles.contains { lower.contains($0) } ? .planMutation : .readOnly
+    }
+
+    private static func contextualDistanceTarget(from text: String) -> Double? {
+        let folded = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "vi_VN"))
+            .replacingOccurrences(of: ",", with: ".")
+        let lower = folded.lowercased()
+        let distanceNeedles = [
+            "cu li", "cu ly", "quang duong", "distance", "kilometer", "kilometre",
+            "thanh", "to ", "len", "xuong"
+        ]
+        guard distanceNeedles.contains(where: { lower.contains($0) }) else { return nil }
+
+        let patterns = [
+            #"(?<![\d.])(\d+(?:\.\d+)?)\s*(?:km|kilometer|kilometre|k)(?![a-z])"#,
+            #"(?:thanh|to|len|xuong)\s+(\d+(?:\.\d+)?)"#
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { continue }
+            let range = NSRange(lower.startIndex..<lower.endIndex, in: lower)
+            guard let match = regex.firstMatch(in: lower, options: [], range: range),
+                  match.numberOfRanges > 1,
+                  let valueRange = Range(match.range(at: 1), in: lower),
+                  let value = Double(lower[valueRange]),
+                  value > 0
+            else { continue }
+            return value
+        }
+        return nil
+    }
+
+    private static func sameKindPayload(kind: WorkoutKind, distanceKm: Double) -> PlanAdjustmentProposal.CreateWorkout? {
+        guard distanceKm.isFinite, distanceKm > 0 else { return nil }
+        switch kind {
+        case .easy, .long:
+            return PlanAdjustmentProposal.CreateWorkout(
+                kind: kind.rawValue,
+                blocks: [
+                    .init(repeatCount: 1, steps: [
+                        .init(role: "work", targetType: "distance_km", targetValue: distanceKm, paceZone: "easy")
+                    ])
+                ]
+            )
+        case .tempo:
+            let workKm = max(0.5, distanceKm - WorkoutFactory.warmupKm - WorkoutFactory.cooldownKm)
+            return PlanAdjustmentProposal.CreateWorkout(
+                kind: kind.rawValue,
+                blocks: [
+                    .init(repeatCount: 1, steps: [
+                        .init(role: "warm_up", targetType: "distance_km", targetValue: WorkoutFactory.warmupKm, paceZone: "easy")
+                    ]),
+                    .init(repeatCount: 1, steps: [
+                        .init(role: "work", targetType: "distance_km", targetValue: workKm, paceZone: "threshold")
+                    ]),
+                    .init(repeatCount: 1, steps: [
+                        .init(role: "cool_down", targetType: "distance_km", targetValue: WorkoutFactory.cooldownKm, paceZone: "easy")
+                    ])
+                ]
+            )
+        case .intervals, .race:
+            return nil
+        }
     }
 
     private func message(_ id: UUID?, in context: ModelContext) -> ChatMessage? {

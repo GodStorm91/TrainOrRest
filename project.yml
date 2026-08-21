@@ -26,7 +26,7 @@ targets:
       path: TrainOrRest/Info.plist
       properties:
         CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "202608212110"
+        CFBundleVersion: "202608212153"
         GoogleCalendarOAuthClientID: "119351365161-2vtfr02trs185c4u2aah2lcomtad9m5b.apps.googleusercontent.com"
         GoogleCalendarOAuthRedirectScheme: "com.googleusercontent.apps.119351365161-2vtfr02trs185c4u2aah2lcomtad9m5b"
         CFBundleURLTypes:
