@@ -124,6 +124,48 @@ final class SmartSchedulingTests: XCTestCase {
         XCTAssertTrue(SmartSchedulingEngine(calendar: calendar).candidates(for: request).isEmpty)
     }
 
+    @MainActor
+    func testWorkoutDetailCandidateSearchRefreshesAvailabilityBeforeFindingSlot() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let calendar = fixedCalendar
+        let connection = GoogleCalendarConnection()
+        connection.connectionStatus = .connected
+        connection.smartSchedulingEnabled = true
+        context.insert(connection)
+        let plan = makePlan(anchor: date(2026, 8, 17, calendar: calendar))
+        let goal = makeGoal(anchor: date(2026, 8, 17, calendar: calendar))
+        let workout = makeWorkout(on: date(2026, 8, 23, calendar: calendar), plan: plan)
+        workout.status = .done
+        context.insert(plan)
+        context.insert(goal)
+        context.insert(workout)
+        try context.save()
+        try GoogleCalendarTokenStore.save(validTokens, connectionID: connection.uuid)
+        defer { try? GoogleCalendarTokenStore.delete(connectionID: connection.uuid) }
+
+        let api = FakeSmartSchedulingAPI()
+        api.calendarList = [
+            GoogleCalendarListEntry(id: "primary", summary: "Primary", description: nil, timeZone: "Asia/Tokyo", accessRole: "owner", primary: true, selected: true, backgroundColor: nil)
+        ]
+        let service = GoogleCalendarSyncService(
+            modelContext: context,
+            api: api,
+            oauth: nil,
+            calendar: calendar,
+            timeZone: TimeZone(identifier: "Asia/Tokyo")!,
+            now: { self.date(2026, 8, 22, hour: 15, calendar: calendar) }
+        )
+
+        XCTAssertTrue(service.smartSchedulingCandidates(for: workout).isEmpty)
+
+        let candidates = await service.refreshedSmartSchedulingCandidates(for: workout)
+
+        XCTAssertEqual(api.freeBusyRequestCount, 1)
+        XCTAssertFalse(candidates.isEmpty)
+        XCTAssertTrue(candidates.contains { calendar.isDate($0.date, inSameDayAs: workout.date) })
+    }
+
     private var validTokens: GoogleCalendarTokenSet {
         GoogleCalendarTokenSet(accessToken: "access", refreshToken: "refresh", expiresAt: Date().addingTimeInterval(3600), tokenType: "Bearer")
     }
@@ -186,6 +228,7 @@ final class SmartSchedulingTests: XCTestCase {
 private final class FakeSmartSchedulingAPI: GoogleCalendarAPIServicing {
     var calendarList: [GoogleCalendarListEntry] = []
     var freeBusyResponse = GoogleFreeBusyResponse(calendars: [:])
+    var freeBusyRequestCount = 0
 
     func exchangeCode(_ code: String, verifier: String) async throws -> GoogleCalendarTokenSet { GoogleCalendarTokenSet(accessToken: "access", refreshToken: "refresh", expiresAt: Date().addingTimeInterval(3600), tokenType: "Bearer") }
     func refresh(_ refreshToken: String) async throws -> GoogleCalendarTokenSet { GoogleCalendarTokenSet(accessToken: "access", refreshToken: refreshToken, expiresAt: Date().addingTimeInterval(3600), tokenType: "Bearer") }
@@ -200,5 +243,8 @@ private final class FakeSmartSchedulingAPI: GoogleCalendarAPIServicing {
     func eventsByPrivateProperty(calendarID: String, key: String, value: String, accessToken: String) async throws -> [GoogleCalendarEventResponse] { [] }
     func listEvents(calendarID: String, syncToken: String?, accessToken: String) async throws -> GoogleCalendarEventPage { GoogleCalendarEventPage(items: [], nextSyncToken: nil) }
     func listCalendarList(accessToken: String) async throws -> [GoogleCalendarListEntry] { calendarList }
-    func freeBusy(request: GoogleFreeBusyRequest, accessToken: String) async throws -> GoogleFreeBusyResponse { freeBusyResponse }
+    func freeBusy(request: GoogleFreeBusyRequest, accessToken: String) async throws -> GoogleFreeBusyResponse {
+        freeBusyRequestCount += 1
+        return freeBusyResponse
+    }
 }

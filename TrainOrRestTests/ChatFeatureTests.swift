@@ -1157,6 +1157,44 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertFalse(messages.map(\.text).joined(separator: "\n").contains("Bạn có thể xác nhận"))
     }
 
+    func testPlanMutationBuffersDraftTextUntilFinalCardOrRejection() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedEveryDayPlan(in: context)
+        let saturday = PlanEngineTestSupport.date(2026, 1, 10, hour: 0)
+        XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [
+                .text("Cảm ơn bạn, mình sẽ kiểm tra lịch hiện tại trước."),
+                .toolUse(id: "toolu_bad", name: CoachTools.toolName, input: .object([
+                    "changes": .array([.object([
+                        "date": .string(CoachContextBuilder.day(saturday, calendar: calendar)),
+                        "action": .string("rest")
+                    ])])
+                ]))
+            ], stopReason: "tool_use"),
+            ClaudeResponse(content: [.text("Em chưa thể chỉnh vì thứ bảy đang trống.")], stopReason: "end_turn")
+        ])
+        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
+        let store = CoachChatStore(
+            client: client,
+            calendar: calendar,
+            now: { self.today },
+            replacementCoordinator: coordinator
+        )
+
+        await store.send(text: "Create workout on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
+
+        XCTAssertNil(coordinator.pendingProposal)
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        XCTAssertEqual(messages.map(\.role), [.user, .assistant])
+        let assistant = try XCTUnwrap(messages.last)
+        XCTAssertEqual(assistant.assistantStatus, .completed)
+        XCTAssertFalse(assistant.text.contains("Cảm ơn bạn"))
+        XCTAssertFalse(assistant.text.contains("thứ bảy đang trống"))
+        XCTAssertTrue(assistant.text.contains("Em chưa thể áp dụng") || assistant.text.contains("Coach chưa đọc được"))
+    }
+
     func testChatStoreRejectsUnapplyablePlanCardBeforeUserCanConfirm() async throws {
         let container = try makeContainer()
         let context = container.mainContext

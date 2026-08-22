@@ -1379,6 +1379,11 @@ final class GoogleCalendarSyncService: ObservableObject {
         return candidates
     }
 
+    func refreshedSmartSchedulingCandidates(for workout: PlannedWorkout, limit: Int = 3) async -> [SchedulingCandidate] {
+        await refreshAvailability(reason: "candidateSearch")
+        return smartSchedulingCandidates(for: workout, limit: limit)
+    }
+
     func acceptSmartSchedulingCandidate(_ candidate: SchedulingCandidate) {
         guard let workout = workout(id: candidate.workoutID) else { return }
         let operation = ScheduleChangeOperation(

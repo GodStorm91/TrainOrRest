@@ -425,6 +425,7 @@ final class CoachChatStore: ObservableObject {
         }
         let applied: [String] = []
         var lastToolRejection: String?
+        let shouldPublishStreamingText = snapshot.actionType != .planMutation
 
         for _ in 0..<CoachChatConfig.maxToolRounds {
             let request = ClaudeRequest(model: model, system: system, tools: [CoachTools.tool], messages: conversation)
@@ -435,6 +436,7 @@ final class CoachChatStore: ObservableObject {
             let streamSaveInterval: TimeInterval = 0.15
             let assembler = CoachStreamAssembler(
                 onText: { delta in
+                    guard shouldPublishStreamingText else { return }
                     guard assistantTurn.activeAttemptID == attemptID else { return }
                     if !replacementStarted {
                         assistantTurn.text = ""
@@ -487,6 +489,10 @@ final class CoachChatStore: ObservableObject {
                         content: [.text("Rejected: \(Self.calendarImportDetourMessage) Call \(CoachTools.toolName) with the concrete calendar changes instead.")]
                     ))
                     continue
+                }
+                if snapshot.actionType == .planMutation {
+                    lastToolRejection = lastToolRejection ?? "The model answered with text instead of submitting a plan adjustment tool call."
+                    break
                 }
                 assistantTurn.text = text.isEmpty ? "I could not produce a response." : text
                 assistantTurn.appliedAdjustment = applied.isEmpty ? nil : applied.joined(separator: "; ")
@@ -674,13 +680,35 @@ final class CoachChatStore: ObservableObject {
     }()
 
     private func classifyAction(_ text: String) -> CoachRequestActionType {
-        let lower = text.lowercased()
+        let lower = text
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "vi_VN"))
+            .lowercased()
         let mutationNeedles = [
             "create workout", "add workout", "update plan", "delete workout", "modify calendar",
             "save settings", "push workout", "thêm bài", "tạo bài", "sửa lịch", "đổi lịch", "xóa bài",
             "đổi cự li", "đổi cự ly", "đổi quãng đường", "change distance"
         ]
-        return mutationNeedles.contains { lower.contains($0) } ? .planMutation : .readOnly
+            .map {
+                $0.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "vi_VN"))
+                    .lowercased()
+            }
+        if mutationNeedles.contains(where: { lower.contains($0) }) || Self.distanceEditRequest(from: text) != nil {
+            return .planMutation
+        }
+
+        let actionNeedles = [
+            "create", "add", "update", "delete", "modify", "replace", "move", "change", "set",
+            "tao", "them", "sua", "chinh", "doi", "xoa", "chuyen", "cap nhat", "tang", "giam"
+        ]
+        let objectNeedles = [
+            "workout", "run", "plan", "calendar", "schedule",
+            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+            "today", "tomorrow", "hom nay", "ngay mai",
+            "lich", "bai", "buoi", "cu li", "cu ly", "quang duong"
+        ]
+        let hasAction = actionNeedles.contains { lower.contains($0) }
+        let hasObject = objectNeedles.contains { lower.contains($0) }
+        return hasAction && hasObject ? .planMutation : .readOnly
     }
 
     private struct DistanceEditRequest {

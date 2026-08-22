@@ -9,6 +9,7 @@ struct WorkoutDetailView: View {
     @EnvironmentObject private var googleCalendar: GoogleCalendarSyncService
     @State private var smartCandidates: [SchedulingCandidate] = []
     @State private var smartSchedulingMessage: String?
+    @State private var isFindingSmartTime = false
 
     var body: some View {
         List {
@@ -55,11 +56,12 @@ struct WorkoutDetailView: View {
                     .accessibilityLabel("Keep workout fixed")
                     if smartCandidates.isEmpty {
                         Button {
-                            refreshSmartCandidates()
+                            Task { await refreshSmartCandidates() }
                         } label: {
-                            Label("Find a time", systemImage: "sparkles")
+                            Label(isFindingSmartTime ? "Finding a time" : "Find a time", systemImage: "sparkles")
                         }
                         .accessibilityLabel("Find a time")
+                        .disabled(isFindingSmartTime)
                     } else {
                         ForEach(smartCandidates) { candidate in
                             VStack(alignment: .leading, spacing: 6) {
@@ -112,7 +114,7 @@ struct WorkoutDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             if smartSchedulingEnabled && !isTimed(workout.date) {
-                refreshSmartCandidates()
+                await refreshSmartCandidates()
             }
         }
     }
@@ -132,8 +134,11 @@ struct WorkoutDetailView: View {
         googleConnections.first?.smartSchedulingEnabled == true
     }
 
-    private func refreshSmartCandidates() {
-        smartCandidates = googleCalendar.smartSchedulingCandidates(for: workout)
+    private func refreshSmartCandidates() async {
+        guard !isFindingSmartTime else { return }
+        isFindingSmartTime = true
+        defer { isFindingSmartTime = false }
+        smartCandidates = await googleCalendar.refreshedSmartSchedulingCandidates(for: workout)
         if smartCandidates.isEmpty {
             smartSchedulingMessage = "No safe available slot found."
         } else {

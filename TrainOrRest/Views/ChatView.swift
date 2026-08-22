@@ -472,7 +472,7 @@ struct ChatView: View {
                         compactContextChip
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    ForEach(Array(messages.enumerated()), id: \.element.date) { index, message in
+                    ForEach(Array(messages.enumerated()), id: \.element.turnID) { index, message in
                         ChatBubble(
                             message: message,
                             hidesSources: isSoftwareKeyboardVisible,
@@ -496,7 +496,7 @@ struct ChatView: View {
                                 chatStore.cancelRetry(failedTurn.turnID, in: modelContext)
                             }
                         )
-                        .id(message.date)
+                        .id(message.turnID)
                     }
                     Color.clear
                         .frame(height: 1)
