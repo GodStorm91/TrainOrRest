@@ -1535,6 +1535,9 @@ final class GoogleCalendarSyncService: ObservableObject {
                 row.accessRole = entry.accessRole
                 row.isPrimary = entry.primary ?? false
                 row.excludedByDefaultReason = excludedReason
+                if excludedReason != nil {
+                    row.selectedForAvailability = false
+                }
                 row.updatedAt = now()
             } else {
                 modelContext.insert(GoogleAvailabilityCalendar(
@@ -1551,7 +1554,7 @@ final class GoogleCalendarSyncService: ObservableObject {
         }
         let all = (try? modelContext.fetch(FetchDescriptor<GoogleAvailabilityCalendar>())) ?? []
         connection.smartSchedulingSelectedCalendarIDs = all
-            .filter { $0.connectionID == connection.uuid && $0.selectedForAvailability }
+            .filter { isSelectableAvailabilityCalendar($0, connection: connection) && $0.selectedForAvailability }
             .map(\.googleCalendarID)
     }
 
@@ -1569,9 +1572,19 @@ final class GoogleCalendarSyncService: ObservableObject {
     private func selectedAvailabilityCalendarIDs(connection: GoogleCalendarConnection) -> [String] {
         let rows = (try? modelContext.fetch(FetchDescriptor<GoogleAvailabilityCalendar>())) ?? []
         let selected = rows
-            .filter { $0.connectionID == connection.uuid && $0.selectedForAvailability }
+            .filter { isSelectableAvailabilityCalendar($0, connection: connection) && $0.selectedForAvailability }
             .map(\.googleCalendarID)
-        return selected.isEmpty ? connection.smartSchedulingSelectedCalendarIDsOrDefault : selected
+        let fallback = connection.smartSchedulingSelectedCalendarIDsOrDefault.filter {
+            $0 != connection.googleCalendarID && $0 != connection.calendarName
+        }
+        return selected.isEmpty ? fallback : selected
+    }
+
+    private func isSelectableAvailabilityCalendar(_ row: GoogleAvailabilityCalendar, connection: GoogleCalendarConnection) -> Bool {
+        row.connectionID == connection.uuid
+            && row.excludedByDefaultReason == nil
+            && row.googleCalendarID != connection.googleCalendarID
+            && row.displayName != connection.calendarName
     }
 
     private func normalizeAvailability(response: GoogleFreeBusyResponse, connection: GoogleCalendarConnection, start: Date, end: Date) {

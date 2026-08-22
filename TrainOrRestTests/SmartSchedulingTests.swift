@@ -67,6 +67,55 @@ final class SmartSchedulingTests: XCTestCase {
         XCTAssertEqual(days.flatMap(\.busyWindows).first?.state, .busy)
     }
 
+    @MainActor
+    func testRefreshAvailabilityDeselectsExistingRestOrTrainCalendarBeforeFreeBusy() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let calendar = fixedCalendar
+        let connection = GoogleCalendarConnection()
+        connection.connectionStatus = .connected
+        connection.smartSchedulingEnabled = true
+        connection.googleCalendarID = "rot-training"
+        connection.smartSchedulingSelectedCalendarIDs = ["rot-training", "primary"]
+        context.insert(connection)
+        context.insert(GoogleAvailabilityCalendar(
+            connectionID: connection.uuid,
+            googleCalendarID: "rot-training",
+            displayName: "RestOrTrain Training",
+            accessRole: "owner",
+            isPrimary: false,
+            selectedForAvailability: true,
+            excludedByDefaultReason: nil
+        ))
+        try context.save()
+        try GoogleCalendarTokenStore.save(validTokens, connectionID: connection.uuid)
+        defer { try? GoogleCalendarTokenStore.delete(connectionID: connection.uuid) }
+
+        let api = FakeSmartSchedulingAPI()
+        api.calendarList = [
+            GoogleCalendarListEntry(id: "primary", summary: "Primary", description: nil, timeZone: "Asia/Tokyo", accessRole: "owner", primary: true, selected: true, backgroundColor: nil),
+            GoogleCalendarListEntry(id: "rot-training", summary: "RestOrTrain Training", description: nil, timeZone: "Asia/Tokyo", accessRole: "owner", primary: false, selected: true, backgroundColor: nil)
+        ]
+        api.freeBusyResponse = GoogleFreeBusyResponse(calendars: [
+            "primary": GoogleFreeBusyCalendar(errors: nil, busy: [])
+        ])
+        let service = GoogleCalendarSyncService(
+            modelContext: context,
+            api: api,
+            oauth: nil,
+            calendar: calendar,
+            timeZone: TimeZone(identifier: "Asia/Tokyo")!,
+            now: { self.date(2026, 8, 22, hour: 15, calendar: calendar) }
+        )
+
+        await service.refreshAvailability(reason: "test")
+
+        let calendars = try context.fetch(FetchDescriptor<GoogleAvailabilityCalendar>())
+        XCTAssertEqual(calendars.first(where: { $0.googleCalendarID == "rot-training" })?.selectedForAvailability, false)
+        XCTAssertEqual(Set(connection.smartSchedulingSelectedCalendarIDsOrDefault), ["primary"])
+        XCTAssertEqual(api.lastFreeBusyRequest?.items.map(\.id), ["primary"])
+    }
+
     func testCandidateEngineRejectsBusyOverlapAndRanksPreferredEvening() throws {
         let calendar = fixedCalendar
         let plan = makePlan(anchor: date(2026, 8, 17, calendar: calendar))
@@ -229,6 +278,7 @@ private final class FakeSmartSchedulingAPI: GoogleCalendarAPIServicing {
     var calendarList: [GoogleCalendarListEntry] = []
     var freeBusyResponse = GoogleFreeBusyResponse(calendars: [:])
     var freeBusyRequestCount = 0
+    var lastFreeBusyRequest: GoogleFreeBusyRequest?
 
     func exchangeCode(_ code: String, verifier: String) async throws -> GoogleCalendarTokenSet { GoogleCalendarTokenSet(accessToken: "access", refreshToken: "refresh", expiresAt: Date().addingTimeInterval(3600), tokenType: "Bearer") }
     func refresh(_ refreshToken: String) async throws -> GoogleCalendarTokenSet { GoogleCalendarTokenSet(accessToken: "access", refreshToken: refreshToken, expiresAt: Date().addingTimeInterval(3600), tokenType: "Bearer") }
@@ -245,6 +295,7 @@ private final class FakeSmartSchedulingAPI: GoogleCalendarAPIServicing {
     func listCalendarList(accessToken: String) async throws -> [GoogleCalendarListEntry] { calendarList }
     func freeBusy(request: GoogleFreeBusyRequest, accessToken: String) async throws -> GoogleFreeBusyResponse {
         freeBusyRequestCount += 1
+        lastFreeBusyRequest = request
         return freeBusyResponse
     }
 }

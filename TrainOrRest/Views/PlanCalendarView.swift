@@ -267,14 +267,16 @@ struct PlanCalendarView: View {
     private func forceSyncIntervals() {
         forceSyncStatus = "Syncing planned workouts to intervals.icu…"
         Task {
-            await pushService.reconcile()
+            await pushService.reconcile(requireEnabled: false)
             await MainActor.run {
                 if let error = pushService.lastPushError {
                     forceSyncStatus = "intervals.icu sync failed: \(error)"
+                } else if let skip = pushService.lastPushSkipReason {
+                    forceSyncStatus = "intervals.icu sync skipped. \(skip)"
                 } else if let lastPushAt = pushService.lastPushAt {
                     forceSyncStatus = "intervals.icu synced \(lastPushAt.formatted(date: .abbreviated, time: .shortened))"
                 } else {
-                    forceSyncStatus = "intervals.icu sync skipped. Enable Watch push in Profile first."
+                    forceSyncStatus = "intervals.icu sync skipped."
                 }
             }
         }

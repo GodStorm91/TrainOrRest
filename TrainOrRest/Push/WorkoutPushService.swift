@@ -18,6 +18,7 @@ final class WorkoutPushService: ObservableObject {
     @Published private(set) var isPushing = false
     @Published private(set) var lastPushAt: Date?
     @Published private(set) var lastPushError: String?
+    @Published private(set) var lastPushSkipReason: String?
 
     private let modelContext: ModelContext
     private let client: IntervalsICUServicing
@@ -59,7 +60,7 @@ final class WorkoutPushService: ObservableObject {
         debounceTask?.cancel()
     }
 
-    func reconcile(today: Date = .now) async {
+    func reconcile(today: Date = .now, requireEnabled: Bool = true) async {
         guard !isPushing else {
             pendingReconcileToday = today
             return
@@ -71,19 +72,28 @@ final class WorkoutPushService: ObservableObject {
         var nextToday: Date? = today
         while let currentToday = nextToday {
             pendingReconcileToday = nil
-            await reconcileOnce(today: currentToday)
+            await reconcileOnce(today: currentToday, requireEnabled: requireEnabled)
             nextToday = pendingReconcileToday
         }
     }
 
-    private func reconcileOnce(today: Date) async {
-        guard userDefaults.bool(forKey: WorkoutPushSettings.enabledKey) else { return }
+    private func reconcileOnce(today: Date, requireEnabled: Bool) async {
+        guard !requireEnabled || userDefaults.bool(forKey: WorkoutPushSettings.enabledKey) else {
+            recordSkip("Watch Push is off.")
+            return
+        }
         let athleteID = userDefaults.string(forKey: WorkoutPushSettings.athleteIDKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !athleteID.isEmpty else { return }
+        guard !athleteID.isEmpty else {
+            recordSkip("Add intervals.icu Athlete ID in Profile first.")
+            return
+        }
         guard let apiKey = try? keychainLoad(KeychainStore.intervalsICUAccount)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
-              !apiKey.isEmpty else { return }
+              !apiKey.isEmpty else {
+            recordSkip("Save intervals.icu API key in Profile first.")
+            return
+        }
 
         do {
             let localEvents = try desiredEvents(today: today)
@@ -148,6 +158,7 @@ final class WorkoutPushService: ObservableObject {
         let date = Date()
         lastPushAt = date
         lastPushError = nil
+        lastPushSkipReason = nil
         userDefaults.set(date, forKey: WorkoutPushSettings.lastPushAtKey)
         userDefaults.removeObject(forKey: WorkoutPushSettings.lastPushErrorKey)
     }
@@ -160,8 +171,14 @@ final class WorkoutPushService: ObservableObject {
             message = "Workout push failed. Try again later."
         }
         lastPushError = message
+        lastPushSkipReason = nil
         userDefaults.set(message, forKey: WorkoutPushSettings.lastPushErrorKey)
         return message
+    }
+
+    private func recordSkip(_ reason: String) {
+        lastPushSkipReason = reason
+        lastPushError = nil
     }
 
     private func dateQuery(_ date: Date) -> String {

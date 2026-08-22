@@ -357,10 +357,14 @@ struct IntervalsConnectionSettingsView: View {
     private func syncNow() {
         isSyncing = true
         Task {
-            await pushService.reconcile()
+            await pushService.reconcile(requireEnabled: false)
             await MainActor.run {
                 isSyncing = false
-                status = pushService.lastPushError == nil ? "Sync complete." : "Could not sync intervals.icu."
+                if let skip = pushService.lastPushSkipReason {
+                    status = "Sync skipped. \(skip)"
+                } else {
+                    status = pushService.lastPushError == nil ? "Sync complete." : "Could not sync intervals.icu."
+                }
             }
         }
     }

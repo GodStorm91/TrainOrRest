@@ -8,7 +8,7 @@ final class WorkoutPushServiceTests: XCTestCase {
     private let today = PlanEngineTestSupport.date(2026, 7, 9)
     private let easyPace = PaceBand(fastSecondsPerKm: 360, slowSecondsPerKm: 390)
 
-    func testDisabledPushIsSilentNoOp() async throws {
+    func testDisabledPushSkipsAutomaticReconcile() async throws {
         let container = try makeContainer()
         let defaults = try makeDefaults()
         let client = MockIntervalsICUService()
@@ -25,9 +25,10 @@ final class WorkoutPushServiceTests: XCTestCase {
         XCTAssertEqual(client.eventsCalls.count, 0)
         XCTAssertNil(service.lastPushAt)
         XCTAssertNil(service.lastPushError)
+        XCTAssertEqual(service.lastPushSkipReason, "Watch Push is off.")
     }
 
-    func testMissingKeyIsSilentNoOp() async throws {
+    func testMissingKeyRecordsSkipReason() async throws {
         let container = try makeContainer()
         let defaults = try makeDefaults()
         defaults.set(true, forKey: WorkoutPushSettings.enabledKey)
@@ -46,6 +47,35 @@ final class WorkoutPushServiceTests: XCTestCase {
         XCTAssertEqual(client.eventsCalls.count, 0)
         XCTAssertNil(service.lastPushAt)
         XCTAssertNil(service.lastPushError)
+        XCTAssertEqual(service.lastPushSkipReason, "Save intervals.icu API key in Profile first.")
+    }
+
+    func testManualReconcileBypassesWatchPushToggleWhenConfigured() async throws {
+        let container = try makeContainer()
+        let defaults = try makeDefaults()
+        defaults.set("i636286", forKey: WorkoutPushSettings.athleteIDKey)
+        let workout = plannedWorkout(uuid: uuid(1))
+        container.mainContext.insert(workout)
+        try container.mainContext.save()
+
+        let client = MockIntervalsICUService()
+        let service = WorkoutPushService(
+            modelContext: container.mainContext,
+            client: client,
+            calendar: calendar,
+            userDefaults: defaults,
+            keychainLoad: { _ in "test-key" }
+        )
+
+        await service.reconcile(today: today, requireEnabled: false)
+
+        XCTAssertEqual(client.eventsCalls, [
+            .init(athleteID: "i636286", oldest: "2026-07-09", newest: "2026-07-16")
+        ])
+        XCTAssertEqual(client.upsertedEvents.map(\.externalID), [WorkoutDSL.externalID(for: uuid(1))])
+        XCTAssertNotNil(service.lastPushAt)
+        XCTAssertNil(service.lastPushError)
+        XCTAssertNil(service.lastPushSkipReason)
     }
 
     func testReconcileListsUpsertsDeletesAndRecordsSuccess() async throws {

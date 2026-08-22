@@ -137,6 +137,7 @@ struct WorkoutDetailView: View {
     private func refreshSmartCandidates() async {
         guard !isFindingSmartTime else { return }
         isFindingSmartTime = true
+        smartSchedulingMessage = nil
         defer { isFindingSmartTime = false }
         smartCandidates = await googleCalendar.refreshedSmartSchedulingCandidates(for: workout)
         if smartCandidates.isEmpty {
