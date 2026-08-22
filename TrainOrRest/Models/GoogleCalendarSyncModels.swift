@@ -445,26 +445,43 @@ final class GoogleCalendarInboundChange {
 @Model
 final class ScheduleChangeOperation {
     @Attribute(.unique) var uuid: UUID
+    var idempotencyKey: String?
     var source: String
     var affectedWorkoutIDs: [UUID]
     var requestedChanges: [String]
     var statusRaw: String
+    var previousScheduleDate: Date?
+    var appliedScheduleDate: Date?
+    var keepTimeFixed: Bool?
+    var googleCalendarState: String?
+    var undoneAt: Date?
     var createdAt: Date
     var completedAt: Date?
     var failureMessage: String?
 
     init(
+        idempotencyKey: String? = nil,
         source: String,
         affectedWorkoutIDs: [UUID],
         requestedChanges: [String],
         status: ScheduleChangeOperationStatus,
+        previousScheduleDate: Date? = nil,
+        appliedScheduleDate: Date? = nil,
+        keepTimeFixed: Bool? = nil,
+        googleCalendarState: String? = nil,
         now: Date = .now
     ) {
         self.uuid = UUID()
+        self.idempotencyKey = idempotencyKey
         self.source = source
         self.affectedWorkoutIDs = affectedWorkoutIDs
         self.requestedChanges = requestedChanges
         self.statusRaw = status.rawValue
+        self.previousScheduleDate = previousScheduleDate
+        self.appliedScheduleDate = appliedScheduleDate
+        self.keepTimeFixed = keepTimeFixed
+        self.googleCalendarState = googleCalendarState
+        self.undoneAt = nil
         self.createdAt = now
         self.completedAt = status == .completed || status == .failed ? now : nil
         self.failureMessage = nil

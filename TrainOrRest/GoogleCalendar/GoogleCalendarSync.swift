@@ -346,6 +346,22 @@ enum GoogleCalendarAPIError: Error {
     case invalidResponse
 }
 
+enum SmartSchedulingApplyStatus: Equatable {
+    case completed
+    case queued
+    case failed(String)
+    case stale(CustomTimeValidation)
+}
+
+struct SmartSchedulingApplyResult: Equatable {
+    var status: SmartSchedulingApplyStatus
+    var operationID: UUID?
+    var previousDate: Date?
+    var scheduledStart: Date?
+    var scheduledEnd: Date?
+    var googleCalendarMessage: String
+}
+
 protocol GoogleCalendarAPIServicing {
     func exchangeCode(_ code: String, verifier: String) async throws -> GoogleCalendarTokenSet
     func refresh(_ refreshToken: String) async throws -> GoogleCalendarTokenSet
@@ -1355,55 +1371,158 @@ final class GoogleCalendarSyncService: ObservableObject {
         }
     }
 
-    func smartSchedulingCandidates(for workout: PlannedWorkout, limit: Int = 3) -> [SchedulingCandidate] {
-        let connection = connection()
-        guard connection.smartSchedulingEnabled,
-              let plan = (try? modelContext.fetch(FetchDescriptor<TrainingPlan>()))?.first,
-              let goal = (try? modelContext.fetch(FetchDescriptor<Goal>()))?.first?.spec else { return [] }
-        let workouts = (try? modelContext.fetch(FetchDescriptor<PlannedWorkout>(sortBy: [SortDescriptor(\.date)]))) ?? []
-        let candidateDates = candidateDates(for: workout, plan: plan)
-        let request = SchedulingRequest(
-            workout: workout,
-            candidateDates: candidateDates,
-            currentTrainingWeek: workout.weekIndex,
-            surroundingWorkouts: workouts,
-            userPreferences: smartPreferences(connection),
-            availability: availabilityDays(connectionID: connection.uuid),
-            timezone: timeZone,
-            plan: plan,
-            goal: goal
-        )
+    func smartSchedulingCandidates(for workout: PlannedWorkout, limit: Int = 8, sameDayOnly: Bool = false, allowLockedWorkoutUpdate: Bool = false) -> [SchedulingCandidate] {
+        let candidateDates = sameDayOnly ? [calendar.startOfDay(for: workout.date)] : nil
+        guard let request = smartSchedulingRequest(for: workout, candidateDates: candidateDates, allowLockedWorkoutUpdate: allowLockedWorkoutUpdate) else { return [] }
         logTelemetry("candidate_search_started")
         let candidates = SmartSchedulingEngine(calendar: calendar).candidates(for: request, limit: limit)
         logTelemetry(candidates.isEmpty ? "no_candidate_found" : "candidate_search_completed", ["count": "\(candidates.count)"])
         return candidates
     }
 
-    func refreshedSmartSchedulingCandidates(for workout: PlannedWorkout, limit: Int = 3) async -> [SchedulingCandidate] {
+    func refreshedSmartSchedulingCandidates(for workout: PlannedWorkout, limit: Int = 8, sameDayOnly: Bool = false, allowLockedWorkoutUpdate: Bool = false) async -> [SchedulingCandidate] {
         await refreshAvailability(reason: "candidateSearch")
-        return smartSchedulingCandidates(for: workout, limit: limit)
+        return smartSchedulingCandidates(for: workout, limit: limit, sameDayOnly: sameDayOnly, allowLockedWorkoutUpdate: allowLockedWorkoutUpdate)
     }
 
     func acceptSmartSchedulingCandidate(_ candidate: SchedulingCandidate) {
-        guard let workout = workout(id: candidate.workoutID) else { return }
-        let operation = ScheduleChangeOperation(
+        Task {
+            _ = await applySmartSchedulingTime(
+                workoutID: candidate.workoutID,
+                start: candidate.startTime,
+                keepTimeFixed: false,
+                expectedWorkoutVersion: candidate.workoutVersion,
+                candidateAvailabilityTimestamp: candidate.availabilitySourceTimestamp,
+                idempotencyKey: candidate.id
+            )
+        }
+    }
+
+    func validateSmartSchedulingTime(workoutID: UUID, start: Date, alternativesLimit: Int = 2) -> CustomTimeValidation? {
+        guard let workout = workout(id: workoutID),
+              let request = smartSchedulingRequest(for: workout, candidateDates: [calendar.startOfDay(for: start)], allowLockedWorkoutUpdate: true) else {
+            return nil
+        }
+        return SmartSchedulingEngine(calendar: calendar).validateCustomTime(
+            start: start,
+            for: request,
+            now: now(),
+            alternativesLimit: alternativesLimit
+        )
+    }
+
+    func applySmartSchedulingTime(
+        workoutID: UUID,
+        start: Date,
+        keepTimeFixed: Bool,
+        expectedWorkoutVersion: String?,
+        candidateAvailabilityTimestamp: Date?,
+        idempotencyKey: String
+    ) async -> SmartSchedulingApplyResult {
+        if let existing = scheduleOperation(idempotencyKey: idempotencyKey),
+           existing.status == .completed {
+            return SmartSchedulingApplyResult(
+                status: .completed,
+                operationID: existing.uuid,
+                previousDate: existing.previousScheduleDate,
+                scheduledStart: existing.appliedScheduleDate,
+                scheduledEnd: existing.appliedScheduleDate.flatMap { scheduledEnd(for: workoutID, start: $0) },
+                googleCalendarMessage: existing.googleCalendarState ?? "Google Calendar update queued"
+            )
+        }
+        guard let workout = workout(id: workoutID) else {
+            return SmartSchedulingApplyResult(status: .failed("Workout no longer exists."), operationID: nil, previousDate: nil, scheduledStart: nil, scheduledEnd: nil, googleCalendarMessage: "Google Calendar was not changed")
+        }
+        if let expectedWorkoutVersion, expectedWorkoutVersion != smartWorkoutVersion(for: workout) {
+            let validation = validateSmartSchedulingTime(workoutID: workoutID, start: start) ?? staleValidation(start: start, workout: workout)
+            return SmartSchedulingApplyResult(status: .stale(validation), operationID: nil, previousDate: nil, scheduledStart: nil, scheduledEnd: validation.calculatedEnd, googleCalendarMessage: "Google Calendar was not changed")
+        }
+        let connection = connection()
+        if let candidateAvailabilityTimestamp,
+           let refreshed = connection.smartSchedulingLastAvailabilityRefreshAt,
+           candidateAvailabilityTimestamp < refreshed {
+            let validation = validateSmartSchedulingTime(workoutID: workoutID, start: start) ?? staleValidation(start: start, workout: workout)
+            guard validation.allowsScheduling else {
+                return SmartSchedulingApplyResult(status: .stale(validation), operationID: nil, previousDate: nil, scheduledStart: nil, scheduledEnd: validation.calculatedEnd, googleCalendarMessage: "Google Calendar was not changed")
+            }
+        }
+        guard let validation = validateSmartSchedulingTime(workoutID: workoutID, start: start), validation.allowsScheduling else {
+            let failed = validateSmartSchedulingTime(workoutID: workoutID, start: start) ?? staleValidation(start: start, workout: workout)
+            return SmartSchedulingApplyResult(status: .stale(failed), operationID: nil, previousDate: nil, scheduledStart: nil, scheduledEnd: failed.calculatedEnd, googleCalendarMessage: "Google Calendar was not changed")
+        }
+
+        let previous = workout.date
+        let operation = scheduleOperation(idempotencyKey: idempotencyKey) ?? ScheduleChangeOperation(
+            idempotencyKey: idempotencyKey,
             source: "smartScheduling",
             affectedWorkoutIDs: [workout.uuid],
-            requestedChanges: ["\(workout.uuid.uuidString): \(workout.date.ISO8601Format()) -> \(candidate.startTime.ISO8601Format())"],
+            requestedChanges: ["\(workout.uuid.uuidString): \(previous.ISO8601Format()) -> \(start.ISO8601Format())"],
             status: .applying,
+            previousScheduleDate: previous,
+            appliedScheduleDate: start,
+            keepTimeFixed: keepTimeFixed,
+            googleCalendarState: isOffline ? "Google Calendar will update when online" : "Google Calendar update queued",
             now: now()
         )
-        modelContext.insert(operation)
-        workout.date = candidate.startTime
+        if scheduleOperation(idempotencyKey: idempotencyKey) == nil {
+            modelContext.insert(operation)
+        }
+        workout.date = start
         workout.manuallyOverridden = true
+        workout.isScheduleLocked = keepTimeFixed
         workout.scheduleUpdatedFrom = "smartScheduling"
         workout.scheduleUpdatedAt = now()
         operation.status = .completed
+        operation.appliedScheduleDate = start
+        operation.keepTimeFixed = keepTimeFixed
+        operation.googleCalendarState = isOffline ? "Google Calendar will update when online" : "Google Calendar update queued"
         markOutboundPending(entityID: workout.uuid)
         try? modelContext.save()
-        logTelemetry("schedule_recommendation_accepted")
+        logTelemetry("schedule_time_applied")
         NotificationCenter.default.post(name: .planDidChange, object: nil)
         scheduleDebouncedReconcile()
+        return SmartSchedulingApplyResult(
+            status: isOffline ? .queued : .completed,
+            operationID: operation.uuid,
+            previousDate: previous,
+            scheduledStart: start,
+            scheduledEnd: validation.calculatedEnd,
+            googleCalendarMessage: operation.googleCalendarState ?? "Google Calendar update queued"
+        )
+    }
+
+    func undoSmartSchedulingOperation(_ operationID: UUID) -> SmartSchedulingApplyResult {
+        guard let operation = ((try? modelContext.fetch(FetchDescriptor<ScheduleChangeOperation>())) ?? []).first(where: { $0.uuid == operationID }),
+              operation.source == "smartScheduling",
+              operation.status == .completed,
+              operation.undoneAt == nil,
+              let workoutID = operation.affectedWorkoutIDs.first,
+              let workout = workout(id: workoutID),
+              let previous = operation.previousScheduleDate else {
+            return SmartSchedulingApplyResult(status: .failed("Undo is no longer available."), operationID: operationID, previousDate: nil, scheduledStart: nil, scheduledEnd: nil, googleCalendarMessage: "Google Calendar was not changed")
+        }
+        if let applied = operation.appliedScheduleDate, abs(workout.date.timeIntervalSince(applied)) > 1 {
+            return SmartSchedulingApplyResult(status: .failed("This workout changed again, so undo is no longer safe."), operationID: operationID, previousDate: operation.previousScheduleDate, scheduledStart: workout.date, scheduledEnd: scheduledEnd(for: workoutID, start: workout.date), googleCalendarMessage: "Google Calendar was not changed")
+        }
+        workout.date = previous
+        workout.manuallyOverridden = true
+        workout.isScheduleLocked = false
+        workout.scheduleUpdatedFrom = "smartSchedulingUndo"
+        workout.scheduleUpdatedAt = now()
+        operation.undoneAt = now()
+        markOutboundPending(entityID: workout.uuid)
+        try? modelContext.save()
+        NotificationCenter.default.post(name: .planDidChange, object: nil)
+        scheduleDebouncedReconcile()
+        logTelemetry("schedule_time_undone")
+        return SmartSchedulingApplyResult(
+            status: isOffline ? .queued : .completed,
+            operationID: operation.uuid,
+            previousDate: operation.appliedScheduleDate,
+            scheduledStart: previous,
+            scheduledEnd: scheduledEnd(for: workoutID, start: previous),
+            googleCalendarMessage: isOffline ? "Google Calendar will update when online" : "Google Calendar update queued"
+        )
     }
 
     func acceptSmartSchedulingCandidate(_ candidate: SchedulingCandidate, resolvingReview changeID: UUID) {
@@ -1666,6 +1785,63 @@ final class GoogleCalendarSyncService: ObservableObject {
             bufferBeforeMinutes: connection.smartSchedulingBufferBeforeOrDefault,
             bufferAfterMinutes: connection.smartSchedulingBufferAfterOrDefault
         )
+    }
+
+    private func smartSchedulingRequest(for workout: PlannedWorkout, candidateDates: [Date]? = nil, allowLockedWorkoutUpdate: Bool = false) -> SchedulingRequest? {
+        let connection = connection()
+        guard connection.smartSchedulingEnabled,
+              let plan = (try? modelContext.fetch(FetchDescriptor<TrainingPlan>()))?.first,
+              let goal = (try? modelContext.fetch(FetchDescriptor<Goal>()))?.first?.spec else { return nil }
+        let workouts = (try? modelContext.fetch(FetchDescriptor<PlannedWorkout>(sortBy: [SortDescriptor(\.date)]))) ?? []
+        return SchedulingRequest(
+            workout: workout,
+            candidateDates: candidateDates ?? self.candidateDates(for: workout, plan: plan),
+            currentTrainingWeek: workout.weekIndex,
+            surroundingWorkouts: workouts,
+            userPreferences: smartPreferences(connection),
+            availability: availabilityDays(connectionID: connection.uuid),
+            timezone: timeZone,
+            plan: plan,
+            goal: goal,
+            allowsLockedWorkoutUpdate: allowLockedWorkoutUpdate
+        )
+    }
+
+    private func smartWorkoutVersion(for workout: PlannedWorkout) -> String {
+        [
+            workout.uuid.uuidString,
+            workout.date.ISO8601Format(),
+            workout.kindRaw,
+            String(format: "%.3f", workout.distanceKm),
+            workout.statusRaw,
+            workout.scheduleUpdatedAt?.ISO8601Format() ?? "none",
+            workout.isScheduleLocked ? "locked" : "unlocked"
+        ].joined(separator: "|")
+    }
+
+    private func scheduleOperation(idempotencyKey: String) -> ScheduleChangeOperation? {
+        ((try? modelContext.fetch(FetchDescriptor<ScheduleChangeOperation>())) ?? [])
+            .first { $0.idempotencyKey == idempotencyKey }
+    }
+
+    private func staleValidation(start: Date, workout: PlannedWorkout) -> CustomTimeValidation {
+        let end = scheduledEnd(for: workout.uuid, start: start) ?? start
+        return CustomTimeValidation(
+            status: .stale,
+            requestedStart: start,
+            calculatedEnd: end,
+            conflicts: ["This option needs to be checked again."],
+            warnings: [],
+            reasons: [],
+            nearestAlternatives: smartSchedulingCandidates(for: workout, limit: 2),
+            availabilitySourceTimestamp: connection().smartSchedulingLastAvailabilityRefreshAt
+        )
+    }
+
+    private func scheduledEnd(for workoutID: UUID, start: Date) -> Date? {
+        guard let workout = workout(id: workoutID) else { return nil }
+        let duration = SmartSchedulingEngine(calendar: calendar).requiredWorkoutDurationSeconds(for: workout)
+        return calendar.date(byAdding: .second, value: Int(duration), to: start)
     }
 
     private func candidateDates(for workout: PlannedWorkout, plan: TrainingPlan) -> [Date] {

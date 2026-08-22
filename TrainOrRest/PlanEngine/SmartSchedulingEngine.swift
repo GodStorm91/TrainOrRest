@@ -18,19 +18,53 @@ struct SchedulingRequest {
     var timezone: TimeZone
     var plan: TrainingPlan
     var goal: GoalSpec
+    var allowsLockedWorkoutUpdate = false
+}
+
+enum SchedulingValidationStatus: String, Codable, CaseIterable, Equatable {
+    case valid
+    case validWithWarning
+    case calendarConflict
+    case trainingConflict
+    case outsideUserPreference
+    case invalid
+    case stale
+
+    var allowsScheduling: Bool {
+        self == .valid || self == .validWithWarning || self == .outsideUserPreference
+    }
 }
 
 struct SchedulingCandidate: Identifiable, Equatable {
-    var id: String { "\(workoutID.uuidString)-\(startTime.timeIntervalSince1970)" }
+    var id: String { "\(workoutID.uuidString)-\(Int(startTime.timeIntervalSince1970))-\(timezone.identifier)" }
     var workoutID: UUID
+    var workoutVersion: String
     var date: Date
     var startTime: Date
     var endTime: Date
+    var timezone: TimeZone
     var score: Int
+    var isRecommended: Bool
+    var validationStatus: SchedulingValidationStatus
     var reasons: [String]
+    var warnings: [String]
     var conflicts: [String]
+    var availabilitySourceTimestamp: Date?
 
-    var isValid: Bool { conflicts.isEmpty }
+    var isValid: Bool { validationStatus.allowsScheduling && conflicts.isEmpty }
+}
+
+struct CustomTimeValidation: Equatable {
+    var status: SchedulingValidationStatus
+    var requestedStart: Date
+    var calculatedEnd: Date
+    var conflicts: [String]
+    var warnings: [String]
+    var reasons: [String]
+    var nearestAlternatives: [SchedulingCandidate]
+    var availabilitySourceTimestamp: Date?
+
+    var allowsScheduling: Bool { status.allowsScheduling && conflicts.isEmpty }
 }
 
 struct WeekScheduleFit: Equatable {
@@ -57,7 +91,7 @@ struct SmartSchedulingEngine {
     }
 
     func candidates(for request: SchedulingRequest, limit: Int = 3) -> [SchedulingCandidate] {
-        guard !request.workout.isScheduleLocked else { return [] }
+        guard !request.workout.isScheduleLocked || request.allowsLockedWorkoutUpdate else { return [] }
         let duration = requiredWorkoutDurationSeconds(for: request.workout)
         let requiredSeconds = duration
             + Double(request.userPreferences.bufferBeforeMinutes * 60)
@@ -79,29 +113,161 @@ struct SmartSchedulingEngine {
                 continue
             }
             for window in availability.availableWindows where window.durationMinutes * 60 >= Int(requiredSeconds) {
-                guard let start = bufferedStart(in: window, preferences: request.userPreferences, durationSeconds: duration),
-                      let end = calendar.date(byAdding: .second, value: Int(duration), to: start) else { continue }
-                let candidate = candidate(
+                for start in candidateStarts(in: window, preferences: request.userPreferences, durationSeconds: duration) {
+                    guard let end = calendar.date(byAdding: .second, value: Int(duration), to: start) else { continue }
+                    let candidate = candidate(
                     workout: request.workout,
                     day: day,
                     start: start,
                     end: end,
                     availabilityWindow: window,
+                    availabilitySourceTimestamp: availability.lastRefreshedAt,
                     preferences: request.userPreferences,
-                    validation: validationResult
-                )
-                if candidate.isValid {
-                    output.append(candidate)
+                    validation: validationResult,
+                    request: request
+                    )
+                    if candidate.isValid {
+                        output.append(candidate)
+                    }
                 }
             }
         }
-        return output
+        var sorted = output
             .sorted { lhs, rhs in
                 if lhs.score != rhs.score { return lhs.score > rhs.score }
                 return lhs.startTime < rhs.startTime
             }
             .prefix(limit)
             .map { $0 }
+        if !sorted.isEmpty {
+            sorted[0].isRecommended = true
+        }
+        return sorted
+    }
+
+    func validateCustomTime(start: Date, for request: SchedulingRequest, now: Date = .now, alternativesLimit: Int = 2) -> CustomTimeValidation {
+        let duration = requiredWorkoutDurationSeconds(for: request.workout)
+        let end = calendar.date(byAdding: .second, value: Int(duration), to: start) ?? start
+        let alternatives = candidates(for: request, limit: max(alternativesLimit, 1))
+        guard !request.workout.isScheduleLocked || request.allowsLockedWorkoutUpdate else {
+            return customValidation(
+                status: .invalid,
+                start: start,
+                end: end,
+                conflicts: ["This workout is fixed."],
+                warnings: [],
+                reasons: [],
+                alternatives: alternatives,
+                availabilitySourceTimestamp: nil
+            )
+        }
+        guard start > now else {
+            return customValidation(
+                status: .invalid,
+                start: start,
+                end: end,
+                conflicts: ["This time has already passed."],
+                warnings: [],
+                reasons: [],
+                alternatives: alternatives,
+                availabilitySourceTimestamp: nil
+            )
+        }
+        guard let availability = request.availability.first(where: { calendar.isDate($0.date, inSameDayAs: start) }) else {
+            return customValidation(
+                status: .stale,
+                start: start,
+                end: end,
+                conflicts: ["Calendar availability needs to be refreshed."],
+                warnings: [],
+                reasons: [],
+                alternatives: alternatives,
+                availabilitySourceTimestamp: nil
+            )
+        }
+        let validationResult = validation.validate(
+            workout: request.workout,
+            targetDate: start,
+            allWorkouts: request.surroundingWorkouts,
+            plan: request.plan,
+            goal: request.goal
+        )
+        guard validationResult.result == .safeAutomatic || validationResult.result == .sameDayTimeOnly else {
+            return customValidation(
+                status: .trainingConflict,
+                start: start,
+                end: end,
+                conflicts: validationResult.reasons.isEmpty ? ["This time is not safe for the current plan."] : validationResult.reasons,
+                warnings: [],
+                reasons: [],
+                alternatives: alternatives,
+                availabilitySourceTimestamp: availability.lastRefreshedAt
+            )
+        }
+
+        let bufferStart = start.addingTimeInterval(Double(-request.userPreferences.bufferBeforeMinutes * 60))
+        let bufferEnd = end.addingTimeInterval(Double(request.userPreferences.bufferAfterMinutes * 60))
+        let conflictingBusy = availability.busyWindows.first { bufferStart < $0.end && bufferEnd > $0.start }
+        if let conflict = conflictingBusy {
+            return customValidation(
+                status: .calendarConflict,
+                start: start,
+                end: end,
+                conflicts: ["Your calendar is busy from \(timeText(conflict.start)) to \(timeText(conflict.end))."],
+                warnings: [],
+                reasons: [],
+                alternatives: nearestAlternatives(to: start, from: alternatives, limit: alternativesLimit),
+                availabilitySourceTimestamp: availability.lastRefreshedAt
+            )
+        }
+
+        let startMinute = minuteOfDay(start)
+        let endMinute = minuteOfDay(end)
+        if startMinute < request.userPreferences.earliestStartMinutes {
+            return customValidation(
+                status: .invalid,
+                start: start,
+                end: end,
+                conflicts: ["This starts before your earliest allowed start."],
+                warnings: [],
+                reasons: [],
+                alternatives: nearestAlternatives(to: start, from: alternatives, limit: alternativesLimit),
+                availabilitySourceTimestamp: availability.lastRefreshedAt
+            )
+        }
+        if endMinute > request.userPreferences.latestFinishMinutes {
+            return customValidation(
+                status: .invalid,
+                start: start,
+                end: end,
+                conflicts: ["This finishes after your latest allowed finish."],
+                warnings: [],
+                reasons: [],
+                alternatives: nearestAlternatives(to: start, from: alternatives, limit: alternativesLimit),
+                availabilitySourceTimestamp: availability.lastRefreshedAt
+            )
+        }
+
+        var warnings: [String] = []
+        var status: SchedulingValidationStatus = .valid
+        if !matchesPreferredTime(start, preferences: request.userPreferences), request.userPreferences.preferredTime != .none {
+            status = .outsideUserPreference
+            warnings.append("This is outside your preferred \(request.userPreferences.preferredTime.title.lowercased()) window.")
+        }
+        return customValidation(
+            status: status,
+            start: start,
+            end: end,
+            conflicts: [],
+            warnings: warnings,
+            reasons: [
+                "No calendar conflicts",
+                "Required duration fits",
+                "Recovery spacing is safe"
+            ],
+            alternatives: nearestAlternatives(to: start, from: alternatives, limit: alternativesLimit),
+            availabilitySourceTimestamp: availability.lastRefreshedAt
+        )
     }
 
     func weekFit(workouts: [PlannedWorkout], availability: [DayAvailability], requestFactory: (PlannedWorkout) -> SchedulingRequest?) -> WeekScheduleFit {
@@ -151,19 +317,29 @@ struct SmartSchedulingEngine {
         }
     }
 
-    private func bufferedStart(in window: AvailabilityWindow, preferences: SmartSchedulingPreferences, durationSeconds: TimeInterval) -> Date? {
+    private func candidateStarts(in window: AvailabilityWindow, preferences: SmartSchedulingPreferences, durationSeconds: TimeInterval) -> [Date] {
         let earliestLimit = time(on: window.start, minutesFromMidnight: preferences.earliestStartMinutes)
         let latestFinish = time(on: window.start, minutesFromMidnight: preferences.latestFinishMinutes)
         let earliest = maxDate(window.start.addingTimeInterval(Double(preferences.bufferBeforeMinutes * 60)), earliestLimit)
         let latestWorkoutEnd = minDate(window.end.addingTimeInterval(Double(-preferences.bufferAfterMinutes * 60)), latestFinish)
-        guard earliest.addingTimeInterval(durationSeconds) <= latestWorkoutEnd else { return nil }
+        guard earliest.addingTimeInterval(durationSeconds) <= latestWorkoutEnd else { return [] }
+        let latestStart = latestWorkoutEnd.addingTimeInterval(-durationSeconds)
+        var starts: Set<Date> = [alignToQuarterHour(earliest)]
         if let preferred = preferredWindow(on: window.start, preferences: preferences) {
             let preferredStart = maxDate(earliest, preferred.start)
             if preferredStart.addingTimeInterval(durationSeconds) <= minDate(latestWorkoutEnd, preferred.end) {
-                return preferredStart
+                starts.insert(alignToQuarterHour(preferredStart))
             }
         }
-        return earliest
+        var cursor = alignToQuarterHour(earliest)
+        while cursor <= latestStart {
+            starts.insert(cursor)
+            guard let next = calendar.date(byAdding: .minute, value: 30, to: cursor), next > cursor else { break }
+            cursor = next
+        }
+        return starts
+            .filter { $0 >= earliest && $0 <= latestStart }
+            .sorted()
     }
 
     private func candidate(
@@ -172,16 +348,20 @@ struct SmartSchedulingEngine {
         start: Date,
         end: Date,
         availabilityWindow: AvailabilityWindow,
+        availabilitySourceTimestamp: Date?,
         preferences: SmartSchedulingPreferences,
-        validation: ScheduleMoveValidation
+        validation: ScheduleMoveValidation,
+        request: SchedulingRequest
     ) -> SchedulingCandidate {
         var score = 100
-        var reasons = ["Available \(availabilityWindow.durationMinutes)-minute window"]
+        var reasons = ["No calendar conflicts"]
+        var warnings: [String] = []
         var conflicts: [String] = []
         if validation.result == .safeAutomatic {
             reasons.append("Keeps the workout inside its training week")
         }
         if validation.result == .sameDayTimeOnly {
+            score += 18
             reasons.append("Keeps the planned workout date")
         }
         if matchesPreferredTime(start, preferences: preferences) {
@@ -189,7 +369,7 @@ struct SmartSchedulingEngine {
             reasons.append("Matches your preferred \(preferences.preferredTime.title.lowercased()) schedule")
         } else if preferences.preferredTime != .none {
             score -= 10
-            reasons.append("Outside your preferred time")
+            warnings.append("Outside your preferred \(preferences.preferredTime.title.lowercased()) window.")
         }
         let spare = availabilityWindow.durationMinutes - Int(end.timeIntervalSince(start) / 60)
         if spare >= preferences.bufferBeforeMinutes + preferences.bufferAfterMinutes + 20 {
@@ -204,13 +384,47 @@ struct SmartSchedulingEngine {
         }
         return SchedulingCandidate(
             workoutID: workout.uuid,
+            workoutVersion: workoutVersion(for: workout),
             date: day,
             startTime: start,
             endTime: end,
+            timezone: request.timezone,
             score: max(0, min(150, score)),
+            isRecommended: false,
+            validationStatus: warnings.isEmpty ? .valid : .outsideUserPreference,
             reasons: Array(reasons.prefix(4)),
-            conflicts: conflicts
+            warnings: warnings,
+            conflicts: conflicts,
+            availabilitySourceTimestamp: availabilitySourceTimestamp
         )
+    }
+
+    private func customValidation(
+        status: SchedulingValidationStatus,
+        start: Date,
+        end: Date,
+        conflicts: [String],
+        warnings: [String],
+        reasons: [String],
+        alternatives: [SchedulingCandidate],
+        availabilitySourceTimestamp: Date?
+    ) -> CustomTimeValidation {
+        CustomTimeValidation(
+            status: status,
+            requestedStart: start,
+            calculatedEnd: end,
+            conflicts: conflicts,
+            warnings: warnings,
+            reasons: reasons,
+            nearestAlternatives: alternatives,
+            availabilitySourceTimestamp: availabilitySourceTimestamp
+        )
+    }
+
+    private func nearestAlternatives(to date: Date, from candidates: [SchedulingCandidate], limit: Int) -> [SchedulingCandidate] {
+        Array(candidates.sorted {
+            abs($0.startTime.timeIntervalSince(date)) < abs($1.startTime.timeIntervalSince(date))
+        }.prefix(limit))
     }
 
     private func overlapsBusy(workout: PlannedWorkout, availability: [DayAvailability]) -> Bool {
@@ -255,6 +469,37 @@ struct SmartSchedulingEngine {
     private func time(on date: Date, minutesFromMidnight: Int) -> Date {
         let day = calendar.startOfDay(for: date)
         return calendar.date(byAdding: .minute, value: minutesFromMidnight, to: day) ?? day
+    }
+
+    private func timeText(_ date: Date) -> String {
+        date.formatted(date: .omitted, time: .shortened)
+    }
+
+    private func minuteOfDay(_ date: Date) -> Int {
+        let components = calendar.dateComponents([.hour, .minute], from: date)
+        return (components.hour ?? 0) * 60 + (components.minute ?? 0)
+    }
+
+    private func alignToQuarterHour(_ date: Date) -> Date {
+        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        let minute = components.minute ?? 0
+        let rounded = Int(ceil(Double(minute) / 15.0)) * 15
+        var aligned = components
+        aligned.minute = rounded % 60
+        aligned.hour = (components.hour ?? 0) + rounded / 60
+        return calendar.date(from: aligned) ?? date
+    }
+
+    private func workoutVersion(for workout: PlannedWorkout) -> String {
+        [
+            workout.uuid.uuidString,
+            workout.date.ISO8601Format(),
+            workout.kindRaw,
+            String(format: "%.3f", workout.distanceKm),
+            workout.statusRaw,
+            workout.scheduleUpdatedAt?.ISO8601Format() ?? "none",
+            workout.isScheduleLocked ? "locked" : "unlocked"
+        ].joined(separator: "|")
     }
 
     private func maxDate(_ lhs: Date, _ rhs: Date) -> Date { lhs > rhs ? lhs : rhs }

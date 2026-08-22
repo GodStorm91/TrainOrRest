@@ -173,6 +173,253 @@ final class SmartSchedulingTests: XCTestCase {
         XCTAssertTrue(SmartSchedulingEngine(calendar: calendar).candidates(for: request).isEmpty)
     }
 
+    func testExplicitTimeSelectionCanValidateLockedWorkout() throws {
+        let calendar = fixedCalendar
+        let plan = makePlan(anchor: date(2026, 8, 17, calendar: calendar))
+        let workout = makeWorkout(on: date(2026, 8, 23, calendar: calendar), plan: plan)
+        workout.isScheduleLocked = true
+        let availability = DayAvailability(
+            connectionID: UUID(),
+            date: date(2026, 8, 23, calendar: calendar),
+            timezoneIdentifier: "Asia/Tokyo",
+            busyWindows: [],
+            availableWindows: [
+                AvailabilityWindow(start: date(2026, 8, 23, hour: 5, calendar: calendar), end: date(2026, 8, 23, hour: 12, calendar: calendar), state: .available)
+            ],
+            lastRefreshedAt: date(2026, 8, 22, hour: 20, calendar: calendar)
+        )
+        let request = SchedulingRequest(
+            workout: workout,
+            candidateDates: [workout.date],
+            currentTrainingWeek: 0,
+            surroundingWorkouts: [workout],
+            userPreferences: SmartSchedulingPreferences(preferredTime: .none, earliestStartMinutes: 5 * 60, latestFinishMinutes: 21 * 60, bufferBeforeMinutes: 0, bufferAfterMinutes: 10),
+            availability: [availability],
+            timezone: TimeZone(identifier: "Asia/Tokyo")!,
+            plan: plan,
+            goal: try XCTUnwrap(makeGoal(anchor: date(2026, 8, 17, calendar: calendar)).spec),
+            allowsLockedWorkoutUpdate: true
+        )
+
+        let validation = SmartSchedulingEngine(calendar: calendar).validateCustomTime(
+            start: date(2026, 8, 23, hour: 6, calendar: calendar),
+            for: request,
+            now: date(2026, 8, 22, hour: 20, calendar: calendar)
+        )
+
+        XCTAssertTrue(validation.allowsScheduling)
+    }
+
+    func testCustomTimeOutsidePreferredWindowRemainsSchedulableWithWarning() throws {
+        let calendar = fixedCalendar
+        let plan = makePlan(anchor: date(2026, 8, 17, calendar: calendar))
+        let goal = try XCTUnwrap(makeGoal(anchor: date(2026, 8, 17, calendar: calendar)).spec)
+        let workout = makeWorkout(on: date(2026, 8, 23, calendar: calendar), plan: plan)
+        let availability = DayAvailability(
+            connectionID: UUID(),
+            date: date(2026, 8, 23, calendar: calendar),
+            timezoneIdentifier: "Asia/Tokyo",
+            busyWindows: [],
+            availableWindows: [
+                AvailabilityWindow(start: date(2026, 8, 23, hour: 5, calendar: calendar), end: date(2026, 8, 23, hour: 12, calendar: calendar), state: .available)
+            ],
+            lastRefreshedAt: date(2026, 8, 22, hour: 20, calendar: calendar)
+        )
+        let request = SchedulingRequest(
+            workout: workout,
+            candidateDates: [workout.date],
+            currentTrainingWeek: 0,
+            surroundingWorkouts: [workout],
+            userPreferences: SmartSchedulingPreferences(preferredTime: .morning, earliestStartMinutes: 5 * 60, latestFinishMinutes: 21 * 60, bufferBeforeMinutes: 0, bufferAfterMinutes: 10),
+            availability: [availability],
+            timezone: TimeZone(identifier: "Asia/Tokyo")!,
+            plan: plan,
+            goal: goal
+        )
+
+        let validation = SmartSchedulingEngine(calendar: calendar).validateCustomTime(
+            start: date(2026, 8, 23, hour: 6, calendar: calendar),
+            for: request,
+            now: date(2026, 8, 22, hour: 20, calendar: calendar)
+        )
+
+        XCTAssertEqual(validation.status, .outsideUserPreference)
+        XCTAssertTrue(validation.allowsScheduling)
+        XCTAssertTrue(validation.warnings.contains { $0.contains("outside your preferred morning") })
+        XCTAssertTrue(validation.conflicts.isEmpty)
+    }
+
+    func testCustomTimeCalendarConflictBlocksWithoutEventDetails() throws {
+        let calendar = fixedCalendar
+        let plan = makePlan(anchor: date(2026, 8, 17, calendar: calendar))
+        let goal = try XCTUnwrap(makeGoal(anchor: date(2026, 8, 17, calendar: calendar)).spec)
+        let workout = makeWorkout(on: date(2026, 8, 23, calendar: calendar), plan: plan)
+        let availability = DayAvailability(
+            connectionID: UUID(),
+            date: date(2026, 8, 23, calendar: calendar),
+            timezoneIdentifier: "Asia/Tokyo",
+            busyWindows: [
+                AvailabilityWindow(start: date(2026, 8, 23, hour: 6, minute: 30, calendar: calendar), end: date(2026, 8, 23, hour: 7, calendar: calendar), state: .busy)
+            ],
+            availableWindows: [
+                AvailabilityWindow(start: date(2026, 8, 23, hour: 5, calendar: calendar), end: date(2026, 8, 23, hour: 6, minute: 20, calendar: calendar), state: .available),
+                AvailabilityWindow(start: date(2026, 8, 23, hour: 7, minute: 10, calendar: calendar), end: date(2026, 8, 23, hour: 10, calendar: calendar), state: .available)
+            ],
+            lastRefreshedAt: date(2026, 8, 22, hour: 20, calendar: calendar)
+        )
+        let request = SchedulingRequest(
+            workout: workout,
+            candidateDates: [workout.date],
+            currentTrainingWeek: 0,
+            surroundingWorkouts: [workout],
+            userPreferences: SmartSchedulingPreferences(preferredTime: .none, earliestStartMinutes: 5 * 60, latestFinishMinutes: 21 * 60, bufferBeforeMinutes: 0, bufferAfterMinutes: 10),
+            availability: [availability],
+            timezone: TimeZone(identifier: "Asia/Tokyo")!,
+            plan: plan,
+            goal: goal
+        )
+
+        let validation = SmartSchedulingEngine(calendar: calendar).validateCustomTime(
+            start: date(2026, 8, 23, hour: 6, calendar: calendar),
+            for: request,
+            now: date(2026, 8, 22, hour: 20, calendar: calendar)
+        )
+
+        XCTAssertEqual(validation.status, .calendarConflict)
+        XCTAssertFalse(validation.allowsScheduling)
+        XCTAssertTrue(validation.conflicts.joined().contains("busy from"))
+        XCTAssertFalse(validation.conflicts.joined().localizedCaseInsensitiveContains("meeting"))
+        XCTAssertFalse(validation.nearestAlternatives.isEmpty)
+    }
+
+    @MainActor
+    func testApplySmartSchedulingTimeIsIdempotentAndUndoRestoresPreviousDate() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let calendar = fixedCalendar
+        let connection = GoogleCalendarConnection()
+        connection.connectionStatus = .connected
+        connection.smartSchedulingEnabled = true
+        context.insert(connection)
+        let plan = makePlan(anchor: date(2026, 8, 17, calendar: calendar))
+        let goal = makeGoal(anchor: date(2026, 8, 17, calendar: calendar))
+        let workout = makeWorkout(on: date(2026, 8, 23, calendar: calendar), plan: plan)
+        context.insert(plan)
+        context.insert(goal)
+        context.insert(workout)
+        context.insert(DayAvailability(
+            connectionID: connection.uuid,
+            date: date(2026, 8, 23, calendar: calendar),
+            timezoneIdentifier: "Asia/Tokyo",
+            busyWindows: [],
+            availableWindows: [
+                AvailabilityWindow(start: date(2026, 8, 23, hour: 5, calendar: calendar), end: date(2026, 8, 23, hour: 12, calendar: calendar), state: .available)
+            ],
+            lastRefreshedAt: date(2026, 8, 22, hour: 20, calendar: calendar)
+        ))
+        try context.save()
+        let service = GoogleCalendarSyncService(
+            modelContext: context,
+            api: FakeSmartSchedulingAPI(),
+            oauth: nil,
+            calendar: calendar,
+            timeZone: TimeZone(identifier: "Asia/Tokyo")!,
+            now: { self.date(2026, 8, 22, hour: 20, calendar: calendar) }
+        )
+        let originalDate = workout.date
+        let target = date(2026, 8, 23, hour: 6, calendar: calendar)
+
+        let first = await service.applySmartSchedulingTime(
+            workoutID: workout.uuid,
+            start: target,
+            keepTimeFixed: true,
+            expectedWorkoutVersion: nil,
+            candidateAvailabilityTimestamp: nil,
+            idempotencyKey: "same-operation"
+        )
+        let second = await service.applySmartSchedulingTime(
+            workoutID: workout.uuid,
+            start: target,
+            keepTimeFixed: true,
+            expectedWorkoutVersion: nil,
+            candidateAvailabilityTimestamp: nil,
+            idempotencyKey: "same-operation"
+        )
+
+        XCTAssertEqual(first.operationID, second.operationID)
+        XCTAssertEqual(workout.date, target)
+        XCTAssertTrue(workout.isScheduleLocked)
+        let operations = try context.fetch(FetchDescriptor<ScheduleChangeOperation>())
+        XCTAssertEqual(operations.count, 1)
+
+        let operationID = try XCTUnwrap(first.operationID)
+        let undo = service.undoSmartSchedulingOperation(operationID)
+
+        XCTAssertEqual(workout.date, originalDate)
+        XCTAssertNotNil(undo.operationID)
+    }
+
+    @MainActor
+    func testAppliedSmartSchedulingTimePatchesExistingGoogleEventWithoutDuplicateInsert() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let calendar = fixedCalendar
+        let connection = GoogleCalendarConnection()
+        connection.connectionStatus = .connected
+        connection.googleCalendarID = "rot-training"
+        connection.smartSchedulingEnabled = true
+        context.insert(connection)
+        let plan = makePlan(anchor: date(2026, 8, 17, calendar: calendar))
+        let goal = makeGoal(anchor: date(2026, 8, 17, calendar: calendar))
+        let workout = makeWorkout(on: date(2026, 8, 23, calendar: calendar), plan: plan)
+        context.insert(plan)
+        context.insert(goal)
+        context.insert(workout)
+        context.insert(GoogleCalendarEventLink(
+            connectionID: connection.uuid,
+            localEntityType: .plannedWorkout,
+            localEntityID: workout.uuid,
+            trainingPlanID: nil,
+            googleCalendarID: "rot-training",
+            googleEventID: "existing-event"
+        ))
+        context.insert(DayAvailability(
+            connectionID: connection.uuid,
+            date: date(2026, 8, 23, calendar: calendar),
+            timezoneIdentifier: "Asia/Tokyo",
+            busyWindows: [],
+            availableWindows: [
+                AvailabilityWindow(start: date(2026, 8, 23, hour: 5, calendar: calendar), end: date(2026, 8, 23, hour: 12, calendar: calendar), state: .available)
+            ],
+            lastRefreshedAt: date(2026, 8, 22, hour: 20, calendar: calendar)
+        ))
+        try context.save()
+        try GoogleCalendarTokenStore.save(validTokens, connectionID: connection.uuid)
+        defer { try? GoogleCalendarTokenStore.delete(connectionID: connection.uuid) }
+        let api = FakeSmartSchedulingAPI()
+        let service = GoogleCalendarSyncService(
+            modelContext: context,
+            api: api,
+            oauth: nil,
+            calendar: calendar,
+            timeZone: TimeZone(identifier: "Asia/Tokyo")!,
+            now: { self.date(2026, 8, 22, hour: 20, calendar: calendar) }
+        )
+
+        _ = await service.applySmartSchedulingTime(
+            workoutID: workout.uuid,
+            start: date(2026, 8, 23, hour: 6, calendar: calendar),
+            keepTimeFixed: false,
+            expectedWorkoutVersion: nil,
+            candidateAvailabilityTimestamp: nil,
+            idempotencyKey: "patch-existing-event"
+        )
+        await service.reconcile(reason: "test")
+
+        XCTAssertEqual(api.patchedEvents.map(\.eventID), ["existing-event"])
+        XCTAssertTrue(api.insertedEvents.isEmpty)
+    }
+
     @MainActor
     func testWorkoutDetailCandidateSearchRefreshesAvailabilityBeforeFindingSlot() async throws {
         let container = try makeContainer()
@@ -279,6 +526,8 @@ private final class FakeSmartSchedulingAPI: GoogleCalendarAPIServicing {
     var freeBusyResponse = GoogleFreeBusyResponse(calendars: [:])
     var freeBusyRequestCount = 0
     var lastFreeBusyRequest: GoogleFreeBusyRequest?
+    var insertedEvents: [(calendarID: String, event: GoogleCalendarEventPayload)] = []
+    var patchedEvents: [(calendarID: String, eventID: String, event: GoogleCalendarEventPayload)] = []
 
     func exchangeCode(_ code: String, verifier: String) async throws -> GoogleCalendarTokenSet { GoogleCalendarTokenSet(accessToken: "access", refreshToken: "refresh", expiresAt: Date().addingTimeInterval(3600), tokenType: "Bearer") }
     func refresh(_ refreshToken: String) async throws -> GoogleCalendarTokenSet { GoogleCalendarTokenSet(accessToken: "access", refreshToken: refreshToken, expiresAt: Date().addingTimeInterval(3600), tokenType: "Bearer") }
@@ -287,8 +536,14 @@ private final class FakeSmartSchedulingAPI: GoogleCalendarAPIServicing {
     func createCalendar(name: String, description: String, timeZone: String, accessToken: String) async throws -> GoogleCalendarListEntry { GoogleCalendarListEntry(id: "rot-training", summary: name, description: description, timeZone: timeZone, accessRole: "owner", primary: false, selected: true, backgroundColor: nil) }
     func deleteCalendar(id: String, accessToken: String) async throws {}
     func revokeToken(_ token: String) async throws {}
-    func insertEvent(calendarID: String, event: GoogleCalendarEventPayload, accessToken: String) async throws -> GoogleCalendarEventResponse { GoogleCalendarEventResponse(id: event.id ?? UUID().uuidString) }
-    func patchEvent(calendarID: String, eventID: String, event: GoogleCalendarEventPayload, accessToken: String) async throws -> GoogleCalendarEventResponse { GoogleCalendarEventResponse(id: eventID) }
+    func insertEvent(calendarID: String, event: GoogleCalendarEventPayload, accessToken: String) async throws -> GoogleCalendarEventResponse {
+        insertedEvents.append((calendarID: calendarID, event: event))
+        return GoogleCalendarEventResponse(id: event.id ?? UUID().uuidString)
+    }
+    func patchEvent(calendarID: String, eventID: String, event: GoogleCalendarEventPayload, accessToken: String) async throws -> GoogleCalendarEventResponse {
+        patchedEvents.append((calendarID: calendarID, eventID: eventID, event: event))
+        return GoogleCalendarEventResponse(id: eventID)
+    }
     func deleteEvent(calendarID: String, eventID: String, accessToken: String) async throws {}
     func eventsByPrivateProperty(calendarID: String, key: String, value: String, accessToken: String) async throws -> [GoogleCalendarEventResponse] { [] }
     func listEvents(calendarID: String, syncToken: String?, accessToken: String) async throws -> GoogleCalendarEventPage { GoogleCalendarEventPage(items: [], nextSyncToken: nil) }
