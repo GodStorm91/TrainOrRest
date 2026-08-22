@@ -191,8 +191,6 @@ final class CoachChatStore: ObservableObject {
               }).first,
               let targetKm = Self.contextualDistanceTarget(from: text),
               let workout = try context.fetch(FetchDescriptor<PlannedWorkout>()).first(where: { $0.uuid == workoutID }),
-              workout.status == .planned,
-              workout.isScheduleLocked == false,
               workout.kind != .race,
               let kind = workout.kind,
               let payload = Self.sameKindPayload(kind: kind, distanceKm: targetKm)
@@ -246,8 +244,6 @@ final class CoachChatStore: ObservableObject {
                 in: context,
                 calendar: calendar
               ),
-              workout.status == .planned,
-              workout.isScheduleLocked == false,
               workout.kind != .race,
               let kind = workout.kind,
               let payload = Self.sameKindPayload(kind: kind, distanceKm: request.targetKm)
@@ -663,11 +659,8 @@ final class CoachChatStore: ObservableObject {
             guard calendar.isDate(proposalDay, inSameDayAs: selectedDay) else {
                 throw CoachTools.ValidationError("This proposal targets a different workout. Switch context before editing another workout.")
             }
-            if selected.isScheduleLocked || selected.kind == .race {
-                throw CoachTools.ValidationError("This workout is fixed. Ask Coach to review alternatives or explicitly unlock it before applying changes.")
-            }
-            guard selected.status == .planned else {
-                throw CoachTools.ValidationError("Only planned workouts can be changed from this contextual edit flow.")
+            if selected.kind == .race {
+                throw CoachTools.ValidationError("Race workouts cannot be replaced from this contextual edit flow.")
             }
         }
     }
@@ -699,9 +692,13 @@ final class CoachChatStore: ObservableObject {
         var targetKm: Double
         var sourceKm: Double?
         var kind: WorkoutKind?
+        var absoluteDay: String?
         var relativeDay: RelativeDay?
 
         func day(relativeTo today: Date, calendar: Calendar) -> Date? {
+            if let absoluteDay {
+                return Self.date(from: absoluteDay, calendar: calendar)
+            }
             switch relativeDay {
             case .today:
                 return calendar.startOfDay(for: today)
@@ -710,6 +707,21 @@ final class CoachChatStore: ObservableObject {
             case nil:
                 return nil
             }
+        }
+
+        private static func date(from value: String, calendar: Calendar) -> Date? {
+            guard value.count == 10 else { return nil }
+            let parts = value.split(separator: "-", omittingEmptySubsequences: false)
+            guard parts.count == 3,
+                  parts[0].count == 4, parts[1].count == 2, parts[2].count == 2,
+                  parts.allSatisfy({ $0.allSatisfy { $0.isASCII && $0.isNumber } }),
+                  let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]),
+                  let date = calendar.date(from: DateComponents(year: year, month: month, day: day))
+            else { return nil }
+            let dayStart = calendar.startOfDay(for: date)
+            let components = calendar.dateComponents([.year, .month, .day], from: dayStart)
+            let rendered = String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
+            return rendered == value ? dayStart : nil
         }
     }
 
@@ -770,6 +782,7 @@ final class CoachChatStore: ObservableObject {
             targetKm: target,
             sourceKm: source,
             kind: workoutKind(from: lower),
+            absoluteDay: absoluteDayString(from: lower),
             relativeDay: relativeDay(from: lower)
         )
     }
@@ -806,6 +819,16 @@ final class CoachChatStore: ObservableObject {
         return nil
     }
 
+    private static func absoluteDayString(from lower: String) -> String? {
+        let pattern = #"\b\d{4}-\d{2}-\d{2}\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
+        let range = NSRange(lower.startIndex..<lower.endIndex, in: lower)
+        guard let match = regex.firstMatch(in: lower, options: [], range: range),
+              let dateRange = Range(match.range, in: lower)
+        else { return nil }
+        return String(lower[dateRange])
+    }
+
     private static func matchPlannedWorkout(
         on day: Date,
         kind: WorkoutKind?,
@@ -815,8 +838,6 @@ final class CoachChatStore: ObservableObject {
     ) throws -> PlannedWorkout? {
         var candidates = try context.fetch(FetchDescriptor<PlannedWorkout>()).filter {
             calendar.isDate($0.date, inSameDayAs: day)
-                && $0.status == .planned
-                && $0.isScheduleLocked == false
                 && $0.kind != .race
         }
         if let kind {

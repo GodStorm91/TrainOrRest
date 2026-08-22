@@ -144,7 +144,7 @@ final class WorkoutReplacementTests: XCTestCase {
         XCTAssertTrue(try planEdits(in: ModelContext(container)).isEmpty)
     }
 
-    func testRebuildReturnsNilWhenStaleTargetBecameIneligible() throws {
+    func testRebuildRestagesWhenStaleTargetBecameCompleted() throws {
         let container = try makeContainer()
         let context = container.mainContext
         let pending = try pendingReplacement(in: context)
@@ -160,7 +160,9 @@ final class WorkoutReplacementTests: XCTestCase {
         )) { error in
             XCTAssertEqual(error as? CoachTools.ReplacementError, .staleTarget)
         }
-        XCTAssertNil(try rebuildPendingOptional(from: pending, in: ModelContext(container)))
+        let rebuilt = try XCTUnwrap(try rebuildPendingOptional(from: pending, in: ModelContext(container)))
+        XCTAssertEqual(rebuilt.expected.statusRaw, WorkoutStatus.done.rawValue)
+        XCTAssertEqual(rebuilt.expected.uuid, existing.uuid)
     }
 
     private func pendingReplacement(in context: ModelContext) throws -> PendingWorkoutReplacement {

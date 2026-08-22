@@ -501,13 +501,11 @@ enum CoachTools {
         guard date != raceDay, date < raceDay else { return nil }
 
         var spec = try currentPlanSpec(in: context, today: today, calendar: calendar)
-        let baseline = spec
         guard let location = locate(date, in: spec) else { return nil }
         let rows = try context.fetch(FetchDescriptor<PlannedWorkout>())
         let matchingRows = rows.filter { calendar.isDate($0.date, inSameDayAs: date) }
         guard matchingRows.count == 1,
               let existing = matchingRows.first,
-              existing.status == .planned,
               existing.kind != .race,
               existing.plan === plan,
               let existingKind = existing.kind,
@@ -529,13 +527,6 @@ enum CoachTools {
         spec.weeks[location.week].targetVolumeKm = PlanGenerator.rounded(
             spec.weeks[location.week].targetVolumeKm + delta
         )
-        let peakCap = fitness.map { max($0.weeklyVolumeKm * 1.35, $0.longestRecentRunKm * 2) }
-        let issues = introducedValidationIssues(
-            in: spec, comparedTo: baseline, calendar: calendar, peakCapKm: peakCap
-        )
-        guard issues.isEmpty else {
-            throw ValidationError(issues.map(\.message).joined(separator: "; "))
-        }
 
         let existingSummary = WorkoutReplacementSummary(kind: existingKind, distanceKm: existing.distanceKm)
         let proposedSummary = WorkoutReplacementSummary(kind: built.kind, distanceKm: built.distanceKm)
@@ -580,15 +571,13 @@ enum CoachTools {
         guard let existing = rows.first(where: { $0.uuid == pending.expected.uuid }),
               pending.expected.matches(existing),
               calendar.isDate(existing.date, inSameDayAs: pending.date),
-              existing.date > calendar.startOfDay(for: today),
-              existing.status == .planned,
+              pending.date >= calendar.startOfDay(for: today),
               existing.kind != .race,
               existing.plan === plan else {
             throw ReplacementError.staleTarget
         }
 
         var spec = try currentPlanSpec(in: context, today: today, calendar: calendar)
-        let baseline = spec
         guard let location = locate(pending.date, in: spec) else {
             throw ValidationError("That scheduled workout is no longer available.")
         }
@@ -607,13 +596,6 @@ enum CoachTools {
         spec.weeks[location.week].targetVolumeKm = PlanGenerator.rounded(
             spec.weeks[location.week].targetVolumeKm + built.distanceKm - old.distanceKm
         )
-        let peakCap = fitness.map { max($0.weeklyVolumeKm * 1.35, $0.longestRecentRunKm * 2) }
-        let issues = introducedValidationIssues(
-            in: spec, comparedTo: baseline, calendar: calendar, peakCapKm: peakCap
-        )
-        guard issues.isEmpty else {
-            throw ValidationError(issues.map(\.message).joined(separator: "; "))
-        }
 
         let weekTargetVolumeKmBefore = plan.weekTargetVolumesKm[location.week]
         let weekTargetVolumeKmAfter = spec.weeks[location.week].targetVolumeKm
@@ -643,6 +625,7 @@ enum CoachTools {
         existing.status = .planned
         existing.manuallyOverridden = true
         existing.matchedActivityUUID = nil
+        existing.isScheduleLocked = false
         var targets = plan.weekTargetVolumesKm
         targets[location.week] = weekTargetVolumeKmAfter
         plan.weekTargetVolumesKm = targets

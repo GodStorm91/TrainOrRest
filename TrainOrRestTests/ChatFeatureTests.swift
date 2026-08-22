@@ -547,7 +547,7 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(WorkoutCoachContext.decode(thread.contextualSnapshotJSON), snapshot)
     }
 
-    func testContextualVietnameseDistanceShortcutHandlesUnsafeTargetWithoutModelGuessing() async throws {
+    func testContextualVietnameseDistanceShortcutStagesExplicitLargeTargetWithoutModelGuessing() async throws {
         let container = try makeContainer()
         let context = container.mainContext
         try seedTrainingData(in: context)
@@ -575,10 +575,11 @@ final class ChatFeatureTests: XCTestCase {
         )
 
         XCTAssertTrue(client.requests.isEmpty)
+        let pending = try XCTUnwrap(coordinator.pending)
+        XCTAssertEqual(pending.expected.uuid, selected.uuid)
+        XCTAssertEqual(pending.proposed.distanceKm, unsafeTargetKm, accuracy: 0.001)
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
-        XCTAssertNil(coordinator.pending)
         XCTAssertFalse(messages.map(\.text).joined(separator: "\n").contains("cụ thể hơn"))
-        XCTAssertTrue(messages.map(\.text).joined(separator: "\n").contains("Buổi tập chưa thay đổi"))
     }
 
     func testContextualVietnameseDistanceShortcutBypassesModelForClearReplacementRequest() async throws {
@@ -659,7 +660,7 @@ final class ChatFeatureTests: XCTestCase {
         }
     }
 
-    func testContextualDistanceShortcutDoesNotAskForSpecificsWhenValidationBlocks() async throws {
+    func testContextualDistanceShortcutDoesNotAskForSpecificsWhenFactoryRejectsInvalidTarget() async throws {
         let container = try makeContainer()
         let context = container.mainContext
         try seedTrainingData(in: context)
@@ -741,6 +742,75 @@ final class ChatFeatureTests: XCTestCase {
         let transcript = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
             .map(\.text)
             .joined(separator: "\n")
+        XCTAssertFalse(transcript.contains("cụ thể hơn"))
+    }
+
+    func testAbsoluteDateDistanceShortcutStagesReplacementForCompletedMatchedWorkout() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let plan = try XCTUnwrap(try PlanStore.activePlan(in: context))
+        let targetDay = try XCTUnwrap(calendar.date(byAdding: .day, value: 1, to: today))
+        for workout in try plannedWorkouts(on: targetDay, in: context) {
+            context.delete(workout)
+        }
+        let activityID = UUID()
+        context.insert(CompletedActivity(
+            hkUUID: activityID,
+            date: targetDay,
+            distanceMeters: 5_200,
+            durationSeconds: 1_800,
+            avgHeartRate: 140,
+            maxHeartRate: 160,
+            avgPaceSecondsPerKm: 346,
+            sourceName: "Garmin"
+        ))
+        let selected = PlannedWorkout(
+            spec: PlannedWorkoutSpec(
+                date: calendar.startOfDay(for: targetDay),
+                kind: .easy,
+                distanceKm: 5.2,
+                paceBand: nil,
+                details: "Easy run"
+            ),
+            weekIndex: 0,
+            phase: .base
+        )
+        selected.status = .done
+        selected.matchedActivityUUID = activityID
+        selected.isScheduleLocked = true
+        selected.plan = plan
+        context.insert(selected)
+        try context.save()
+
+        let client = MockClaudeClient(responses: [])
+        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
+        let store = CoachChatStore(
+            client: client,
+            calendar: calendar,
+            now: { self.today },
+            replacementCoordinator: coordinator
+        )
+
+        await store.send(
+            text: "Tạo chỉnh sửa ngắn hạn chỉ ngày 2026-01-06 easy 10km vẫn easy nha",
+            model: "claude-test",
+            attachments: [.health],
+            apiKey: "test-key",
+            in: context
+        )
+
+        XCTAssertTrue(client.requests.isEmpty)
+        let pending = try XCTUnwrap(coordinator.pending)
+        XCTAssertEqual(pending.expected.uuid, selected.uuid)
+        XCTAssertEqual(pending.existing.distanceKm, 5.2, accuracy: 0.001)
+        XCTAssertEqual(pending.existing.kind, .easy)
+        XCTAssertEqual(pending.proposed.distanceKm, 10, accuracy: 0.001)
+        XCTAssertEqual(pending.proposed.kind, .easy)
+        let transcript = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+            .map(\.text)
+            .joined(separator: "\n")
+        XCTAssertFalse(transcript.contains("hoàn thành"))
         XCTAssertFalse(transcript.contains("cụ thể hơn"))
     }
 

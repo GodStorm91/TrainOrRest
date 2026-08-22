@@ -78,6 +78,60 @@ final class PlanEditTests: XCTestCase {
         XCTAssertTrue(replacement.presentation.title.contains("Replace"))
     }
 
+    func testExplicitReplacementCanOverwriteSameDayCompletedMatchedWorkout() throws {
+        let container = try makeContainer(withHistory: true)
+        let context = container.mainContext
+        let existing = try XCTUnwrap(workout(on: occupiedDay, in: context))
+        let activityID = UUID()
+        context.insert(CompletedActivity(
+            hkUUID: activityID,
+            date: occupiedDay,
+            distanceMeters: existing.distanceKm * 1000,
+            durationSeconds: 2_400,
+            avgHeartRate: 142,
+            maxHeartRate: 166,
+            avgPaceSecondsPerKm: 320,
+            sourceName: "Garmin"
+        ))
+        existing.status = .done
+        existing.matchedActivityUUID = activityID
+        existing.isScheduleLocked = true
+        try context.save()
+
+        let proposal = PlanAdjustmentProposal(changes: [.init(
+            date: CoachContextBuilder.day(occupiedDay, calendar: calendar),
+            action: .replace,
+            detail: nil,
+            workout: PlanAdjustmentProposal.CreateWorkout(
+                kind: "easy",
+                blocks: [.init(repeatCount: 1, steps: [.init(
+                    role: "work", targetType: "distance_km", targetValue: 10, paceZone: "easy"
+                )])]
+            )
+        )])
+        let pending = try XCTUnwrap(try CoachTools.pendingReplacement(
+            for: proposal,
+            in: context,
+            today: occupiedDay,
+            calendar: calendar,
+            language: .en
+        ))
+
+        try CoachTools.confirmReplacement(pending, in: context, today: occupiedDay, calendar: calendar)
+
+        XCTAssertEqual(existing.distanceKm, 10, accuracy: 0.001)
+        XCTAssertEqual(existing.status, .planned)
+        XCTAssertNil(existing.matchedActivityUUID)
+        XCTAssertFalse(existing.isScheduleLocked)
+        XCTAssertTrue(existing.manuallyOverridden)
+        let edit = try XCTUnwrap(try planEdits(in: context).first)
+        XCTAssertEqual(edit.statusRaw, WorkoutStatus.done.rawValue)
+        XCTAssertEqual(edit.matchedActivityUUID, activityID)
+        XCTAssertEqual(edit.afterDistanceKm, 10, accuracy: 0.001)
+        XCTAssertEqual(edit.afterStatusRaw, WorkoutStatus.planned.rawValue)
+        XCTAssertNil(edit.afterMatchedActivityUUID)
+    }
+
     func testRevertRestoresWorkoutFieldsAndWeekTargetVolume() throws {
         let container = try makeContainer()
         let context = container.mainContext
