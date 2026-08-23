@@ -31,7 +31,7 @@ targets:
       path: TrainOrRest/Info.plist
       properties:
         CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "202608222056"
+        CFBundleVersion: "202608231440"
         GoogleCalendarOAuthClientID: "119351365161-2vtfr02trs185c4u2aah2lcomtad9m5b.apps.googleusercontent.com"
         GoogleCalendarOAuthRedirectScheme: "com.googleusercontent.apps.119351365161-2vtfr02trs185c4u2aah2lcomtad9m5b"
         CFBundleURLTypes:
@@ -73,7 +73,7 @@ targets:
       properties:
         CFBundleDisplayName: Readiness
         CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "202608222056"
+        CFBundleVersion: "202608231440"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
   TrainOrRestTests:
