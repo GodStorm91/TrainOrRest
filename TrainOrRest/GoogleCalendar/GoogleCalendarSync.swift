@@ -2395,25 +2395,31 @@ final class GoogleCalendarSyncService: ObservableObject {
                     return (repaired, fallback)
                 }
             }
-            guard let existingID = event.payload.id else { throw error }
-            do {
-                _ = try await api.patchEvent(
-                    calendarID: calendarID,
-                    eventID: existingID,
-                    event: event.payload.preservingGoogleCustomizationsForPatch(),
-                    accessToken: accessToken
-                )
-                return (GoogleCalendarEventResponse(id: existingID), event)
-            } catch {
-                guard Self.isInvalidStartTime(error), let fallback = allDayFallback(for: event) else { throw error }
-                _ = try await api.patchEvent(
-                    calendarID: calendarID,
-                    eventID: existingID,
-                    event: fallback.payload.preservingGoogleCustomizationsForPatch(),
-                    accessToken: accessToken
-                )
-                return (GoogleCalendarEventResponse(id: existingID), fallback)
-            }
+            guard event.payload.id != nil else { throw error }
+            return try await insertEventWithGeneratedID(
+                calendarID: calendarID,
+                event: event,
+                accessToken: accessToken
+            )
+        }
+    }
+
+    private func insertEventWithGeneratedID(
+        calendarID: String,
+        event: GoogleCalendarDesiredEvent,
+        accessToken: String
+    ) async throws -> (response: GoogleCalendarEventResponse, event: GoogleCalendarDesiredEvent) {
+        var payload = event.payload
+        payload.id = nil
+        do {
+            let response = try await api.insertEvent(calendarID: calendarID, event: payload, accessToken: accessToken)
+            return (response, event)
+        } catch {
+            guard Self.isInvalidStartTime(error), let fallback = allDayFallback(for: event) else { throw error }
+            var fallbackPayload = fallback.payload
+            fallbackPayload.id = nil
+            let response = try await api.insertEvent(calendarID: calendarID, event: fallbackPayload, accessToken: accessToken)
+            return (response, fallback)
         }
     }
 

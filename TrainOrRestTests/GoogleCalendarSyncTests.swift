@@ -250,6 +250,7 @@ final class GoogleCalendarSyncTests: XCTestCase {
         let api = FakeGoogleCalendarAPI()
         api.patchErrorsByEventID["bad-start-event"] = .permanent(400, "invalid: Invalid start time.")
         api.insertErrorsByEventID[duplicateID] = .permanent(409, "duplicate: The requested identifier already exists.")
+        api.remoteEventsByEntity[workout.uuid.uuidString] = duplicateID
         let service = GoogleCalendarSyncService(modelContext: context, api: api, oauth: nil, calendar: calendar, timeZone: TimeZone(identifier: "Asia/Tokyo")!, now: { self.date(2026, 8, 19, calendar: calendar) })
 
         await service.reconcile(reason: "test")
@@ -261,6 +262,65 @@ final class GoogleCalendarSyncTests: XCTestCase {
         let link = try XCTUnwrap(try context.fetch(FetchDescriptor<GoogleCalendarEventLink>()).first)
         XCTAssertEqual(link.googleEventID, duplicateID)
         XCTAssertEqual(link.syncState, .synced)
+    }
+
+    @MainActor
+    func testAddBackCreatesGeneratedEventWhenDeletedDeterministicIDIsTombstoned() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let calendar = fixedCalendar
+        let goal = makeGoal(anchor: date(2026, 8, 17, calendar: calendar))
+        let plan = makePlan(anchor: date(2026, 8, 17, calendar: calendar))
+        let workout = makeWorkout(on: date(2026, 8, 25, calendar: calendar), plan: plan)
+        let eventID = GoogleCalendarEventBuilder.deterministicEventID(type: .plannedWorkout, id: workout.uuid)
+        context.insert(goal)
+        context.insert(plan)
+        context.insert(workout)
+        let connection = GoogleCalendarConnection()
+        connection.connectionStatus = .connected
+        connection.googleCalendarID = "calendar-1"
+        connection.allowsSchedulingFromGoogle = true
+        context.insert(connection)
+        context.insert(GoogleCalendarEventLink(
+            connectionID: connection.uuid,
+            localEntityType: .plannedWorkout,
+            localEntityID: workout.uuid,
+            trainingPlanID: nil,
+            googleCalendarID: "calendar-1",
+            googleEventID: eventID
+        ))
+        try context.save()
+        try GoogleCalendarTokenStore.save(validTokens, connectionID: connection.uuid)
+        defer { try? GoogleCalendarTokenStore.delete(connectionID: connection.uuid) }
+        let api = FakeGoogleCalendarAPI()
+        api.remoteEventPages = [GoogleCalendarEventPage(items: [
+            GoogleCalendarRemoteEvent(
+                id: eventID,
+                status: "cancelled",
+                summary: nil,
+                description: nil,
+                start: nil,
+                end: nil,
+                updated: "2026-08-21T00:00:00Z",
+                extendedProperties: nil
+            )
+        ], nextSyncToken: "token-1")]
+        api.insertErrorsByEventID[eventID] = .permanent(409, "duplicate: The requested identifier already exists.")
+        let service = GoogleCalendarSyncService(modelContext: context, api: api, oauth: nil, calendar: calendar, timeZone: .current, now: { self.date(2026, 8, 19, calendar: calendar) })
+
+        await service.checkForCalendarChanges()
+        service.addBackToGoogleCalendar(workoutID: workout.uuid)
+        await service.reconcile(reason: "testAddBack")
+
+        XCTAssertEqual(connection.connectionStatus, .connected)
+        XCTAssertEqual(api.insertedEvents.count, 2)
+        XCTAssertEqual(api.insertedEvents.first?.id, eventID)
+        XCTAssertNil(api.insertedEvents.last?.id)
+        XCTAssertEqual(api.patchedEvents, [])
+        let link = try XCTUnwrap(try context.fetch(FetchDescriptor<GoogleCalendarEventLink>()).first)
+        XCTAssertNotEqual(link.googleEventID, eventID)
+        XCTAssertEqual(link.syncState, .synced)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<GoogleCalendarInboundChange>()).first?.status, .restored)
     }
 
     @MainActor
