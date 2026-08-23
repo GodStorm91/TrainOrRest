@@ -206,7 +206,7 @@ final class GoogleCalendarSyncTests: XCTestCase {
         try GoogleCalendarTokenStore.save(validTokens, connectionID: connection.uuid)
         defer { try? GoogleCalendarTokenStore.delete(connectionID: connection.uuid) }
         let api = FakeGoogleCalendarAPI()
-        api.patchErrorsByEventID["bad-event"] = .permanent(400)
+        api.patchErrorsByEventID["bad-event"] = .permanent(400, "Bad Request")
         let now = date(2026, 8, 23, calendar: calendar)
         let service = GoogleCalendarSyncService(modelContext: context, api: api, oauth: nil, calendar: calendar, timeZone: .current, now: { now })
 
@@ -217,8 +217,10 @@ final class GoogleCalendarSyncTests: XCTestCase {
         XCTAssertEqual(connection.lastSuccessfulSyncAt, date(2026, 8, 20, calendar: calendar))
         XCTAssertTrue(connection.lastSyncSummary?.contains("1 will retry") == true)
         XCTAssertTrue(connection.lastSyncSummary?.contains("First retry") == true)
+        XCTAssertTrue(connection.lastSyncSummary?.contains("HTTP 400") == true)
         XCTAssertTrue(service.lastDebugReport?.contains("Failed: 1") == true)
         XCTAssertTrue(service.lastDebugReport?.contains("First retry:") == true)
+        XCTAssertTrue(service.lastDebugReport?.contains("Bad Request") == true)
     }
 
     @MainActor

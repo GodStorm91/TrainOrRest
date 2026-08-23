@@ -342,7 +342,7 @@ enum GoogleCalendarAPIError: Error {
     case notFound
     case syncTokenExpired
     case temporary
-    case permanent(Int)
+    case permanent(Int, String?)
     case invalidResponse
 }
 
@@ -623,12 +623,29 @@ struct GoogleCalendarAPIClient: GoogleCalendarAPIServicing {
         case 500..<600:
             throw GoogleCalendarAPIError.temporary
         default:
-            throw GoogleCalendarAPIError.permanent(http.statusCode)
+            throw GoogleCalendarAPIError.permanent(http.statusCode, Self.errorMessage(from: data))
         }
     }
 
     private static func formEncode(_ value: String) -> String {
         value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
+    }
+
+    private static func errorMessage(from data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        if let error = object["error"] as? [String: Any] {
+            let status = error["status"] as? String
+            let message = error["message"] as? String
+            let reason = (error["errors"] as? [[String: Any]])?.first?["reason"] as? String
+            return [status, reason, message]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: ": ")
+        }
+        if let message = object["message"] as? String {
+            return message.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
     }
 
     private struct TokenResponse: Codable {
@@ -2242,7 +2259,7 @@ final class GoogleCalendarSyncService: ObservableObject {
                 }
                 logger.error("Google Calendar event sync failed for \(event.payload.summary, privacy: .public): \(String(describing: error), privacy: .public)")
                 failed += 1
-                failureDetails.append(event.payload.summary)
+                failureDetails.append("\(event.payload.summary) · \(Self.debugDescription(for: error))")
             }
         }
 
@@ -2260,7 +2277,7 @@ final class GoogleCalendarSyncService: ObservableObject {
                 }
                 logger.error("Google Calendar event delete failed for \(link.googleEventID, privacy: .public): \(String(describing: error), privacy: .public)")
                 failed += 1
-                failureDetails.append("removed event")
+                failureDetails.append("removed event · \(Self.debugDescription(for: error))")
             }
         }
         try modelContext.save()
@@ -2426,6 +2443,31 @@ final class GoogleCalendarSyncService: ObservableObject {
             return true
         case .notFound, .permanent, .invalidResponse:
             return false
+        }
+    }
+
+    private static func debugDescription(for error: Error) -> String {
+        guard let apiError = error as? GoogleCalendarAPIError else {
+            return String(describing: error)
+        }
+        switch apiError {
+        case .unauthorized:
+            return "HTTP 401/403 unauthorized"
+        case .rateLimited:
+            return "HTTP 429 rate limited"
+        case .notFound:
+            return "HTTP 404 not found"
+        case .syncTokenExpired:
+            return "HTTP 410 sync token expired"
+        case .temporary:
+            return "HTTP 5xx temporary Google error"
+        case .permanent(let status, let message):
+            if let message, !message.isEmpty {
+                return "HTTP \(status): \(message)"
+            }
+            return "HTTP \(status)"
+        case .invalidResponse:
+            return "invalid Google response"
         }
     }
 
