@@ -60,7 +60,11 @@ final class WorkoutPushService: ObservableObject {
         debounceTask?.cancel()
     }
 
-    func reconcile(today: Date = .now, requireEnabled: Bool = true) async {
+    func reconcile(
+        today: Date = .now,
+        requireEnabled: Bool = true,
+        forceRecreate: Bool = false
+    ) async {
         guard !isPushing else {
             pendingReconcileToday = today
             return
@@ -72,12 +76,16 @@ final class WorkoutPushService: ObservableObject {
         var nextToday: Date? = today
         while let currentToday = nextToday {
             pendingReconcileToday = nil
-            await reconcileOnce(today: currentToday, requireEnabled: requireEnabled)
+            await reconcileOnce(
+                today: currentToday,
+                requireEnabled: requireEnabled,
+                forceRecreate: forceRecreate
+            )
             nextToday = pendingReconcileToday
         }
     }
 
-    private func reconcileOnce(today: Date, requireEnabled: Bool) async {
+    private func reconcileOnce(today: Date, requireEnabled: Bool, forceRecreate: Bool) async {
         guard !requireEnabled || userDefaults.bool(forKey: WorkoutPushSettings.enabledKey) else {
             recordSkip("Watch Push is off.")
             return
@@ -105,12 +113,16 @@ final class WorkoutPushService: ObservableObject {
                 oldest: dateQuery(start),
                 newest: dateQuery(end)
             )
-            let plan = PushReconciler.reconcile(desiredEvents: localEvents, remoteEvents: remoteEvents)
-            if !plan.toUpsert.isEmpty {
-                _ = try await client.bulkUpsert(plan.toUpsert, credentials: credentials)
-            }
+            let plan = PushReconciler.reconcile(
+                desiredEvents: localEvents,
+                remoteEvents: remoteEvents,
+                forceRecreate: forceRecreate
+            )
             for eventID in plan.toDelete {
                 try await client.deleteEvent(id: eventID, credentials: credentials)
+            }
+            if !plan.toUpsert.isEmpty {
+                _ = try await client.bulkUpsert(plan.toUpsert, credentials: credentials)
             }
             recordSuccess()
             logger.info("Workout push reconciled: upsert \(plan.toUpsert.count), delete \(plan.toDelete.count)")

@@ -267,7 +267,7 @@ struct PlanCalendarView: View {
     private func forceSyncIntervals() {
         forceSyncStatus = "Syncing planned workouts to intervals.icu…"
         Task {
-            await pushService.reconcile(requireEnabled: false)
+            await pushService.reconcile(requireEnabled: false, forceRecreate: true)
             await MainActor.run {
                 if let error = pushService.lastPushError {
                     forceSyncStatus = "intervals.icu sync failed: \(error)"

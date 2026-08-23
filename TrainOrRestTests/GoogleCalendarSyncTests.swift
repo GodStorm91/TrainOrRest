@@ -139,6 +139,44 @@ final class GoogleCalendarSyncTests: XCTestCase {
     }
 
     @MainActor
+    func testMissingLinkedEventIsRecreatedAndClearsPartialFailure() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let calendar = fixedCalendar
+        let plan = makePlan(anchor: date(2026, 8, 17, calendar: calendar))
+        let workout = makeWorkout(on: date(2026, 8, 25, calendar: calendar), plan: plan)
+        context.insert(plan)
+        context.insert(workout)
+        let connection = GoogleCalendarConnection()
+        connection.connectionStatus = .partialFailure
+        connection.googleCalendarID = "calendar-1"
+        context.insert(connection)
+        context.insert(GoogleCalendarEventLink(
+            connectionID: connection.uuid,
+            localEntityType: .plannedWorkout,
+            localEntityID: workout.uuid,
+            trainingPlanID: nil,
+            googleCalendarID: "calendar-1",
+            googleEventID: "missing-event"
+        ))
+        try context.save()
+        try GoogleCalendarTokenStore.save(validTokens, connectionID: connection.uuid)
+        defer { try? GoogleCalendarTokenStore.delete(connectionID: connection.uuid) }
+        let api = FakeGoogleCalendarAPI()
+        api.patchErrorsByEventID["missing-event"] = .notFound
+        let service = GoogleCalendarSyncService(modelContext: context, api: api, oauth: nil, calendar: calendar, timeZone: .current, now: { self.date(2026, 8, 19, calendar: calendar) })
+
+        await service.reconcile(reason: "test")
+
+        XCTAssertEqual(connection.connectionStatus, .connected)
+        XCTAssertEqual(api.patchedEvents, ["missing-event"])
+        XCTAssertEqual(api.insertedEvents.count, 1)
+        let link = try XCTUnwrap(try context.fetch(FetchDescriptor<GoogleCalendarEventLink>()).first)
+        XCTAssertNotEqual(link.googleEventID, "missing-event")
+        XCTAssertEqual(link.syncState, .synced)
+    }
+
+    @MainActor
     func testRemovedFutureWorkoutDeletesManagedEvent() async throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -164,6 +202,37 @@ final class GoogleCalendarSyncTests: XCTestCase {
         await service.reconcile(reason: "test")
 
         XCTAssertEqual(api.deletedEvents, ["google-event-1"])
+    }
+
+    @MainActor
+    func testAlreadyMissingRemovedEventDoesNotKeepSyncIncomplete() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let connection = GoogleCalendarConnection()
+        connection.connectionStatus = .partialFailure
+        connection.googleCalendarID = "calendar-1"
+        context.insert(connection)
+        let removedWorkoutID = UUID()
+        context.insert(GoogleCalendarEventLink(
+            connectionID: connection.uuid,
+            localEntityType: .plannedWorkout,
+            localEntityID: removedWorkoutID,
+            trainingPlanID: nil,
+            googleCalendarID: "calendar-1",
+            googleEventID: "already-missing-event"
+        ))
+        try context.save()
+        try GoogleCalendarTokenStore.save(validTokens, connectionID: connection.uuid)
+        defer { try? GoogleCalendarTokenStore.delete(connectionID: connection.uuid) }
+        let api = FakeGoogleCalendarAPI()
+        api.deleteErrorsByEventID["already-missing-event"] = .notFound
+        let service = GoogleCalendarSyncService(modelContext: context, api: api, oauth: nil, calendar: fixedCalendar, timeZone: .current)
+
+        await service.reconcile(reason: "test")
+
+        XCTAssertEqual(connection.connectionStatus, .connected)
+        let link = try XCTUnwrap(try context.fetch(FetchDescriptor<GoogleCalendarEventLink>()).first)
+        XCTAssertEqual(link.syncState, .deleted)
     }
 
     @MainActor
@@ -765,6 +834,8 @@ private final class FakeGoogleCalendarAPI: GoogleCalendarAPIServicing {
     var insertedEvents: [GoogleCalendarEventPayload] = []
     var patchedEvents: [String] = []
     var deletedEvents: [String] = []
+    var patchErrorsByEventID: [String: GoogleCalendarAPIError] = [:]
+    var deleteErrorsByEventID: [String: GoogleCalendarAPIError] = [:]
     var remoteEventsByEntity: [String: String] = [:]
     var remoteEventPages: [GoogleCalendarEventPage] = []
     var listEventsErrors: [GoogleCalendarAPIError] = []
@@ -806,11 +877,17 @@ private final class FakeGoogleCalendarAPI: GoogleCalendarAPIServicing {
     func patchEvent(calendarID: String, eventID: String, event: GoogleCalendarEventPayload, accessToken: String) async throws -> GoogleCalendarEventResponse {
         patchedEvents.append(eventID)
         patchedEventPayloads.append(event)
+        if let error = patchErrorsByEventID[eventID] {
+            throw error
+        }
         return GoogleCalendarEventResponse(id: eventID)
     }
 
     func deleteEvent(calendarID: String, eventID: String, accessToken: String) async throws {
         deletedEvents.append(eventID)
+        if let error = deleteErrorsByEventID[eventID] {
+            throw error
+        }
     }
 
     func eventsByPrivateProperty(calendarID: String, key: String, value: String, accessToken: String) async throws -> [GoogleCalendarEventResponse] {

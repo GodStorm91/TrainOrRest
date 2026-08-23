@@ -27,13 +27,14 @@ enum PushReconciler {
 
     static func reconcile(
         desiredEvents: [IntervalsWorkoutEvent],
-        remoteEvents: [RemoteWorkoutEvent]
+        remoteEvents: [RemoteWorkoutEvent],
+        forceRecreate: Bool = false
     ) -> WorkoutPushPlan {
         let desiredIDs = Set(desiredEvents.map(\.externalID))
         let toDelete = remoteEvents.compactMap { event -> Int? in
             guard let externalID = event.externalID,
                   externalID.hasPrefix(externalIDPrefix),
-                  !desiredIDs.contains(externalID) else { return nil }
+                  forceRecreate || !desiredIDs.contains(externalID) else { return nil }
             return event.id
         }
         return WorkoutPushPlan(toUpsert: desiredEvents, toDelete: toDelete)

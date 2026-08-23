@@ -78,6 +78,33 @@ final class WorkoutPushServiceTests: XCTestCase {
         XCTAssertNil(service.lastPushSkipReason)
     }
 
+    func testForceRecreateDeletesMatchingRemoteWorkoutBeforeUpsertingFreshCopy() async throws {
+        let container = try makeContainer()
+        let defaults = try makeDefaults()
+        defaults.set("i636286", forKey: WorkoutPushSettings.athleteIDKey)
+        let workout = plannedWorkout(uuid: uuid(1))
+        container.mainContext.insert(workout)
+        try container.mainContext.save()
+
+        let client = MockIntervalsICUService(remoteEvents: [
+            RemoteWorkoutEvent(id: 10, externalID: WorkoutDSL.externalID(for: uuid(1))),
+            RemoteWorkoutEvent(id: 11, externalID: "manual"),
+        ])
+        let service = WorkoutPushService(
+            modelContext: container.mainContext,
+            client: client,
+            calendar: calendar,
+            userDefaults: defaults,
+            keychainLoad: { _ in "test-key" }
+        )
+
+        await service.reconcile(today: today, requireEnabled: false, forceRecreate: true)
+
+        XCTAssertEqual(client.deletedEventIDs, [10])
+        XCTAssertEqual(client.upsertedEvents.map(\.externalID), [WorkoutDSL.externalID(for: uuid(1))])
+        XCTAssertEqual(client.operations, [.delete(10), .upsert([WorkoutDSL.externalID(for: uuid(1))])])
+    }
+
     func testReconcileListsUpsertsDeletesAndRecordsSuccess() async throws {
         let container = try makeContainer()
         let defaults = try makeDefaults()
@@ -291,12 +318,18 @@ private final class MockIntervalsICUService: IntervalsICUServicing {
     var eventsCalls: [EventsCall] = []
     var upsertedEvents: [IntervalsWorkoutEvent] = []
     var deletedEventIDs: [Int] = []
+    var operations: [Operation] = []
     var suspendNextEventsCall = false
     var onEventsCall: ((Int) -> Void)?
     var onBulkUpsert: ((Int) -> Void)?
     var suspendedEventsWasCancelled = false
     private var bulkUpsertCalls = 0
     private var suspendedEvents: CheckedContinuation<[RemoteWorkoutEvent], Error>?
+
+    enum Operation: Equatable {
+        case delete(Int)
+        case upsert([String])
+    }
 
     init(remoteEvents: [RemoteWorkoutEvent] = [], eventsError: Error? = nil) {
         self.remoteEvents = remoteEvents
@@ -309,6 +342,7 @@ private final class MockIntervalsICUService: IntervalsICUServicing {
     ) async throws -> [RemoteWorkoutEvent] {
         bulkUpsertCalls += 1
         upsertedEvents.append(contentsOf: events)
+        operations.append(.upsert(events.map(\.externalID)))
         onBulkUpsert?(bulkUpsertCalls)
         return []
     }
@@ -338,6 +372,7 @@ private final class MockIntervalsICUService: IntervalsICUServicing {
 
     func deleteEvent(id: Int, credentials: IntervalsICUCredentials) async throws {
         deletedEventIDs.append(id)
+        operations.append(.delete(id))
     }
 
     func resumeSuspendedEvents() {

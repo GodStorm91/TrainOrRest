@@ -74,6 +74,23 @@ final class PushReconcilerTests: XCTestCase {
         XCTAssertEqual(plan.toDelete, [2])
     }
 
+    func testForceRecreateDeletesMatchingTrainOrRestEventsBeforeUpsertPlan() {
+        let local = [event(externalID: "trainorrest-a")]
+        let remote = [
+            RemoteWorkoutEvent(id: 1, externalID: "trainorrest-a"),
+            RemoteWorkoutEvent(id: 2, externalID: "manual"),
+        ]
+
+        let plan = PushReconciler.reconcile(
+            desiredEvents: local,
+            remoteEvents: remote,
+            forceRecreate: true
+        )
+
+        XCTAssertEqual(plan.toDelete, [1])
+        XCTAssertEqual(plan.toUpsert, local)
+    }
+
     func testDesiredEventsUseStructuredMovingTime() {
         let structure = [
             WorkoutStepGroup(steps: [

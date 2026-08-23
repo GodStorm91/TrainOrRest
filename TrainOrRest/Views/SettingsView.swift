@@ -357,13 +357,13 @@ struct IntervalsConnectionSettingsView: View {
     private func syncNow() {
         isSyncing = true
         Task {
-            await pushService.reconcile(requireEnabled: false)
+            await pushService.reconcile(requireEnabled: false, forceRecreate: true)
             await MainActor.run {
                 isSyncing = false
                 if let skip = pushService.lastPushSkipReason {
                     status = "Sync skipped. \(skip)"
                 } else {
-                    status = pushService.lastPushError == nil ? "Sync complete." : "Could not sync intervals.icu."
+                    status = pushService.lastPushError == nil ? "Sync complete. Existing Garmin workouts were recreated." : "Could not sync intervals.icu."
                 }
             }
         }
@@ -411,7 +411,7 @@ struct WatchDeliverySettingsView: View {
     private func syncNow() {
         isSyncing = true
         Task {
-            await pushService.reconcile()
+            await pushService.reconcile(forceRecreate: true)
             await MainActor.run { isSyncing = false }
         }
     }

@@ -2125,12 +2125,33 @@ final class GoogleCalendarSyncService: ObservableObject {
                     continue
                 }
                 if let link = linksByKey[key] {
-                    _ = try await api.patchEvent(
-                        calendarID: calendarID,
-                        eventID: link.googleEventID,
-                        event: event.payload.preservingGoogleCustomizationsForPatch(),
-                        accessToken: accessToken
-                    )
+                    do {
+                        _ = try await api.patchEvent(
+                            calendarID: calendarID,
+                            eventID: link.googleEventID,
+                            event: event.payload.preservingGoogleCustomizationsForPatch(),
+                            accessToken: accessToken
+                        )
+                    } catch GoogleCalendarAPIError.notFound {
+                        if let repaired = try await api.eventsByPrivateProperty(
+                            calendarID: calendarID,
+                            key: "rotEntityId",
+                            value: event.entityID.uuidString,
+                            accessToken: accessToken
+                        ).first {
+                            link.googleEventID = repaired.id
+                            _ = try await api.patchEvent(
+                                calendarID: calendarID,
+                                eventID: repaired.id,
+                                event: event.payload.preservingGoogleCustomizationsForPatch(),
+                                accessToken: accessToken
+                            )
+                        } else {
+                            let response = try await api.insertEvent(calendarID: calendarID, event: event.payload, accessToken: accessToken)
+                            link.googleEventID = response.id
+                            link.googleCalendarID = calendarID
+                        }
+                    }
                     update(link, event: event)
                     updated += 1
                 } else if let repaired = try await api.eventsByPrivateProperty(
@@ -2182,6 +2203,9 @@ final class GoogleCalendarSyncService: ObservableObject {
         for link in links where !desiredKeys.contains(entityKey(link.localEntityType, link.localEntityID)) && link.syncState != .deleted && link.syncState != .notVisibleInGoogleCalendar {
             do {
                 try await api.deleteEvent(calendarID: calendarID, eventID: link.googleEventID, accessToken: accessToken)
+                link.syncState = .deleted
+                deleted += 1
+            } catch GoogleCalendarAPIError.notFound {
                 link.syncState = .deleted
                 deleted += 1
             } catch {
