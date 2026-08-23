@@ -79,6 +79,66 @@ struct RemoteWorkoutEvent: Decodable, Equatable {
     }
 }
 
+struct IntervalsActivitySummary: Decodable, Equatable {
+    var id: String
+    var startDateLocal: String?
+    var type: String?
+    var name: String?
+    var distance: Double?
+    var movingTime: Double?
+    var elapsedTime: Double?
+    var recordingTime: Double?
+    var averageSpeed: Double?
+    var averageHeartRate: Double?
+    var maxHeartRate: Double?
+    var trainingLoad: Double?
+    var deviceName: String?
+    var recordingStops: [Double]?
+    var streamTypes: [String]?
+    var intervals: [IntervalsActivityInterval]?
+
+    enum CodingKeys: String, CodingKey {
+        case id, type, name, distance
+        case startDateLocal = "start_date_local"
+        case movingTime = "moving_time"
+        case elapsedTime = "elapsed_time"
+        case recordingTime = "icu_recording_time"
+        case averageSpeed = "average_speed"
+        case averageHeartRate = "average_heartrate"
+        case maxHeartRate = "max_heartrate"
+        case trainingLoad = "icu_training_load"
+        case deviceName = "device_name"
+        case recordingStops = "recording_stops"
+        case streamTypes = "stream_types"
+        case intervals = "icu_intervals"
+    }
+}
+
+struct IntervalsActivityInterval: Decodable, Equatable {
+    var distance: Double?
+    var movingTime: Double?
+    var elapsedTime: Double?
+    var averageSpeed: Double?
+    var averageHeartRate: Double?
+    var startTime: Double?
+    var endTime: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case distance
+        case movingTime = "moving_time"
+        case elapsedTime = "elapsed_time"
+        case averageSpeed = "average_speed"
+        case averageHeartRate = "average_heartrate"
+        case startTime = "start_time"
+        case endTime = "end_time"
+    }
+}
+
+struct IntervalsActivityStream: Decodable, Equatable {
+    var type: String
+    var data: [Double?]
+}
+
 enum IntervalsICUError: LocalizedError, Equatable {
     case unauthorized
     case offline
@@ -147,6 +207,55 @@ final class IntervalsICUClient: IntervalsICUServicing {
         var request = authenticatedRequest(url: components.url!, credentials: credentials)
         request.httpMethod = "GET"
         return try await decodedResponse(for: request, as: [RemoteWorkoutEvent].self)
+    }
+
+    func activities(
+        credentials: IntervalsICUCredentials,
+        oldest: String,
+        newest: String
+    ) async throws -> [IntervalsActivitySummary] {
+        var components = URLComponents(
+            url: athleteURL(credentials).appendingPathComponent("activities"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "oldest", value: oldest),
+            URLQueryItem(name: "newest", value: newest),
+        ]
+
+        var request = authenticatedRequest(url: components.url!, credentials: credentials)
+        request.httpMethod = "GET"
+        return try await decodedResponse(for: request, as: [IntervalsActivitySummary].self)
+    }
+
+    func activityDetail(id: String, credentials: IntervalsICUCredentials) async throws -> IntervalsActivitySummary {
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("activity").appendingPathComponent(id),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [URLQueryItem(name: "intervals", value: "true")]
+
+        var request = authenticatedRequest(url: components.url!, credentials: credentials)
+        request.httpMethod = "GET"
+        return try await decodedResponse(for: request, as: IntervalsActivitySummary.self)
+    }
+
+    func activityStreams(
+        id: String,
+        credentials: IntervalsICUCredentials,
+        types: [String]
+    ) async throws -> [IntervalsActivityStream] {
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("activity").appendingPathComponent(id).appendingPathComponent("streams.json"),
+            resolvingAgainstBaseURL: false
+        )!
+        if !types.isEmpty {
+            components.queryItems = [URLQueryItem(name: "types", value: types.joined(separator: ","))]
+        }
+
+        var request = authenticatedRequest(url: components.url!, credentials: credentials)
+        request.httpMethod = "GET"
+        return try await decodedResponse(for: request, as: [IntervalsActivityStream].self)
     }
 
     func deleteEvent(id: Int, credentials: IntervalsICUCredentials) async throws {

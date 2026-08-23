@@ -71,6 +71,77 @@ final class IntervalsICUClientTests: XCTestCase {
         XCTAssertEqual(request.url?.path, "/api/v1/athlete/i636286/events/99")
     }
 
+    func testActivitiesBuildsWindowQueryAndDecodesAnalysisSummary() async throws {
+        let session = MockIntervalsICUSession(body: """
+        [{
+          "id":"i178723019",
+          "start_date_local":"2026-08-23T06:55:22",
+          "type":"Run",
+          "distance":7018.8,
+          "moving_time":2542,
+          "average_speed":2.754,
+          "average_heartrate":150,
+          "max_heartrate":165,
+          "icu_training_load":34,
+          "stream_types":["time","distance","velocity_smooth","heartrate"]
+        }]
+        """)
+        let client = IntervalsICUClient(session: session)
+
+        let activities = try await client.activities(credentials: credentials, oldest: "2026-08-23", newest: "2026-08-24")
+
+        XCTAssertEqual(activities.first?.id, "i178723019")
+        XCTAssertEqual(activities.first?.averageHeartRate, 150)
+        let request = try XCTUnwrap(session.requests.first)
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.url?.path, "/api/v1/athlete/i636286/activities")
+        let components = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
+        XCTAssertEqual(components?.queryItems?.first { $0.name == "oldest" }?.value, "2026-08-23")
+        XCTAssertEqual(components?.queryItems?.first { $0.name == "newest" }?.value, "2026-08-24")
+    }
+
+    func testActivityDetailRequestsIntervalsAndDecodesLaps() async throws {
+        let session = MockIntervalsICUSession(body: """
+        {
+          "id":"i178723019",
+          "device_name":"Garmin fenix 8",
+          "icu_intervals":[{"distance":1000,"moving_time":360,"average_speed":2.77,"average_heartrate":148}]
+        }
+        """)
+        let client = IntervalsICUClient(session: session)
+
+        let detail = try await client.activityDetail(id: "i178723019", credentials: credentials)
+
+        XCTAssertEqual(detail.deviceName, "Garmin fenix 8")
+        XCTAssertEqual(detail.intervals?.first?.distance, 1000)
+        let request = try XCTUnwrap(session.requests.first)
+        XCTAssertEqual(request.url?.path, "/api/v1/activity/i178723019")
+        XCTAssertEqual(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems?.first?.value, "true")
+    }
+
+    func testActivityStreamsRequestsTypedStreams() async throws {
+        let session = MockIntervalsICUSession(body: """
+        [
+          {"type":"time","data":[0,1,2]},
+          {"type":"heartrate","data":[140,null,144]}
+        ]
+        """)
+        let client = IntervalsICUClient(session: session)
+
+        let streams = try await client.activityStreams(
+            id: "i178723019",
+            credentials: credentials,
+            types: ["time", "heartrate"]
+        )
+
+        XCTAssertEqual(streams.map(\.type), ["time", "heartrate"])
+        XCTAssertEqual(streams[1].data[0], 140)
+        XCTAssertNil(streams[1].data[1])
+        let request = try XCTUnwrap(session.requests.first)
+        XCTAssertEqual(request.url?.path, "/api/v1/activity/i178723019/streams.json")
+        XCTAssertEqual(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems?.first?.value, "time,heartrate")
+    }
+
     func testUnauthorizedStatusMapsToTypedError() async throws {
         let session = MockIntervalsICUSession(statusCode: 401, body: "{}")
         let client = IntervalsICUClient(session: session)
