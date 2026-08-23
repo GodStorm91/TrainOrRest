@@ -783,8 +783,8 @@ struct GoogleCalendarEventBuilder {
         let eventEnd: GoogleCalendarEventDate
         if isTimed, let durationSeconds {
             let end = date.addingTimeInterval(max(durationSeconds, 60 * 15))
-            eventStart = GoogleCalendarEventDate(date: nil, dateTime: Self.rfc3339(date, timeZone: timeZone), timeZone: timeZone.identifier)
-            eventEnd = GoogleCalendarEventDate(date: nil, dateTime: Self.rfc3339(end, timeZone: timeZone), timeZone: timeZone.identifier)
+            eventStart = GoogleCalendarEventDate(date: nil, dateTime: Self.rfc3339(date, timeZone: timeZone), timeZone: nil)
+            eventEnd = GoogleCalendarEventDate(date: nil, dateTime: Self.rfc3339(end, timeZone: timeZone), timeZone: nil)
         } else {
             let start = calendar.startOfDay(for: date)
             let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start

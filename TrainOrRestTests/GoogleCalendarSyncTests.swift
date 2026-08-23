@@ -44,8 +44,8 @@ final class GoogleCalendarSyncTests: XCTestCase {
         XCTAssertNil(payload.start.date)
         XCTAssertEqual(payload.start.dateTime, "2026-08-25T07:30:00+09:00")
         XCTAssertEqual(payload.end.dateTime, "2026-08-25T08:12:40+09:00")
-        XCTAssertEqual(payload.start.timeZone, "Asia/Tokyo")
-        XCTAssertEqual(payload.end.timeZone, "Asia/Tokyo")
+        XCTAssertNil(payload.start.timeZone)
+        XCTAssertNil(payload.end.timeZone)
         XCTAssertEqual(payload.transparency, "opaque")
     }
 
@@ -216,6 +216,7 @@ final class GoogleCalendarSyncTests: XCTestCase {
         XCTAssertEqual(api.deletedEvents, ["bad-start-event"])
         XCTAssertEqual(api.insertedEvents.count, 1)
         XCTAssertEqual(api.insertedEvents.first?.start.dateTime, "2026-08-25T07:30:00+09:00")
+        XCTAssertNil(api.insertedEvents.first?.start.timeZone)
         let link = try XCTUnwrap(try context.fetch(FetchDescriptor<GoogleCalendarEventLink>()).first)
         XCTAssertNotEqual(link.googleEventID, "bad-start-event")
         XCTAssertEqual(link.syncState, .synced)
