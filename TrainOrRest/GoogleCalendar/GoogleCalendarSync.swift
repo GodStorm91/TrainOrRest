@@ -775,8 +775,8 @@ struct GoogleCalendarEventBuilder {
         let eventEnd: GoogleCalendarEventDate
         if isTimed, let durationSeconds {
             let end = date.addingTimeInterval(max(durationSeconds, 60 * 15))
-            eventStart = GoogleCalendarEventDate(date: nil, dateTime: Self.rfc3339(date), timeZone: timeZone.identifier)
-            eventEnd = GoogleCalendarEventDate(date: nil, dateTime: Self.rfc3339(end), timeZone: timeZone.identifier)
+            eventStart = GoogleCalendarEventDate(date: nil, dateTime: Self.rfc3339(date, timeZone: timeZone), timeZone: timeZone.identifier)
+            eventEnd = GoogleCalendarEventDate(date: nil, dateTime: Self.rfc3339(end, timeZone: timeZone), timeZone: timeZone.identifier)
         } else {
             let start = calendar.startOfDay(for: date)
             let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start
@@ -878,8 +878,13 @@ struct GoogleCalendarEventBuilder {
         return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
     }
 
-    static func rfc3339(_ date: Date) -> String {
-        ISO8601DateFormatter().string(from: date)
+    static func rfc3339(_ date: Date, timeZone: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXXXX"
+        return formatter.string(from: date)
     }
 
     static func deterministicEventID(type: GoogleCalendarLocalEntityType, id: UUID) -> String {

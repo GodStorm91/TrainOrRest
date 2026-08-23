@@ -42,9 +42,10 @@ final class GoogleCalendarSyncTests: XCTestCase {
             .first?.payload)
 
         XCTAssertNil(payload.start.date)
-        XCTAssertNotNil(payload.start.dateTime)
-        XCTAssertNotNil(payload.end.dateTime)
+        XCTAssertEqual(payload.start.dateTime, "2026-08-25T07:30:00+09:00")
+        XCTAssertEqual(payload.end.dateTime, "2026-08-25T08:12:40+09:00")
         XCTAssertEqual(payload.start.timeZone, "Asia/Tokyo")
+        XCTAssertEqual(payload.end.timeZone, "Asia/Tokyo")
         XCTAssertEqual(payload.transparency, "opaque")
     }
 
