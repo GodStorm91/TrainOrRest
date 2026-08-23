@@ -19,6 +19,7 @@ enum ReadinessStore {
         let readiness = try computeAndPersistReadiness(in: context, today: today, calendar: calendar)
         try regenerateIfNeeded(in: context, verdict: readiness?.verdict ?? .insufficientData, today: today, calendar: calendar)
         try context.save()
+        ReadinessWidgetBridge.publish(readiness)
         return readiness
     }
 

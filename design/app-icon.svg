@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  TrainOrRest app icon — "Score gauge" (concept F of design/TrainOrRest Icon.dc.html).
+  TrainOrRest app icon — static gauge mark (concept F of design/TrainOrRest Icon.dc.html).
   Geometry is copied verbatim from that design's 200x200 viewBox so the rendered
   icon matches the concept exactly. Corners are intentionally square: iOS applies
   its own mask, and baking a radius in would double-round the icon.
@@ -31,12 +31,11 @@
   <g stroke="#EAE1FF" stroke-width="7" stroke-linecap="round"><path d="M100 100 L128 74"/></g>
   <circle cx="100" cy="100" r="9" fill="#EAE1FF"/>
 
-  <!-- readiness score; Barlow Semi Condensed 800 is not installed, so we use the
-       condensed grotesque the app itself substitutes for Barlow (see Theme.swift) -->
+  <!-- Static app mark only. Live readiness belongs in the widget, not the app icon. -->
   <text x="100" y="155"
         text-anchor="middle"
         font-family="Avenir Next Condensed"
         font-weight="800"
-        font-size="26"
-        fill="#ffffff">78</text>
+        font-size="24"
+        fill="#ffffff">TOR</text>
 </svg>
