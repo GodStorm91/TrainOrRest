@@ -182,6 +182,46 @@ final class GoogleCalendarSyncTests: XCTestCase {
     }
 
     @MainActor
+    func testInvalidStartTimePatchRecreatesLinkedEvent() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let calendar = fixedCalendar
+        let plan = makePlan(anchor: date(2026, 8, 17, calendar: calendar))
+        let workout = makeWorkout(on: date(2026, 8, 25, hour: 7, minute: 30, calendar: calendar), plan: plan)
+        context.insert(plan)
+        context.insert(workout)
+        let connection = GoogleCalendarConnection()
+        connection.connectionStatus = .partialFailure
+        connection.googleCalendarID = "calendar-1"
+        context.insert(connection)
+        context.insert(GoogleCalendarEventLink(
+            connectionID: connection.uuid,
+            localEntityType: .plannedWorkout,
+            localEntityID: workout.uuid,
+            trainingPlanID: nil,
+            googleCalendarID: "calendar-1",
+            googleEventID: "bad-start-event"
+        ))
+        try context.save()
+        try GoogleCalendarTokenStore.save(validTokens, connectionID: connection.uuid)
+        defer { try? GoogleCalendarTokenStore.delete(connectionID: connection.uuid) }
+        let api = FakeGoogleCalendarAPI()
+        api.patchErrorsByEventID["bad-start-event"] = .permanent(400, "invalid: Invalid start time.")
+        let service = GoogleCalendarSyncService(modelContext: context, api: api, oauth: nil, calendar: calendar, timeZone: TimeZone(identifier: "Asia/Tokyo")!, now: { self.date(2026, 8, 19, calendar: calendar) })
+
+        await service.reconcile(reason: "test")
+
+        XCTAssertEqual(connection.connectionStatus, .connected)
+        XCTAssertEqual(api.patchedEvents, ["bad-start-event"])
+        XCTAssertEqual(api.deletedEvents, ["bad-start-event"])
+        XCTAssertEqual(api.insertedEvents.count, 1)
+        XCTAssertEqual(api.insertedEvents.first?.start.dateTime, "2026-08-25T07:30:00+09:00")
+        let link = try XCTUnwrap(try context.fetch(FetchDescriptor<GoogleCalendarEventLink>()).first)
+        XCTAssertNotEqual(link.googleEventID, "bad-start-event")
+        XCTAssertEqual(link.syncState, .synced)
+    }
+
+    @MainActor
     func testEventPayloadFailureKeepsLastSuccessfulSyncAndSurfacesRetrySummary() async throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -222,6 +262,7 @@ final class GoogleCalendarSyncTests: XCTestCase {
         XCTAssertTrue(service.lastDebugReport?.contains("Failed: 1") == true)
         XCTAssertTrue(service.lastDebugReport?.contains("First retry:") == true)
         XCTAssertTrue(service.lastDebugReport?.contains("Bad Request") == true)
+        XCTAssertTrue(service.lastDebugReport?.contains("start 2026-08-25") == true)
     }
 
     @MainActor

@@ -261,6 +261,14 @@ struct GoogleCalendarEventPayload: Codable, Equatable {
         copy.reminders = nil
         return copy
     }
+
+    var scheduleDebugDescription: String {
+        let startValue = start.date ?? start.dateTime ?? "nil"
+        let endValue = end.date ?? end.dateTime ?? "nil"
+        let startZone = start.timeZone.map { " \($0)" } ?? ""
+        let endZone = end.timeZone.map { " \($0)" } ?? ""
+        return "start \(startValue)\(startZone), end \(endValue)\(endZone)"
+    }
 }
 
 struct GoogleCalendarEventDate: Codable, Equatable {
@@ -2214,6 +2222,12 @@ final class GoogleCalendarSyncService: ObservableObject {
                             link.googleEventID = response.id
                             link.googleCalendarID = calendarID
                         }
+                    } catch {
+                        guard Self.isInvalidStartTime(error) else { throw error }
+                        try? await api.deleteEvent(calendarID: calendarID, eventID: link.googleEventID, accessToken: accessToken)
+                        let response = try await api.insertEvent(calendarID: calendarID, event: event.payload, accessToken: accessToken)
+                        link.googleEventID = response.id
+                        link.googleCalendarID = calendarID
                     }
                     update(link, event: event)
                     updated += 1
@@ -2235,12 +2249,20 @@ final class GoogleCalendarSyncService: ObservableObject {
                     update(link, event: event)
                     modelContext.insert(link)
                     linksByKey[key] = link
-                    _ = try await api.patchEvent(
-                        calendarID: calendarID,
-                        eventID: repaired.id,
-                        event: event.payload.preservingGoogleCustomizationsForPatch(),
-                        accessToken: accessToken
-                    )
+                    do {
+                        _ = try await api.patchEvent(
+                            calendarID: calendarID,
+                            eventID: repaired.id,
+                            event: event.payload.preservingGoogleCustomizationsForPatch(),
+                            accessToken: accessToken
+                        )
+                    } catch {
+                        guard Self.isInvalidStartTime(error) else { throw error }
+                        try? await api.deleteEvent(calendarID: calendarID, eventID: repaired.id, accessToken: accessToken)
+                        let response = try await api.insertEvent(calendarID: calendarID, event: event.payload, accessToken: accessToken)
+                        link.googleEventID = response.id
+                        link.googleCalendarID = calendarID
+                    }
                     updated += 1
                 } else {
                     let response = try await api.insertEvent(calendarID: calendarID, event: event.payload, accessToken: accessToken)
@@ -2264,7 +2286,7 @@ final class GoogleCalendarSyncService: ObservableObject {
                 }
                 logger.error("Google Calendar event sync failed for \(event.payload.summary, privacy: .public): \(String(describing: error), privacy: .public)")
                 failed += 1
-                failureDetails.append("\(event.payload.summary) · \(Self.debugDescription(for: error))")
+                failureDetails.append("\(event.payload.summary) · \(Self.debugDescription(for: error)) · \(event.payload.scheduleDebugDescription)")
             }
         }
 
@@ -2449,6 +2471,13 @@ final class GoogleCalendarSyncService: ObservableObject {
         case .notFound, .permanent, .invalidResponse:
             return false
         }
+    }
+
+    private static func isInvalidStartTime(_ error: Error) -> Bool {
+        guard case let GoogleCalendarAPIError.permanent(status, message) = error else {
+            return false
+        }
+        return status == 400 && (message ?? "").localizedCaseInsensitiveContains("invalid start time")
     }
 
     private static func debugDescription(for error: Error) -> String {
