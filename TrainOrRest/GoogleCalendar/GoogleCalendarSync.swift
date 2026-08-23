@@ -2218,14 +2218,22 @@ final class GoogleCalendarSyncService: ObservableObject {
                                 accessToken: accessToken
                             )
                         } else {
-                            let response = try await api.insertEvent(calendarID: calendarID, event: event.payload, accessToken: accessToken)
+                            let response = try await insertEventRepairingDuplicate(
+                                calendarID: calendarID,
+                                event: event,
+                                accessToken: accessToken
+                            )
                             link.googleEventID = response.id
                             link.googleCalendarID = calendarID
                         }
                     } catch {
                         guard Self.isInvalidStartTime(error) else { throw error }
                         try? await api.deleteEvent(calendarID: calendarID, eventID: link.googleEventID, accessToken: accessToken)
-                        let response = try await api.insertEvent(calendarID: calendarID, event: event.payload, accessToken: accessToken)
+                        let response = try await insertEventRepairingDuplicate(
+                            calendarID: calendarID,
+                            event: event,
+                            accessToken: accessToken
+                        )
                         link.googleEventID = response.id
                         link.googleCalendarID = calendarID
                     }
@@ -2259,13 +2267,21 @@ final class GoogleCalendarSyncService: ObservableObject {
                     } catch {
                         guard Self.isInvalidStartTime(error) else { throw error }
                         try? await api.deleteEvent(calendarID: calendarID, eventID: repaired.id, accessToken: accessToken)
-                        let response = try await api.insertEvent(calendarID: calendarID, event: event.payload, accessToken: accessToken)
+                        let response = try await insertEventRepairingDuplicate(
+                            calendarID: calendarID,
+                            event: event,
+                            accessToken: accessToken
+                        )
                         link.googleEventID = response.id
                         link.googleCalendarID = calendarID
                     }
                     updated += 1
                 } else {
-                    let response = try await api.insertEvent(calendarID: calendarID, event: event.payload, accessToken: accessToken)
+                    let response = try await insertEventRepairingDuplicate(
+                        calendarID: calendarID,
+                        event: event,
+                        accessToken: accessToken
+                    )
                     let link = GoogleCalendarEventLink(
                         connectionID: connection.uuid,
                         localEntityType: event.entityType,
@@ -2330,6 +2346,40 @@ final class GoogleCalendarSyncService: ObservableObject {
         ].compactMap { $0 }.joined(separator: "|")
         link.lastSyncedAt = now()
         link.syncState = .synced
+    }
+
+    private func insertEventRepairingDuplicate(
+        calendarID: String,
+        event: GoogleCalendarDesiredEvent,
+        accessToken: String
+    ) async throws -> GoogleCalendarEventResponse {
+        do {
+            return try await api.insertEvent(calendarID: calendarID, event: event.payload, accessToken: accessToken)
+        } catch {
+            guard Self.isDuplicateIdentifier(error) else { throw error }
+            if let repaired = try await api.eventsByPrivateProperty(
+                calendarID: calendarID,
+                key: "rotEntityId",
+                value: event.entityID.uuidString,
+                accessToken: accessToken
+            ).first {
+                _ = try await api.patchEvent(
+                    calendarID: calendarID,
+                    eventID: repaired.id,
+                    event: event.payload.preservingGoogleCustomizationsForPatch(),
+                    accessToken: accessToken
+                )
+                return repaired
+            }
+            guard let existingID = event.payload.id else { throw error }
+            _ = try await api.patchEvent(
+                calendarID: calendarID,
+                eventID: existingID,
+                event: event.payload.preservingGoogleCustomizationsForPatch(),
+                accessToken: accessToken
+            )
+            return GoogleCalendarEventResponse(id: existingID)
+        }
     }
 
     private func markScheduledFromGoogle(_ workout: PlannedWorkout) {
@@ -2478,6 +2528,16 @@ final class GoogleCalendarSyncService: ObservableObject {
             return false
         }
         return status == 400 && (message ?? "").localizedCaseInsensitiveContains("invalid start time")
+    }
+
+    private static func isDuplicateIdentifier(_ error: Error) -> Bool {
+        guard case let GoogleCalendarAPIError.permanent(status, responseMessage) = error else {
+            return false
+        }
+        guard status == 409 else { return false }
+        let text = responseMessage ?? ""
+        return text.localizedCaseInsensitiveContains("duplicate")
+            || text.localizedCaseInsensitiveContains("identifier already exists")
     }
 
     private static func debugDescription(for error: Error) -> String {
