@@ -2218,24 +2218,30 @@ final class GoogleCalendarSyncService: ObservableObject {
                                 accessToken: accessToken
                             )
                         } else {
-                            let response = try await insertEventRepairingDuplicate(
+                            let repairedInsert = try await insertEventRepairingDuplicate(
                                 calendarID: calendarID,
                                 event: event,
                                 accessToken: accessToken
                             )
-                            link.googleEventID = response.id
+                            link.googleEventID = repairedInsert.response.id
                             link.googleCalendarID = calendarID
+                            update(link, event: repairedInsert.event)
+                            updated += 1
+                            continue
                         }
                     } catch {
                         guard Self.isInvalidStartTime(error) else { throw error }
                         try? await api.deleteEvent(calendarID: calendarID, eventID: link.googleEventID, accessToken: accessToken)
-                        let response = try await insertEventRepairingDuplicate(
+                        let repairedInsert = try await insertEventRepairingDuplicate(
                             calendarID: calendarID,
                             event: event,
                             accessToken: accessToken
                         )
-                        link.googleEventID = response.id
+                        link.googleEventID = repairedInsert.response.id
                         link.googleCalendarID = calendarID
+                        update(link, event: repairedInsert.event)
+                        updated += 1
+                        continue
                     }
                     update(link, event: event)
                     updated += 1
@@ -2267,17 +2273,20 @@ final class GoogleCalendarSyncService: ObservableObject {
                     } catch {
                         guard Self.isInvalidStartTime(error) else { throw error }
                         try? await api.deleteEvent(calendarID: calendarID, eventID: repaired.id, accessToken: accessToken)
-                        let response = try await insertEventRepairingDuplicate(
+                        let repairedInsert = try await insertEventRepairingDuplicate(
                             calendarID: calendarID,
                             event: event,
                             accessToken: accessToken
                         )
-                        link.googleEventID = response.id
+                        link.googleEventID = repairedInsert.response.id
                         link.googleCalendarID = calendarID
+                        update(link, event: repairedInsert.event)
+                        updated += 1
+                        continue
                     }
                     updated += 1
                 } else {
-                    let response = try await insertEventRepairingDuplicate(
+                    let repairedInsert = try await insertEventRepairingDuplicate(
                         calendarID: calendarID,
                         event: event,
                         accessToken: accessToken
@@ -2288,10 +2297,10 @@ final class GoogleCalendarSyncService: ObservableObject {
                         localEntityID: event.entityID,
                         trainingPlanID: event.trainingPlanID,
                         googleCalendarID: calendarID,
-                        googleEventID: response.id,
+                        googleEventID: repairedInsert.response.id,
                         now: now()
                     )
-                    update(link, event: event)
+                    update(link, event: repairedInsert.event)
                     modelContext.insert(link)
                     linksByKey[key] = link
                     created += 1
@@ -2352,10 +2361,14 @@ final class GoogleCalendarSyncService: ObservableObject {
         calendarID: String,
         event: GoogleCalendarDesiredEvent,
         accessToken: String
-    ) async throws -> GoogleCalendarEventResponse {
+    ) async throws -> (response: GoogleCalendarEventResponse, event: GoogleCalendarDesiredEvent) {
         do {
-            return try await api.insertEvent(calendarID: calendarID, event: event.payload, accessToken: accessToken)
+            let response = try await api.insertEvent(calendarID: calendarID, event: event.payload, accessToken: accessToken)
+            return (response, event)
         } catch {
+            if Self.isInvalidStartTime(error), let fallback = allDayFallback(for: event) {
+                return try await insertEventRepairingDuplicate(calendarID: calendarID, event: fallback, accessToken: accessToken)
+            }
             guard Self.isDuplicateIdentifier(error) else { throw error }
             if let repaired = try await api.eventsByPrivateProperty(
                 calendarID: calendarID,
@@ -2363,23 +2376,71 @@ final class GoogleCalendarSyncService: ObservableObject {
                 value: event.entityID.uuidString,
                 accessToken: accessToken
             ).first {
+                do {
+                    _ = try await api.patchEvent(
+                        calendarID: calendarID,
+                        eventID: repaired.id,
+                        event: event.payload.preservingGoogleCustomizationsForPatch(),
+                        accessToken: accessToken
+                    )
+                    return (repaired, event)
+                } catch {
+                    guard Self.isInvalidStartTime(error), let fallback = allDayFallback(for: event) else { throw error }
+                    _ = try await api.patchEvent(
+                        calendarID: calendarID,
+                        eventID: repaired.id,
+                        event: fallback.payload.preservingGoogleCustomizationsForPatch(),
+                        accessToken: accessToken
+                    )
+                    return (repaired, fallback)
+                }
+            }
+            guard let existingID = event.payload.id else { throw error }
+            do {
                 _ = try await api.patchEvent(
                     calendarID: calendarID,
-                    eventID: repaired.id,
+                    eventID: existingID,
                     event: event.payload.preservingGoogleCustomizationsForPatch(),
                     accessToken: accessToken
                 )
-                return repaired
+                return (GoogleCalendarEventResponse(id: existingID), event)
+            } catch {
+                guard Self.isInvalidStartTime(error), let fallback = allDayFallback(for: event) else { throw error }
+                _ = try await api.patchEvent(
+                    calendarID: calendarID,
+                    eventID: existingID,
+                    event: fallback.payload.preservingGoogleCustomizationsForPatch(),
+                    accessToken: accessToken
+                )
+                return (GoogleCalendarEventResponse(id: existingID), fallback)
             }
-            guard let existingID = event.payload.id else { throw error }
-            _ = try await api.patchEvent(
-                calendarID: calendarID,
-                eventID: existingID,
-                event: event.payload.preservingGoogleCustomizationsForPatch(),
-                accessToken: accessToken
-            )
-            return GoogleCalendarEventResponse(id: existingID)
         }
+    }
+
+    private func allDayFallback(for event: GoogleCalendarDesiredEvent) -> GoogleCalendarDesiredEvent? {
+        guard event.payload.start.date == nil else { return nil }
+        let dateString = event.payload.start.dateTime.map { String($0.prefix(10)) }
+        guard let dateString, let start = Self.date(fromLocalDate: dateString, calendar: calendar) else { return nil }
+        let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start
+        var payload = event.payload
+        payload.start = GoogleCalendarEventDate(date: GoogleCalendarEventBuilder.localDate(start, calendar: calendar), dateTime: nil, timeZone: nil)
+        payload.end = GoogleCalendarEventDate(date: GoogleCalendarEventBuilder.localDate(end, calendar: calendar), dateTime: nil, timeZone: nil)
+        payload.transparency = "transparent"
+        let hashData = (try? JSONEncoder.google.encode(payload)) ?? Data()
+        let hash = Data(SHA256.hash(data: hashData)).hexString
+        return GoogleCalendarDesiredEvent(
+            entityType: event.entityType,
+            entityID: event.entityID,
+            trainingPlanID: event.trainingPlanID,
+            payload: payload,
+            hash: hash
+        )
+    }
+
+    private static func date(fromLocalDate value: String, calendar: Calendar) -> Date? {
+        let parts = value.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        return calendar.date(from: DateComponents(timeZone: calendar.timeZone, year: parts[0], month: parts[1], day: parts[2]))
     }
 
     private func markScheduledFromGoogle(_ workout: PlannedWorkout) {

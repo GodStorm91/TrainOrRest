@@ -264,6 +264,41 @@ final class GoogleCalendarSyncTests: XCTestCase {
     }
 
     @MainActor
+    func testInvalidStartTimeInsertFallsBackToAllDayEvent() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let calendar = fixedCalendar
+        let plan = makePlan(anchor: date(2026, 8, 17, calendar: calendar))
+        let workout = makeWorkout(on: date(2026, 8, 23, hour: 6, calendar: calendar), plan: plan)
+        context.insert(plan)
+        context.insert(workout)
+        let connection = GoogleCalendarConnection()
+        connection.connectionStatus = .partialFailure
+        connection.googleCalendarID = "calendar-1"
+        context.insert(connection)
+        try context.save()
+        try GoogleCalendarTokenStore.save(validTokens, connectionID: connection.uuid)
+        defer { try? GoogleCalendarTokenStore.delete(connectionID: connection.uuid) }
+        let eventID = GoogleCalendarEventBuilder.deterministicEventID(type: .plannedWorkout, id: workout.uuid)
+        let api = FakeGoogleCalendarAPI()
+        api.insertErrorsByEventID[eventID] = .permanent(400, "invalid: Invalid start time.")
+        let service = GoogleCalendarSyncService(modelContext: context, api: api, oauth: nil, calendar: calendar, timeZone: TimeZone(identifier: "Asia/Tokyo")!, now: { self.date(2026, 8, 23, hour: 19, calendar: calendar) })
+
+        await service.reconcile(reason: "test")
+
+        XCTAssertEqual(connection.connectionStatus, .connected)
+        XCTAssertEqual(api.insertedEvents.count, 2)
+        XCTAssertEqual(api.insertedEvents.first?.start.dateTime, "2026-08-23T06:00:00+09:00")
+        XCTAssertEqual(api.insertedEvents.last?.start.date, "2026-08-23")
+        XCTAssertEqual(api.insertedEvents.last?.end.date, "2026-08-24")
+        XCTAssertEqual(api.insertedEvents.last?.transparency, "transparent")
+        let link = try XCTUnwrap(try context.fetch(FetchDescriptor<GoogleCalendarEventLink>()).first)
+        XCTAssertEqual(link.googleEventID, eventID)
+        XCTAssertEqual(link.lastGoogleScheduleSignature, "2026-08-23")
+        XCTAssertEqual(link.syncState, .synced)
+    }
+
+    @MainActor
     func testEventPayloadFailureKeepsLastSuccessfulSyncAndSurfacesRetrySummary() async throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -1040,7 +1075,7 @@ private final class FakeGoogleCalendarAPI: GoogleCalendarAPIServicing {
 
     func insertEvent(calendarID: String, event: GoogleCalendarEventPayload, accessToken: String) async throws -> GoogleCalendarEventResponse {
         insertedEvents.append(event)
-        if let error = event.id.flatMap({ insertErrorsByEventID[$0] }) {
+        if let error = event.id.flatMap({ insertErrorsByEventID.removeValue(forKey: $0) }) {
             throw error
         }
         return GoogleCalendarEventResponse(id: event.id ?? UUID().uuidString)
