@@ -1041,12 +1041,14 @@ final class GoogleCalendarSyncService: ObservableObject {
     @Published private(set) var isSyncing = false
     @Published private(set) var isOffline = false
     @Published private(set) var lastIssue: String?
+    @Published private(set) var lastDebugReport: String?
 
     private let modelContext: ModelContext
     private let api: GoogleCalendarAPIServicing
     private let oauth: GoogleCalendarOAuthService
     private let calendar: Calendar
     private let timeZone: TimeZone
+    private let userDefaults: UserDefaults
     private let now: () -> Date
     private let logger = Logger(subsystem: "com.khanhnguyen.TrainOrRest", category: "google-calendar")
     private var planChangeObserver: NSObjectProtocol?
@@ -1060,6 +1062,7 @@ final class GoogleCalendarSyncService: ObservableObject {
         oauth: GoogleCalendarOAuthService? = nil,
         calendar: Calendar = .current,
         timeZone: TimeZone = .current,
+        userDefaults: UserDefaults = .standard,
         now: @escaping () -> Date = Date.init
     ) {
         self.modelContext = modelContext
@@ -1067,6 +1070,7 @@ final class GoogleCalendarSyncService: ObservableObject {
         self.oauth = oauth ?? GoogleCalendarOAuthService()
         self.calendar = calendar
         self.timeZone = timeZone
+        self.userDefaults = userDefaults
         self.now = now
         observePlanChanges()
         observeNetwork()
@@ -1082,11 +1086,13 @@ final class GoogleCalendarSyncService: ObservableObject {
 
     func connection() -> GoogleCalendarConnection {
         if let existing = (try? modelContext.fetch(FetchDescriptor<GoogleCalendarConnection>()).first) {
+            loadPersistedDebugReportIfNeeded(for: existing)
             return existing
         }
         let created = GoogleCalendarConnection(now: now())
         modelContext.insert(created)
         try? modelContext.save()
+        loadPersistedDebugReportIfNeeded(for: created)
         return created
     }
 
@@ -1126,6 +1132,14 @@ final class GoogleCalendarSyncService: ObservableObject {
         if isOffline {
             connection.connectionStatus = .offlineQueued
             connection.lastCalendarChangeSummary = "Calendar changes will be checked when you are online."
+            recordDebugReport(Self.debugReport(
+                title: "Google Calendar change check queued",
+                lines: [
+                    "Reason: \(reason)",
+                    "Status: offline",
+                    "Calendar ID: \(connection.googleCalendarID ?? "missing")"
+                ]
+            ), connection: connection)
             try? modelContext.save()
             return
         }
@@ -1142,11 +1156,20 @@ final class GoogleCalendarSyncService: ObservableObject {
             let outbound = try await reconcileEvents(connection: connection, calendarID: calendarID, accessToken: token)
             connection.connectionStatus = outbound.failed == 0 ? .connected : .partialFailure
             connection.lastSyncErrorCategory = outbound.failed == 0 ? .none : .partialEventFailure
-            connection.lastSuccessfulSyncAt = now()
+            if outbound.failed == 0 {
+                connection.lastSuccessfulSyncAt = now()
+            }
             connection.lastCalendarChangeCheckAt = now()
             connection.lastCalendarChangeSummary = inboundSummary(outcome)
             connection.lastSyncSummary = [inboundSummary(outcome), outbound.summary].filter { !$0.isEmpty }.joined(separator: " ")
             lastIssue = outcome.needsReview > 0 ? inboundSummary(outcome) : nil
+            recordDebugReport(outbound.debugReport(
+                title: "Google Calendar sync complete",
+                reason: reason,
+                status: connection.connectionStatus,
+                calendarID: calendarID,
+                inboundSummary: inboundSummary(outcome)
+            ), connection: connection)
             try modelContext.save()
             logger.info("Google Calendar inbound check completed: \(connection.lastSyncSummary ?? "", privacy: .public)")
         } catch GoogleCalendarAPIError.syncTokenExpired where canResetExpiredSyncToken {
@@ -1170,6 +1193,14 @@ final class GoogleCalendarSyncService: ObservableObject {
         if isOffline {
             connection.connectionStatus = .offlineQueued
             connection.lastSyncSummary = "Google Calendar will update when you are online."
+            recordDebugReport(Self.debugReport(
+                title: "Google Calendar sync queued",
+                lines: [
+                    "Reason: \(reason)",
+                    "Status: offline",
+                    "Calendar ID: \(connection.googleCalendarID ?? "missing")"
+                ]
+            ), connection: connection)
             try? modelContext.save()
             return
         }
@@ -1188,7 +1219,9 @@ final class GoogleCalendarSyncService: ObservableObject {
             let result = try await reconcileEvents(connection: connection, calendarID: calendarID, accessToken: token)
             connection.connectionStatus = result.failed == 0 ? .connected : .partialFailure
             connection.lastSyncErrorCategory = result.failed == 0 ? .none : .partialEventFailure
-            connection.lastSuccessfulSyncAt = now()
+            if result.failed == 0 {
+                connection.lastSuccessfulSyncAt = now()
+            }
             if connection.allowsSchedulingFromGoogle {
                 connection.lastCalendarChangeCheckAt = now()
                 connection.lastCalendarChangeSummary = inboundSummary(inbound)
@@ -1197,6 +1230,13 @@ final class GoogleCalendarSyncService: ObservableObject {
                 .filter { !$0.isEmpty }
                 .joined(separator: " ")
             lastIssue = result.failed == 0 && inbound.needsReview == 0 ? nil : connection.lastSyncSummary
+            recordDebugReport(result.debugReport(
+                title: "Google Calendar sync complete",
+                reason: reason,
+                status: connection.connectionStatus,
+                calendarID: calendarID,
+                inboundSummary: connection.allowsSchedulingFromGoogle ? inboundSummary(inbound) : nil
+            ), connection: connection)
             try modelContext.save()
             logger.info("Google Calendar sync completed: \(result.summary, privacy: .public)")
         } catch GoogleCalendarAPIError.syncTokenExpired where canResetExpiredSyncToken {
@@ -2112,6 +2152,7 @@ final class GoogleCalendarSyncService: ObservableObject {
         var skipped = 0
         var deleted = 0
         var failed = 0
+        var failureDetails: [String] = []
 
         for event in desired {
             do {
@@ -2196,7 +2237,12 @@ final class GoogleCalendarSyncService: ObservableObject {
                     created += 1
                 }
             } catch {
+                if shouldAbortSync(for: error) {
+                    throw error
+                }
+                logger.error("Google Calendar event sync failed for \(event.payload.summary, privacy: .public): \(String(describing: error), privacy: .public)")
                 failed += 1
+                failureDetails.append(event.payload.summary)
             }
         }
 
@@ -2209,11 +2255,25 @@ final class GoogleCalendarSyncService: ObservableObject {
                 link.syncState = .deleted
                 deleted += 1
             } catch {
+                if shouldAbortSync(for: error) {
+                    throw error
+                }
+                logger.error("Google Calendar event delete failed for \(link.googleEventID, privacy: .public): \(String(describing: error), privacy: .public)")
                 failed += 1
+                failureDetails.append("removed event")
             }
         }
         try modelContext.save()
-        return SyncResult(created: created, updated: updated, skipped: skipped, deleted: deleted, failed: failed)
+        return SyncResult(
+            desired: desired.count,
+            linked: links.count,
+            created: created,
+            updated: updated,
+            skipped: skipped,
+            deleted: deleted,
+            failed: failed,
+            failureDetails: failureDetails
+        )
     }
 
     private func update(_ link: GoogleCalendarEventLink, event: GoogleCalendarDesiredEvent) {
@@ -2298,6 +2358,16 @@ final class GoogleCalendarSyncService: ObservableObject {
             connection.lastSyncErrorCategory = .temporary
             connection.lastSyncSummary = "Could not finish calendar sync."
         }
+        recordDebugReport(Self.debugReport(
+            title: "Google Calendar sync failed",
+            lines: [
+                "Status: \(connection.connectionStatus.rawValue)",
+                "Error category: \(connection.lastSyncErrorCategory.rawValue)",
+                "Error: \((error as? LocalizedError)?.errorDescription ?? String(describing: error))",
+                "Calendar ID: \(connection.googleCalendarID ?? "missing")",
+                "Connected account: \(connection.maskedEmail ?? "unknown")"
+            ]
+        ), connection: connection)
         try? modelContext.save()
     }
 
@@ -2349,6 +2419,16 @@ final class GoogleCalendarSyncService: ObservableObject {
         "\(type.rawValue):\(id.uuidString)"
     }
 
+    private func shouldAbortSync(for error: Error) -> Bool {
+        guard let apiError = error as? GoogleCalendarAPIError else { return false }
+        switch apiError {
+        case .unauthorized, .rateLimited, .syncTokenExpired, .temporary:
+            return true
+        case .notFound, .permanent, .invalidResponse:
+            return false
+        }
+    }
+
     static func mask(_ email: String?) -> String? {
         guard let email, let at = email.firstIndex(of: "@") else { return email }
         let name = String(email[..<at])
@@ -2358,18 +2438,68 @@ final class GoogleCalendarSyncService: ObservableObject {
     }
 
     private struct SyncResult {
+        var desired: Int
+        var linked: Int
         var created: Int
         var updated: Int
         var skipped: Int
         var deleted: Int
         var failed: Int
+        var failureDetails: [String] = []
 
         var summary: String {
             if failed > 0 {
-                return "\(created + updated + skipped) synced, \(failed) will retry."
+                let first = failureDetails.first.map { " First retry: \($0)." } ?? ""
+                return "\(created + updated + skipped) synced, \(failed) will retry.\(first)"
             }
             return "\(created + updated + skipped) workouts synced."
         }
+
+        func debugReport(
+            title: String,
+            reason: String,
+            status: GoogleCalendarConnectionStatus,
+            calendarID: String,
+            inboundSummary: String?
+        ) -> String {
+            var lines = [
+                "Reason: \(reason)",
+                "Status: \(status.rawValue)",
+                "Calendar ID: \(calendarID)",
+                "Desired events: \(desired)",
+                "Existing links: \(linked)",
+                "Created: \(created)",
+                "Updated: \(updated)",
+                "Skipped unchanged: \(skipped)",
+                "Deleted stale: \(deleted)",
+                "Failed: \(failed)"
+            ]
+            if let inboundSummary, !inboundSummary.isEmpty {
+                lines.append("Inbound: \(inboundSummary)")
+            }
+            if let first = failureDetails.first {
+                lines.append("First retry: \(first)")
+            }
+            return ([title] + lines).joined(separator: "\n")
+        }
+    }
+
+    private static func debugReport(title: String, lines: [String]) -> String {
+        ([title] + lines).joined(separator: "\n")
+    }
+
+    private func recordDebugReport(_ report: String, connection: GoogleCalendarConnection) {
+        lastDebugReport = report
+        userDefaults.set(report, forKey: debugReportKey(connectionID: connection.uuid))
+    }
+
+    private func loadPersistedDebugReportIfNeeded(for connection: GoogleCalendarConnection) {
+        guard lastDebugReport == nil else { return }
+        lastDebugReport = userDefaults.string(forKey: debugReportKey(connectionID: connection.uuid))
+    }
+
+    private func debugReportKey(connectionID: UUID) -> String {
+        "googleCalendarLastDebugReport-\(connectionID.uuidString)"
     }
 }
 

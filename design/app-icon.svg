@@ -32,10 +32,4 @@
   <circle cx="100" cy="100" r="9" fill="#EAE1FF"/>
 
   <!-- Static app mark only. Live readiness belongs in the widget, not the app icon. -->
-  <text x="100" y="155"
-        text-anchor="middle"
-        font-family="Avenir Next Condensed"
-        font-weight="800"
-        font-size="24"
-        fill="#ffffff">TOR</text>
 </svg>

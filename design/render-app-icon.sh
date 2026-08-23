@@ -4,13 +4,18 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-svg="$root/design/app-icon.svg"
+source="$root/design/app-icon-source.jpg"
 out="$root/TrainOrRest/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png"
 
 mkdir -p "$(dirname "$out")"
-rsvg-convert --width 1024 --height 1024 --background-color '#08080d' "$svg" -o "$out.tmp"
-magick "$out.tmp" -alpha remove -alpha off -strip "$out"
-rm -f "$out.tmp"
+magick "$source" \
+  -resize 1024x1024^ \
+  -gravity center \
+  -extent 1024x1024 \
+  -alpha remove \
+  -alpha off \
+  -strip \
+  "$out"
 
 echo "wrote $out"
 sips -g pixelWidth -g pixelHeight -g hasAlpha "$out" | tail -3

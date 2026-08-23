@@ -108,6 +108,10 @@ final class GoogleCalendarSyncTests: XCTestCase {
         XCTAssertEqual(api.insertedEvents.count, 1)
         XCTAssertEqual(api.patchedEvents.count, 0)
         XCTAssertEqual(connection.connectionStatus, .connected)
+        XCTAssertTrue(service.lastDebugReport?.contains("Google Calendar sync complete") == true)
+        XCTAssertTrue(service.lastDebugReport?.contains("Desired events: 1") == true)
+        XCTAssertTrue(service.lastDebugReport?.contains("Created: 0") == true)
+        XCTAssertTrue(service.lastDebugReport?.contains("Skipped unchanged: 1") == true)
     }
 
     @MainActor
@@ -174,6 +178,84 @@ final class GoogleCalendarSyncTests: XCTestCase {
         let link = try XCTUnwrap(try context.fetch(FetchDescriptor<GoogleCalendarEventLink>()).first)
         XCTAssertNotEqual(link.googleEventID, "missing-event")
         XCTAssertEqual(link.syncState, .synced)
+    }
+
+    @MainActor
+    func testEventPayloadFailureKeepsLastSuccessfulSyncAndSurfacesRetrySummary() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let calendar = fixedCalendar
+        let plan = makePlan(anchor: date(2026, 8, 17, calendar: calendar))
+        let workout = makeWorkout(on: date(2026, 8, 25, calendar: calendar), plan: plan)
+        context.insert(plan)
+        context.insert(workout)
+        let connection = GoogleCalendarConnection()
+        connection.connectionStatus = .connected
+        connection.googleCalendarID = "calendar-1"
+        connection.lastSuccessfulSyncAt = date(2026, 8, 20, calendar: calendar)
+        context.insert(connection)
+        context.insert(GoogleCalendarEventLink(
+            connectionID: connection.uuid,
+            localEntityType: .plannedWorkout,
+            localEntityID: workout.uuid,
+            trainingPlanID: nil,
+            googleCalendarID: "calendar-1",
+            googleEventID: "bad-event"
+        ))
+        try context.save()
+        try GoogleCalendarTokenStore.save(validTokens, connectionID: connection.uuid)
+        defer { try? GoogleCalendarTokenStore.delete(connectionID: connection.uuid) }
+        let api = FakeGoogleCalendarAPI()
+        api.patchErrorsByEventID["bad-event"] = .permanent(400)
+        let now = date(2026, 8, 23, calendar: calendar)
+        let service = GoogleCalendarSyncService(modelContext: context, api: api, oauth: nil, calendar: calendar, timeZone: .current, now: { now })
+
+        await service.reconcile(reason: "test")
+
+        XCTAssertEqual(connection.connectionStatus, .partialFailure)
+        XCTAssertEqual(connection.lastSyncErrorCategory, .partialEventFailure)
+        XCTAssertEqual(connection.lastSuccessfulSyncAt, date(2026, 8, 20, calendar: calendar))
+        XCTAssertTrue(connection.lastSyncSummary?.contains("1 will retry") == true)
+        XCTAssertTrue(connection.lastSyncSummary?.contains("First retry") == true)
+        XCTAssertTrue(service.lastDebugReport?.contains("Failed: 1") == true)
+        XCTAssertTrue(service.lastDebugReport?.contains("First retry:") == true)
+    }
+
+    @MainActor
+    func testEventAuthorizationFailureRequiresReconnectInsteadOfPartialRetry() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let calendar = fixedCalendar
+        let plan = makePlan(anchor: date(2026, 8, 17, calendar: calendar))
+        let workout = makeWorkout(on: date(2026, 8, 25, calendar: calendar), plan: plan)
+        context.insert(plan)
+        context.insert(workout)
+        let connection = GoogleCalendarConnection()
+        connection.connectionStatus = .connected
+        connection.googleCalendarID = "calendar-1"
+        context.insert(connection)
+        context.insert(GoogleCalendarEventLink(
+            connectionID: connection.uuid,
+            localEntityType: .plannedWorkout,
+            localEntityID: workout.uuid,
+            trainingPlanID: nil,
+            googleCalendarID: "calendar-1",
+            googleEventID: "forbidden-event"
+        ))
+        try context.save()
+        try GoogleCalendarTokenStore.save(validTokens, connectionID: connection.uuid)
+        defer { try? GoogleCalendarTokenStore.delete(connectionID: connection.uuid) }
+        let api = FakeGoogleCalendarAPI()
+        api.patchErrorsByEventID["forbidden-event"] = .unauthorized
+        let service = GoogleCalendarSyncService(modelContext: context, api: api, oauth: nil, calendar: calendar, timeZone: .current)
+
+        await service.reconcile(reason: "test")
+
+        XCTAssertEqual(connection.connectionStatus, .needsReconnect)
+        XCTAssertEqual(connection.lastSyncErrorCategory, .permissionRevoked)
+        XCTAssertEqual(connection.lastSyncSummary, "Reconnect Google Calendar.")
+        XCTAssertTrue(service.lastDebugReport?.contains("Google Calendar sync failed") == true)
+        XCTAssertTrue(service.lastDebugReport?.contains("Error category: permissionRevoked") == true)
     }
 
     @MainActor

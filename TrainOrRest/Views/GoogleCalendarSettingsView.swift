@@ -155,6 +155,11 @@ struct GoogleCalendarSettingsView: View {
                     symbol: statusSymbol,
                     tint: statusTint
                 )
+                if let summary = connection.lastSyncSummary, !summary.isEmpty {
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(connection.connectionStatus == .partialFailure ? Theme.warn : .secondary)
+                }
                 if let last = connection.lastSuccessfulSyncAt {
                     LabeledContent("Last successful sync", value: last.formatted(date: .abbreviated, time: .shortened))
                 } else {
@@ -207,6 +212,16 @@ struct GoogleCalendarSettingsView: View {
                 Section {
                     Text(summary)
                         .foregroundStyle(connection.connectionStatus == .partialFailure ? Theme.warn : Theme.dim)
+                }
+            }
+
+            if let report = googleCalendar.lastDebugReport, !report.isEmpty {
+                Section {
+                    DebugReportView(text: report)
+                } header: {
+                    Text("Google sync debug")
+                } footer: {
+                    Text("Use this to see whether the failure is authentication, calendar access, payload update, stale event deletion, or unchanged-event skipping.")
                 }
             }
 

@@ -76,6 +76,9 @@ final class WorkoutPushServiceTests: XCTestCase {
         XCTAssertNotNil(service.lastPushAt)
         XCTAssertNil(service.lastPushError)
         XCTAssertNil(service.lastPushSkipReason)
+        XCTAssertTrue(service.lastDebugReport?.contains("Upsert payloads: 1") == true)
+        XCTAssertTrue(service.lastDebugReport?.contains("First DSL:") == true)
+        XCTAssertTrue(service.lastDebugReport?.contains("/km Pace") == true)
     }
 
     func testForceRecreateDeletesMatchingRemoteWorkoutBeforeUpsertingFreshCopy() async throws {
@@ -158,6 +161,8 @@ final class WorkoutPushServiceTests: XCTestCase {
 
         XCTAssertEqual(service.lastPushError, IntervalsICUError.unauthorized.errorDescription)
         XCTAssertEqual(defaults.string(forKey: WorkoutPushSettings.lastPushErrorKey), service.lastPushError)
+        XCTAssertTrue(service.lastDebugReport?.contains("intervals.icu sync failed") == true)
+        XCTAssertTrue(service.lastDebugReport?.contains("Error: Your intervals.icu API key was rejected.") == true)
     }
 
     func testInFlightReconcileQueuesOneFollowUpPass() async throws {

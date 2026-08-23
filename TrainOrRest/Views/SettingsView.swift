@@ -297,6 +297,16 @@ struct IntervalsConnectionSettingsView: View {
                         .foregroundStyle(status.hasPrefix("Could not") ? Theme.bad : Theme.good)
                 }
             }
+
+            if let report = pushService.lastDebugReport, !report.isEmpty {
+                Section {
+                    DebugReportView(text: report)
+                } header: {
+                    Text("Garmin delivery debug")
+                } footer: {
+                    Text("This is the exact intervals.icu push path. If the DSL contains pace but Garmin still shows distance only, the failure is in intervals.icu to Garmin export or Garmin Connect parsing.")
+                }
+            }
         }
         .navigationTitle("intervals.icu")
         .navigationBarTitleDisplayMode(.inline)
@@ -403,6 +413,14 @@ struct WatchDeliverySettingsView: View {
             } footer: {
                 Text("Watch Push sends planned workouts through intervals.icu. Manage the intervals.icu connection separately under Connected Services.")
             }
+
+            if let report = pushService.lastDebugReport, !report.isEmpty {
+                Section {
+                    DebugReportView(text: report)
+                } header: {
+                    Text("Garmin delivery debug")
+                }
+            }
         }
         .navigationTitle("Watch Delivery")
         .navigationBarTitleDisplayMode(.inline)
@@ -414,6 +432,21 @@ struct WatchDeliverySettingsView: View {
             await pushService.reconcile(forceRecreate: true)
             await MainActor.run { isSyncing = false }
         }
+    }
+}
+
+struct DebugReportView: View {
+    var text: String
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: true) {
+            Text(text)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(Theme.dim)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityLabel(text)
     }
 }
 
