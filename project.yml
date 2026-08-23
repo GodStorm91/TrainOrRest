@@ -20,6 +20,12 @@ targets:
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        Release:
+          CODE_SIGN_IDENTITY: Apple Distribution
+          CODE_SIGN_STYLE: Manual
+          DEVELOPMENT_TEAM: QLUHW4PPRY
+          PROVISIONING_PROFILE_SPECIFIER: TrainOrRest App Store
     entitlements:
       path: TrainOrRest/TrainOrRest.entitlements
       properties:
@@ -63,6 +69,12 @@ targets:
       base:
         APPLICATION_EXTENSION_API_ONLY: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.khanhnguyen.TrainOrRest.ReadinessWidget
+      configs:
+        Release:
+          CODE_SIGN_IDENTITY: Apple Distribution
+          CODE_SIGN_STYLE: Manual
+          DEVELOPMENT_TEAM: QLUHW4PPRY
+          PROVISIONING_PROFILE_SPECIFIER: TrainOrRest Widget App Store
     entitlements:
       path: TrainOrRestWidget/TrainOrRestWidget.entitlements
       properties:
