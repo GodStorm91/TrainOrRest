@@ -36,6 +36,23 @@ final class CoachCreateWorkoutTests: XCTestCase {
         XCTAssertEqual(try weekTarget(0, in: context), targetBefore + 7, accuracy: 0.001)
     }
 
+    func testCreatesThresholdWithAppDerivedPaceAndCanonicalStructure() throws {
+        let container = try seededContainer()
+        let context = container.mainContext
+        let paces = try XCTUnwrap(fitnessPaces(in: context))
+
+        let result = try create(.threshold(workKm: 4), on: freeDay, in: context)
+
+        let workout = try XCTUnwrap(workout(on: freeDay, in: context))
+        XCTAssertEqual(result.summary, "Created threshold on 2026-01-09")
+        XCTAssertEqual(workout.kind, .threshold)
+        XCTAssertEqual(workout.distanceKm, 8, accuracy: 0.001)
+        XCTAssertEqual(workout.paceBand, paces.threshold)
+        XCTAssertEqual(workout.details, "2 km warm-up · 4 km at T pace · 2 km cool-down")
+        XCTAssertEqual(workout.structure.flatMap(\.steps).map(\.role), [.warmUp, .work, .coolDown])
+    }
+
+
     func testCreatesIntervalsWithRepeatedWorkAndDurationRecovery() throws {
         let container = try seededContainer()
         let context = container.mainContext
@@ -237,7 +254,7 @@ final class CoachCreateWorkoutTests: XCTestCase {
     // MARK: - Payloads
 
     private enum CreatePayload {
-        case easy(km: Double), long(km: Double), tempo(workKm: Double), intervals(reps: Int)
+        case easy(km: Double), long(km: Double), tempo(workKm: Double), threshold(workKm: Double), intervals(reps: Int)
         case malformedStep
         case raw(kind: String, zone: String = "easy")
 
@@ -253,6 +270,12 @@ final class CoachCreateWorkoutTests: XCTestCase {
                 return .init(kind: "long", blocks: [.init(repeatCount: 1, steps: [distance("work", km, "easy")])])
             case .tempo(let workKm):
                 return .init(kind: "tempo", blocks: [.init(repeatCount: 1, steps: [
+                    distance("warm_up", 2, "easy"),
+                    distance("work", workKm, "threshold"),
+                    distance("cool_down", 2, "easy")
+                ])])
+            case .threshold(let workKm):
+                return .init(kind: "threshold", blocks: [.init(repeatCount: 1, steps: [
                     distance("warm_up", 2, "easy"),
                     distance("work", workKm, "threshold"),
                     distance("cool_down", 2, "easy")

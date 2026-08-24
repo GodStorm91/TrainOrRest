@@ -6,6 +6,7 @@ enum TrainingVisualStyle {
     static let easy = Theme.good
     static let long = Theme.accent
     static let tempo = Theme.warn
+    static let threshold = Theme.warn
     static let intervals = Theme.accent2
     static let race = Theme.accent2
     static let recovery = Theme.good
@@ -24,6 +25,7 @@ extension WorkoutKind {
         case .easy: TrainingVisualStyle.easy
         case .long: TrainingVisualStyle.long
         case .tempo: TrainingVisualStyle.tempo
+        case .threshold: TrainingVisualStyle.threshold
         case .intervals: TrainingVisualStyle.intervals
         case .race: TrainingVisualStyle.race
         }

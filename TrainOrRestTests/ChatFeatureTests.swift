@@ -17,6 +17,7 @@ final class ChatFeatureTests: XCTestCase {
 
         XCTAssertLessThanOrEqual(text.count, CoachContextBuilder.maxCharacters)
         XCTAssertTrue(text.contains("Goal: Half Marathon"))
+        XCTAssertTrue(text.contains("Current week plan (2026-01-05...2026-01-12):"))
         XCTAssertTrue(text.contains("Plan next 14 days:"))
         XCTAssertTrue(text.contains("Current-year run history (2026):"))
         XCTAssertTrue(text.contains("Last 14 days runs:"))

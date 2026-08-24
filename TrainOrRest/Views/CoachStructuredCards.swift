@@ -152,6 +152,8 @@ struct CoachWorkoutSummary: Equatable {
             return ["Endurance"]
         case .tempo:
             return ["Threshold"]
+        case .threshold:
+            return ["Threshold"]
         case .intervals:
             return ["Speed"]
         case .race:

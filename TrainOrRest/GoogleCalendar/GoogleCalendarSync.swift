@@ -871,6 +871,7 @@ struct GoogleCalendarEventBuilder {
         case .easy: "Easy Run"
         case .long: "Long Run"
         case .tempo: "Tempo Run"
+        case .threshold: "Threshold Run"
         case .intervals: "Intervals"
         case .race: "Race"
         case nil: "Run"

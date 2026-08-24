@@ -96,6 +96,10 @@ enum WorkoutFactory {
         assemble(tempoRecipe(tempoKm: tempoKm), paces: paces)
     }
 
+    static func canonicalThreshold(workKm: Double, paces: TrainingPaces) -> BuiltWorkout {
+        assemble(thresholdRecipe(workKm: workKm), paces: paces)
+    }
+
     static func canonicalIntervals(repCount: Int, paces: TrainingPaces) -> BuiltWorkout {
         assemble(intervalRecipe(repCount: repCount), paces: paces)
     }
@@ -110,6 +114,14 @@ enum WorkoutFactory {
         WorkoutRecipe(kind: .tempo, blocks: [
             .init(repeatCount: 1, steps: [.distance(.warmUp, warmupKm, .easy)]),
             .init(repeatCount: 1, steps: [.distance(.work, tempoKm, .threshold)]),
+            .init(repeatCount: 1, steps: [.distance(.coolDown, cooldownKm, .easy)])
+        ])
+    }
+
+    static func thresholdRecipe(workKm: Double) -> WorkoutRecipe {
+        WorkoutRecipe(kind: .threshold, blocks: [
+            .init(repeatCount: 1, steps: [.distance(.warmUp, warmupKm, .easy)]),
+            .init(repeatCount: 1, steps: [.distance(.work, workKm, .threshold)]),
             .init(repeatCount: 1, steps: [.distance(.coolDown, cooldownKm, .easy)])
         ])
     }
@@ -197,22 +209,22 @@ enum WorkoutFactory {
             else {
                 throw WorkoutBuildError("\(recipe.kind.rawValue) runs must be one easy-paced distance step.")
             }
-        case .tempo:
+        case .tempo, .threshold:
             guard steps.contains(where: { $0.role == .work }) else {
-                throw WorkoutBuildError("A tempo needs a work step.")
+                throw WorkoutBuildError("\(recipe.kind.rawValue) needs a work step.")
             }
             for step in steps {
                 switch step.role {
                 case .work:
                     guard step.zone == .threshold else {
-                        throw WorkoutBuildError("Tempo work must use threshold pace.")
+                        throw WorkoutBuildError("\(recipe.kind.rawValue) work must use threshold pace.")
                     }
                 case .warmUp, .coolDown:
                     guard !step.zone.isQuality else {
                         throw WorkoutBuildError("Warm-up and cool-down must be easy.")
                     }
                 case .recovery:
-                    throw WorkoutBuildError("Tempo workouts have no recovery steps.")
+                    throw WorkoutBuildError("\(recipe.kind.rawValue) workouts have no recovery steps.")
                 }
             }
         case .intervals:

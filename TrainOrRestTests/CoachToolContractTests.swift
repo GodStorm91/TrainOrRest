@@ -77,7 +77,7 @@ final class CoachToolContractTests: XCTestCase {
         XCTAssertEqual(item["additionalProperties"], .bool(false))
         XCTAssertEqual(workout["additionalProperties"], .bool(false))
         XCTAssertTrue(actions.contains(.string("create")))
-        XCTAssertEqual(kinds, ["easy", "long", "tempo", "intervals"].map(JSONValue.string))
+        XCTAssertEqual(kinds, ["easy", "long", "tempo", "threshold", "intervals"].map(JSONValue.string))
         XCTAssertFalse(kinds.contains(.string("race")), "race must never be creatable")
     }
 
@@ -97,6 +97,18 @@ final class CoachToolContractTests: XCTestCase {
         XCTAssertEqual(workout.blocks[0].steps.map(\.role), ["warm_up", "work", "cool_down"])
         XCTAssertEqual(workout.blocks[0].steps[1].paceZone, "threshold")
         XCTAssertEqual(workout.blocks[0].steps[1].targetValue, 5)
+    }
+
+    func testExactThresholdPayloadDecodes() throws {
+        let json = """
+        {"changes":[{"date":"2026-07-11","action":"create","workout":{"kind":"threshold","blocks":[{"repeat_count":1,"steps":[{"role":"warm_up","target_type":"distance_km","target_value":2,"pace_zone":"easy"},{"role":"work","target_type":"distance_km","target_value":4,"pace_zone":"threshold"},{"role":"cool_down","target_type":"distance_km","target_value":2,"pace_zone":"easy"}]}]}}]}
+        """.data(using: .utf8)!
+        let proposal = try JSONDecoder().decode(PlanAdjustmentProposal.self, from: json)
+        let workout = try XCTUnwrap(proposal.changes.first?.workout)
+
+        XCTAssertEqual(workout.kind, "threshold")
+        XCTAssertEqual(workout.blocks[0].steps.map(\.role), ["warm_up", "work", "cool_down"])
+        XCTAssertEqual(workout.blocks[0].steps[1].paceZone, "threshold")
     }
 
 

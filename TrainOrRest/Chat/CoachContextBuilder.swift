@@ -20,7 +20,7 @@ enum CoachContextBuilder {
             "For replace requests, date is the existing workout day and workout is required. Use replace when the user asks to change an existing workout into a different workout type, for example changing a tempo run on 2026-08-25 into shorter intervals. Do not use downgrade with a workout payload; downgrade only means make the existing workout an easy run at the same distance.",
             "When the user says 'tomorrow's workout', 'tomorrow training', 'buổi tập ngày mai', or 'buổi training ngày mai', resolve it to the Tomorrow workout section below. If the user asks to increase/decrease that workout to a specific distance such as 10 km, use replace on tomorrow's absolute date, keep the same workout kind unless the user names a different kind, and submit a concrete workout payload for confirmation. Do not ask for the date again when the Tomorrow workout section names exactly one planned workout.",
             "If a plan tool call is rejected for missing or malformed fields, fix the JSON and call the tool again immediately. Do not ask the user to confirm the tool schema or JSON format.",
-            "You may create easy, long, tempo, and interval workouts. A race distance or target time can be context for a training request: for example, ‘create a workout to help me run a half marathon under 1:50’ means create a safe non-race workout, not a goal change or race workout. Use the stated training day; if no day is stated, ask which day to schedule it. You cannot create or edit a race workout, and you cannot change the goal.",
+            "You may create easy, long, tempo, threshold, and interval workouts. A threshold workout is a sustained T-pace session with easy warm-up and cool-down. A race distance or target time can be context for a training request: for example, ‘create a workout to help me run a half marathon under 1:50’ means create a safe non-race workout, not a goal change or race workout. Use the stated training day; if no day is stated, ask which day to schedule it. You cannot create or edit a race workout, and you cannot change the goal.",
             "For questions about running history, yearly totals, monthly totals, or which month the user ran most, answer from the run history sections. Do not say monthly data is unavailable when those sections are present."
         ]
 
@@ -148,7 +148,18 @@ enum CoachContextBuilder {
         guard !workouts.isEmpty else { return ["Plan: none generated."] }
         let end = calendar.date(byAdding: .day, value: 14, to: dayStart) ?? dayStart
         let upcoming = workouts.filter { $0.date >= dayStart && $0.date < end }
-        var lines = ["Plan next 14 days:"]
+        let weekStart = PlanGenerator.mondayOfWeek(containing: dayStart, calendar: calendar)
+        let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? dayStart
+        let currentWeek = workouts.filter { $0.date >= weekStart && $0.date < weekEnd }
+        var lines = ["Current week plan (\(day(weekStart, calendar: calendar))...\(day(weekEnd, calendar: calendar))):"]
+        if currentWeek.isEmpty {
+            lines.append("- no workouts scheduled this week")
+        } else {
+            lines += currentWeek.map { workout in
+                "- \(weekdayName(workout.date, calendar: calendar)) \(day(workout.date, calendar: calendar)): \(workoutSummary(workout, calendar: calendar))"
+            }
+        }
+        lines.append("Plan next 14 days:")
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
         let tomorrowWorkouts = workouts
             .filter { calendar.isDate($0.date, inSameDayAs: tomorrow) && $0.status == .planned }

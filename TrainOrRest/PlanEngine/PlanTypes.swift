@@ -95,13 +95,13 @@ struct TrainingPaces: Equatable {
 }
 
 enum WorkoutKind: String, Codable, CaseIterable {
-    case easy, long, tempo, intervals, race
+    case easy, long, tempo, threshold, intervals, race
 
     /// Hard sessions that need a recovery day between them.
     var isQuality: Bool {
         switch self {
         case .easy: false
-        case .long, .tempo, .intervals, .race: true
+        case .long, .tempo, .threshold, .intervals, .race: true
         }
     }
 }

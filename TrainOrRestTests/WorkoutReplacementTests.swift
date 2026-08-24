@@ -42,6 +42,30 @@ final class WorkoutReplacementTests: XCTestCase {
         )
     }
 
+    func testCanStageEasyWorkoutReplacementToThreshold() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let existing = try XCTUnwrap(workout(on: occupiedDay, in: context))
+        existing.kindRaw = WorkoutKind.easy.rawValue
+        existing.details = "Easy run at E pace"
+        try context.save()
+        let threshold = PlanAdjustmentProposal.CreateWorkout(
+            kind: "threshold",
+            blocks: [.init(repeatCount: 1, steps: [
+                .init(role: "warm_up", targetType: "distance_km", targetValue: 2, paceZone: "easy"),
+                .init(role: "work", targetType: "distance_km", targetValue: 4, paceZone: "threshold"),
+                .init(role: "cool_down", targetType: "distance_km", targetValue: 2, paceZone: "easy")
+            ])]
+        )
+
+        let pending = try pendingReplacement(workout: threshold, date: occupiedDay, in: context)
+
+        XCTAssertEqual(pending.existing.kind, .easy)
+        XCTAssertEqual(pending.proposed.kind, .threshold)
+        XCTAssertEqual(pending.proposed.distanceKm, 8, accuracy: 0.001)
+    }
+
+
     func testConfirmationPreservesIdentityReplacesFieldsAndWritesAudit() throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -63,7 +87,7 @@ final class WorkoutReplacementTests: XCTestCase {
         XCTAssertEqual(replaced.distanceKm, 5, accuracy: 0.001)
         XCTAssertNotEqual(replaced.details, oldDetails)
         XCTAssertEqual(replaced.structure.flatMap(\.steps).map(\.role), [.work])
-        XCTAssertNil(replaced.paceBand)
+        XCTAssertNotNil(replaced.paceBand)
         XCTAssertEqual(replaced.status, .planned)
         XCTAssertTrue(replaced.manuallyOverridden)
         XCTAssertNil(replaced.matchedActivityUUID)
@@ -223,12 +247,26 @@ final class WorkoutReplacementTests: XCTestCase {
         let container = try ModelContainer(
             for: schema, configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)]
         )
+        for step in 0..<11 {
+            container.mainContext.insert(CompletedActivity(
+                hkUUID: UUID(),
+                date: calendar.date(byAdding: .day, value: -(1 + step * 3), to: today)!,
+                distanceMeters: 12_000,
+                durationSeconds: 3_960,
+                avgHeartRate: 145,
+                maxHeartRate: 168,
+                avgPaceSecondsPerKm: 330,
+                sourceName: "Garmin"
+            ))
+        }
+        try container.mainContext.save()
         let goal = GoalSpec(
             distance: .halfMarathon, targetTimeSeconds: 105 * 60,
             raceDate: PlanEngineTestSupport.date(2026, 1, 25),
             availableDays: Set(Weekday.allCases), longRunDay: .sunday
         )
-        let fitness = FitnessProfile(vdot: 44, weeklyVolumeKm: 30, volumeTrend: 0, longestRecentRunKm: 12)
+        let fitness = try PlanStore.currentFitness(in: container.mainContext, today: today, calendar: calendar)
+            ?? FitnessProfile(vdot: 44, weeklyVolumeKm: 30, volumeTrend: 0, longestRecentRunKm: 12)
         try PlanStore.replaceGoal(spec: goal, fitness: fitness, today: today, calendar: calendar, in: container.mainContext)
         return container
     }

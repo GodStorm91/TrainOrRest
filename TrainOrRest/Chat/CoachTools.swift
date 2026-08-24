@@ -185,7 +185,7 @@ enum CoachTools {
             "properties": .object([
                 "kind": .object([
                     "type": .string("string"),
-                    "enum": .array(["easy", "long", "tempo", "intervals"].map(JSONValue.string))
+                    "enum": .array(["easy", "long", "tempo", "threshold", "intervals"].map(JSONValue.string))
                 ]),
                 "blocks": .object([
                     "type": .string("array"),

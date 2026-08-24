@@ -96,7 +96,7 @@ enum WorkoutProse {
             return "Easy run at E pace"
         case .long:
             return "Long run at E pace"
-        case .tempo:
+        case .tempo, .threshold:
             let steps = structure.flatMap(\.steps)
             var parts: [String] = []
             if let warmUp = steps.first(where: { $0.role == .warmUp })?.distanceKm {

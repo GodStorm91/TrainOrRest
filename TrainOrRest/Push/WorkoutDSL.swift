@@ -35,6 +35,8 @@ enum WorkoutDSL {
             "Long Run - \(formatDistance(WorkoutStructure.totalDistanceKm(structure)))"
         case .tempo:
             "Tempo - \(formatDistance(workDistance(in: structure))) @ T pace"
+        case .threshold:
+            "Threshold - \(formatDistance(workDistance(in: structure))) @ T pace"
         case .intervals:
             intervalEventName(structure)
         case .race:
@@ -75,6 +77,8 @@ enum WorkoutDSL {
             switch kind {
             case .tempo:
                 return "Tempo"
+            case .threshold:
+                return "Threshold"
             case .intervals:
                 return "Main set"
             case .easy, .long, .race:

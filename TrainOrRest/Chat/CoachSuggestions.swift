@@ -132,6 +132,7 @@ enum CoachSuggestions {
             case .easy: return "イージー"
             case .long: return "ロング走"
             case .tempo: return "テンポ走"
+            case .threshold: return "閾値走"
             case .intervals: return "インターバル"
             case .race: return "レース"
             }
@@ -140,6 +141,7 @@ enum CoachSuggestions {
             case .easy: return "chạy nhẹ"
             case .long: return "chạy dài"
             case .tempo: return "tempo"
+            case .threshold: return "threshold"
             case .intervals: return "interval"
             case .race: return "chạy đua"
             }

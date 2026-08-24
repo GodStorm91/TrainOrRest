@@ -33,6 +33,7 @@ enum ShoeWorkoutType: String, Codable, CaseIterable, Identifiable {
         case .easy: .easy
         case .long: .longRun
         case .tempo: .tempo
+        case .threshold: .threshold
         case .intervals: .intervals
         case .race: .race
         case nil: .other

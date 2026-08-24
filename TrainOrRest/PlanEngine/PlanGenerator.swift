@@ -304,9 +304,12 @@ enum PlanGenerator {
         kind: WorkoutKind, date: Date, weekVolume: Double, paces: TrainingPaces
     ) -> PlannedWorkoutSpec {
         switch kind {
-        case .tempo:
+        case .tempo, .threshold:
             let tempoKm = rounded(min(max(weekVolume * 0.12, 3), 8))
-            return spec(date: date, built: WorkoutFactory.canonicalTempo(tempoKm: tempoKm, paces: paces))
+            let built = kind == .threshold
+                ? WorkoutFactory.canonicalThreshold(workKm: tempoKm, paces: paces)
+                : WorkoutFactory.canonicalTempo(tempoKm: tempoKm, paces: paces)
+            return spec(date: date, built: built)
         case .intervals:
             let repCount = max(3, min(6, Int(weekVolume * 0.08)))
             return spec(date: date, built: WorkoutFactory.canonicalIntervals(repCount: repCount, paces: paces))

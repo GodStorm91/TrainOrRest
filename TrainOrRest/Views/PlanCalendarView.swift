@@ -387,6 +387,7 @@ extension WorkoutKind {
         case .easy: "Easy"
         case .long: "Long run"
         case .tempo: "Tempo"
+        case .threshold: "Threshold"
         case .intervals: "Intervals"
         case .race: "Race"
         }
@@ -397,6 +398,7 @@ extension WorkoutKind {
         case .easy: "figure.run"
         case .long: "arrow.up.right.circle"
         case .tempo: "gauge.with.needle"
+        case .threshold: "speedometer"
         case .intervals: "timer"
         case .race: "flag.checkered"
         }

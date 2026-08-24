@@ -831,6 +831,7 @@ final class CoachChatStore: ObservableObject {
 
     private static func workoutKind(from lower: String) -> WorkoutKind? {
         if lower.contains("long run") || lower.contains("bai dai") { return .long }
+        if lower.contains("threshold") || lower.contains("nguong") || lower.contains("ngưỡng") { return .threshold }
         if lower.contains("tempo") { return .tempo }
         if lower.contains("interval") || lower.contains("intervals") || lower.contains("bien toc") { return .intervals }
         if lower.contains("easy") || lower.contains("nhe") { return .easy }
@@ -898,7 +899,7 @@ final class CoachChatStore: ObservableObject {
                     ])
                 ]
             )
-        case .tempo:
+        case .tempo, .threshold:
             let workKm = max(0.5, distanceKm - WorkoutFactory.warmupKm - WorkoutFactory.cooldownKm)
             return PlanAdjustmentProposal.CreateWorkout(
                 kind: kind.rawValue,
