@@ -4,8 +4,12 @@ import SwiftUI
 struct WorkoutDetailView: View {
     @Bindable var workout: PlannedWorkout
     @Query private var activities: [CompletedActivity]
+    @Query(sort: \RunningShoe.createdAt, order: .reverse) private var shoes: [RunningShoe]
+    @Query private var mileageEntries: [ShoeMileageEntry]
+    @Query private var storedShoePreferences: [RunningShoePreferences]
     @Query private var googleLinks: [GoogleCalendarEventLink]
     @Query private var googleConnections: [GoogleCalendarConnection]
+    @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var googleCalendar: GoogleCalendarSyncService
     @State private var smartCandidates: [SchedulingCandidate] = []
     @State private var smartSchedulingMessage: String?
@@ -18,6 +22,7 @@ struct WorkoutDetailView: View {
     @State private var isApplyingSmartTime = false
     @State private var smartApplyResult: SmartSchedulingApplyResult?
     @State private var smartOperationKey = UUID().uuidString
+    @State private var isChoosingShoe = false
 
     var body: some View {
         List {
@@ -88,6 +93,24 @@ struct WorkoutDetailView: View {
                 }
             }
 
+            Section("Gear") {
+                Button {
+                    isChoosingShoe = true
+                } label: {
+                    WorkoutShoeRow(
+                        shoe: assignedShoe,
+                        source: workout.shoeAssignmentSource,
+                        isNearMileageRange: assignedShoe.map(isNearMileageRange) ?? false
+                    )
+                }
+                .buttonStyle(.plain)
+                if assignedShoe?.status == .retired {
+                    Text("This workout uses a retired shoe.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.warn)
+                }
+            }
+
             Section("Status") {
                 statusButtons
             }
@@ -116,6 +139,24 @@ struct WorkoutDetailView: View {
             .presentationDragIndicator(.visible)
             .interactiveDismissDisabled(isApplyingSmartTime)
         }
+        .sheet(isPresented: $isChoosingShoe) {
+            ShoePickerSheet(
+                workoutType: ShoeWorkoutType.normalized(from: workout.kind),
+                shoes: shoes,
+                mileageEntries: mileageEntries,
+                recommendedShoeID: automaticShoeID,
+                allowsAutomaticSelection: true,
+                onSelect: { shoe in
+                    workout.shoeID = shoe?.id
+                    workout.shoeAssignmentSource = shoe == nil ? .none : .manual
+                    try? modelContext.save()
+                },
+                onAutomatic: {
+                    applyAutomaticShoe()
+                    try? modelContext.save()
+                }
+            )
+        }
         .onAppear {
             NotificationCenter.default.post(name: .torSetBottomDockHidden, object: true)
         }
@@ -132,6 +173,48 @@ struct WorkoutDetailView: View {
     private var matchedActivity: CompletedActivity? {
         guard let uuid = workout.matchedActivityUUID else { return nil }
         return activities.first { $0.hkUUID == uuid }
+    }
+
+    private var assignedShoe: RunningShoe? {
+        guard let shoeID = workout.shoeID else { return nil }
+        return shoes.first { $0.id == shoeID }
+    }
+
+    private var shoePreferences: RunningShoePreferences {
+        storedShoePreferences.first ?? RunningShoePreferences()
+    }
+
+    private var automaticShoeID: UUID? {
+        ShoeAssignmentService.selectShoeForWorkout(
+            workoutType: ShoeWorkoutType.normalized(from: workout.kind),
+            activeShoes: shoes,
+            preferences: shoePreferences,
+            existingShoeID: nil,
+            existingAssignmentSource: .none,
+            mileageEntries: mileageEntries
+        ).shoeID
+    }
+
+    private func applyAutomaticShoe() {
+        if storedShoePreferences.isEmpty {
+            modelContext.insert(shoePreferences)
+        }
+        workout.shoeID = nil
+        workout.shoeAssignmentSource = .none
+        ShoeAssignmentService.applySelection(
+            to: workout,
+            shoes: shoes,
+            preferences: shoePreferences,
+            entries: mileageEntries
+        )
+    }
+
+    private func isNearMileageRange(_ shoe: RunningShoe) -> Bool {
+        ShoeWearStatusService.isNearRetirement(
+            shoe,
+            ledger: mileageEntries,
+            thresholdPercent: shoePreferences.nearRetirementThresholdPercent
+        )
     }
 
     private var isNotVisibleInGoogleCalendar: Bool {

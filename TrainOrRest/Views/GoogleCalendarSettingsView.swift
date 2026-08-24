@@ -208,23 +208,6 @@ struct GoogleCalendarSettingsView: View {
 
             smartSchedulingSection
 
-            if let summary = connection.lastSyncSummary {
-                Section {
-                    Text(summary)
-                        .foregroundStyle(connection.connectionStatus == .partialFailure ? Theme.warn : Theme.dim)
-                }
-            }
-
-            if let report = googleCalendar.lastDebugReport, !report.isEmpty {
-                Section {
-                    DebugReportView(text: report)
-                } header: {
-                    Text("Google sync debug")
-                } footer: {
-                    Text("Use this to see whether the failure is authentication, calendar access, payload update, stale event deletion, or unchanged-event skipping.")
-                }
-            }
-
             let recentChanges = calendarChanges.filter { $0.connectionID == connection.uuid }.prefix(5)
             if !recentChanges.isEmpty || connection.lastCalendarChangeSummary != nil {
                 Section {

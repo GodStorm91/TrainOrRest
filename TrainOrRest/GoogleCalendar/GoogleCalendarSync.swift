@@ -2652,8 +2652,7 @@ final class GoogleCalendarSyncService: ObservableObject {
 
         var summary: String {
             if failed > 0 {
-                let first = failureDetails.first.map { " First retry: \($0)." } ?? ""
-                return "\(created + updated + skipped) synced, \(failed) will retry.\(first)"
+                return "\(created + updated + skipped) synced, \(failed) will retry."
             }
             return "\(created + updated + skipped) workouts synced."
         }

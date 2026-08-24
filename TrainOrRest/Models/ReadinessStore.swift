@@ -205,11 +205,14 @@ enum ReadinessStore {
         for row in replaceable {
             context.delete(row)
         }
+        var insertedWorkouts: [PlannedWorkout] = []
         for (week, workoutSpec) in incoming {
             let workout = PlannedWorkout(spec: workoutSpec, weekIndex: week.index, phase: week.phase)
             workout.plan = plan
             context.insert(workout)
+            insertedWorkouts.append(workout)
         }
+        try ShoeAssignmentService.assignAutomaticShoes(to: insertedWorkouts, in: context)
         plan.generatedAt = today
         plan.anchorDate = spec.anchorDate
         plan.weekPhasesRaw = spec.weeks.map(\.phase.rawValue)

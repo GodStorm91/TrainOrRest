@@ -10,6 +10,7 @@ struct PlanMonthView: View {
     @Binding var monthAnchor: Date
     @Binding var selectedDate: Date
     var onReviewRunInChat: (CompletedActivity) -> Void = { _ in }
+    @Query(sort: \RunningShoe.createdAt, order: .reverse) private var shoes: [RunningShoe]
 
     private let calendar = Calendar.current
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 3), count: 7)
@@ -239,6 +240,14 @@ struct PlanMonthView: View {
                     Text(subtitle(workout))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Theme.dim)
+                    if let shoe = assignedShoe(for: workout) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "shoeprints.fill")
+                            Text(workout.shoeAssignmentSource == .auto ? "\(shoe.displayName) · Auto" : shoe.displayName)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                    }
                 }
                 Spacer(minLength: 8)
                 statusBadge(workout, isToday: highlighted)
@@ -364,5 +373,10 @@ struct PlanMonthView: View {
 
     private func matchedWorkout(for activity: CompletedActivity) -> PlannedWorkout? {
         workouts.first(where: { $0.matchedActivityUUID == activity.hkUUID }) ?? workouts(on: activity.date).first
+    }
+
+    private func assignedShoe(for workout: PlannedWorkout) -> RunningShoe? {
+        guard let shoeID = workout.shoeID else { return nil }
+        return shoes.first { $0.id == shoeID }
     }
 }

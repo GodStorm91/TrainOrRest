@@ -10,6 +10,7 @@ struct PlanWeekListView: View {
 
     @Query(sort: \PlannedWorkout.date) private var workouts: [PlannedWorkout]
     @Query(sort: \CompletedActivity.date, order: .reverse) private var completedActivities: [CompletedActivity]
+    @Query(sort: \RunningShoe.createdAt, order: .reverse) private var shoes: [RunningShoe]
     @Query private var plans: [TrainingPlan]
 
     @State private var expandedWeekStarts: Set<Date> = []
@@ -154,6 +155,14 @@ struct PlanWeekListView: View {
                     Text(plannedSubtitle(workout))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Theme.dim)
+                    if let shoe = assignedShoe(for: workout) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "shoeprints.fill")
+                            Text(workout.shoeAssignmentSource == .auto ? "\(shoe.displayName) · Auto" : shoe.displayName)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                    }
                 }
                 Spacer(minLength: 8)
                 statusBadge(workout)
@@ -318,5 +327,10 @@ struct PlanWeekListView: View {
 
     private func matchedWorkout(for activity: CompletedActivity) -> PlannedWorkout? {
         workouts.first(where: { $0.matchedActivityUUID == activity.hkUUID }) ?? workouts(on: activity.date).first
+    }
+
+    private func assignedShoe(for workout: PlannedWorkout) -> RunningShoe? {
+        guard let shoeID = workout.shoeID else { return nil }
+        return shoes.first { $0.id == shoeID }
     }
 }

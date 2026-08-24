@@ -22,6 +22,8 @@ final class PlannedWorkout {
     /// Set by user actions; auto-matching never overwrites a manual decision.
     var manuallyOverridden: Bool
     var matchedActivityUUID: UUID?
+    var shoeID: UUID?
+    var shoeAssignmentSourceRaw: String?
     var scheduleUpdatedFromRaw: String?
     var scheduleUpdatedAt: Date?
     var scheduleLock: Bool?
@@ -41,6 +43,8 @@ final class PlannedWorkout {
         self.statusRaw = WorkoutStatus.planned.rawValue
         self.manuallyOverridden = false
         self.matchedActivityUUID = nil
+        self.shoeID = nil
+        self.shoeAssignmentSourceRaw = ShoeAssignmentSource.none.rawValue
         self.scheduleUpdatedFromRaw = nil
         self.scheduleUpdatedAt = nil
         self.scheduleLock = false

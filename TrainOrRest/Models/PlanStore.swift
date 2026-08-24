@@ -57,13 +57,16 @@ enum PlanStore {
         let planSpec = PlanGenerator.generate(goal: spec, fitness: fitness, today: today, calendar: calendar)
         let plan = TrainingPlan(spec: planSpec, generatedAt: today)
         context.insert(plan)
+        var insertedWorkouts: [PlannedWorkout] = []
         for week in planSpec.weeks {
             for workoutSpec in week.workouts {
                 let workout = PlannedWorkout(spec: workoutSpec, weekIndex: week.index, phase: week.phase)
                 workout.plan = plan
                 context.insert(workout)
+                insertedWorkouts.append(workout)
             }
         }
+        try ShoeAssignmentService.assignAutomaticShoes(to: insertedWorkouts, in: context)
         try context.save()
     }
 
@@ -98,6 +101,13 @@ enum PlanStore {
             if let activityID = matches[workout.uuid] {
                 workout.status = .done
                 workout.matchedActivityUUID = activityID
+                if let activity = activities.first(where: { $0.hkUUID == activityID }),
+                   activity.shoeAssignmentSource != .manual,
+                   activity.shoeAssignmentSource != .syncedProvider {
+                    activity.shoeID = workout.shoeID
+                    activity.shoeAssignmentSource = workout.shoeID == nil ? .none : workout.shoeAssignmentSource
+                    try ShoeMileageService.syncMileage(for: activity, in: context)
+                }
             }
         }
         try context.save()

@@ -114,6 +114,7 @@ final class SyncEngine: ObservableObject {
                 existing.maxHeartRate = summary.maxHeartRate
                 existing.avgPaceSecondsPerKm = pace
                 existing.sourceName = summary.sourceName
+                try ShoeMileageService.syncMileage(for: existing, in: modelContext)
             } else {
                 modelContext.insert(CompletedActivity(
                     hkUUID: summary.uuid,
@@ -129,6 +130,7 @@ final class SyncEngine: ObservableObject {
         }
 
         for uuid in delta.deletedUUIDs {
+            try ShoeMileageService.removeMileage(forActivityID: uuid, in: modelContext)
             if let activity = try fetchActivity(hkUUID: uuid) {
                 modelContext.delete(activity)
             }

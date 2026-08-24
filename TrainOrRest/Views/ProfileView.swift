@@ -206,6 +206,7 @@ struct ProfileView: View {
     private var personalNavigationRows: some View {
         VStack(spacing: 10) {
             navRow("Run history", systemImage: "figure.run") { ActivityListView() }
+            navRow("Running Shoes", systemImage: "shoeprints.fill") { RunningShoesView() }
         }
     }
 

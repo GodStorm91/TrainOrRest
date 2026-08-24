@@ -4,6 +4,10 @@ import SwiftUI
 struct ActivityDetailView: View {
     let activity: CompletedActivity
     @Query(sort: \PlannedWorkout.date) private var plannedWorkouts: [PlannedWorkout]
+    @Query(sort: \RunningShoe.createdAt, order: .reverse) private var shoes: [RunningShoe]
+    @Query private var mileageEntries: [ShoeMileageEntry]
+    @Query private var storedShoePreferences: [RunningShoePreferences]
+    @Environment(\.modelContext) private var modelContext
     @AppStorage(WorkoutPushSettings.athleteIDKey) private var intervalsAthleteID = ""
 
     @State private var analysisExpanded = false
@@ -11,6 +15,7 @@ struct ActivityDetailView: View {
     @State private var expandedTechnicalSection: ActivityTechnicalSection?
     @State private var intervalsAnalysis: IntervalsActivityAnalysisData?
     @State private var intervalsLoadState: IntervalsActivityLoadState = .idle
+    @State private var isChoosingShoe = false
 
     private let calendar = Calendar.current
 
@@ -39,6 +44,22 @@ struct ActivityDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: activity.hkUUID) {
             await loadIntervalsAnalysis()
+        }
+        .sheet(isPresented: $isChoosingShoe) {
+            ShoePickerSheet(
+                workoutType: ShoeWorkoutType.normalized(from: matchedWorkout?.kind),
+                shoes: shoes,
+                mileageEntries: mileageEntries,
+                recommendedShoeID: recommendedShoeID,
+                allowsAutomaticSelection: false,
+                onSelect: { shoe in
+                    activity.shoeID = shoe?.id
+                    activity.shoeAssignmentSource = shoe == nil ? .none : .manual
+                    try? ShoeMileageService.syncMileage(for: activity, in: modelContext)
+                    try? modelContext.save()
+                },
+                onAutomatic: nil
+            )
         }
     }
 
@@ -108,8 +129,24 @@ struct ActivityDetailView: View {
             CollapsibleMetricSection(
                 section: .gear,
                 expandedSection: $expandedTechnicalSection,
-                preview: intervalsAnalysis?.deviceName ?? activity.sourceName
+                preview: assignedShoe?.displayName ?? intervalsAnalysis?.deviceName ?? activity.sourceName
             ) {
+                Button {
+                    isChoosingShoe = true
+                } label: {
+                    WorkoutShoeRow(
+                        shoe: assignedShoe,
+                        source: activity.shoeAssignmentSource,
+                        isNearMileageRange: assignedShoe.map(isNearMileageRange) ?? false
+                    )
+                }
+                .buttonStyle(.plain)
+                if let assignedShoe {
+                    MetricRow(
+                        label: "Shoe total",
+                        value: "\(kmText(ShoeMileageService.currentMileageKm(for: assignedShoe, ledger: mileageEntries))) km"
+                    )
+                }
                 MetricRow(label: "Recorded by", value: activity.sourceName)
                 MetricRow(label: "Analysis source", value: intervalsAnalysis == nil ? "Apple Health import" : "intervals.icu Garmin import")
                 if let deviceName = intervalsAnalysis?.deviceName {
@@ -178,6 +215,35 @@ struct ActivityDetailView: View {
         return plannedWorkouts.first {
             calendar.isDate($0.date, inSameDayAs: activity.date)
         }
+    }
+
+    private var assignedShoe: RunningShoe? {
+        guard let shoeID = activity.shoeID else { return nil }
+        return shoes.first { $0.id == shoeID }
+    }
+
+    private var shoePreferences: RunningShoePreferences {
+        storedShoePreferences.first ?? RunningShoePreferences()
+    }
+
+    private var recommendedShoeID: UUID? {
+        if let shoeID = matchedWorkout?.shoeID { return shoeID }
+        return ShoeAssignmentService.selectShoeForWorkout(
+            workoutType: ShoeWorkoutType.normalized(from: matchedWorkout?.kind),
+            activeShoes: shoes,
+            preferences: shoePreferences,
+            existingShoeID: nil,
+            existingAssignmentSource: .none,
+            mileageEntries: mileageEntries
+        ).shoeID
+    }
+
+    private func isNearMileageRange(_ shoe: RunningShoe) -> Bool {
+        ShoeWearStatusService.isNearRetirement(
+            shoe,
+            ledger: mileageEntries,
+            thresholdPercent: shoePreferences.nearRetirementThresholdPercent
+        )
     }
 }
 

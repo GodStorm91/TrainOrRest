@@ -28,7 +28,8 @@ struct TrainOrRestApp: App {
                 CoachRequestSnapshot.self, CoachMemoryItem.self,
                 GoogleCalendarConnection.self, GoogleCalendarEventLink.self,
                 GoogleCalendarInboundChange.self, ScheduleChangeOperation.self,
-                GoogleAvailabilityCalendar.self, DayAvailability.self
+                GoogleAvailabilityCalendar.self, DayAvailability.self,
+                RunningShoe.self, ShoeMileageEntry.self, RunningShoePreferences.self
             )
         } catch {
             fatalError("Failed to create SwiftData container: \(error)")
