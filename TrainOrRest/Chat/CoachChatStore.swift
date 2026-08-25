@@ -579,9 +579,6 @@ final class CoachChatStore: ObservableObject {
     }
 
     private func failureCategory(for error: Error, snapshot: CoachRequestSnapshot) -> CoachErrorCategory {
-        if snapshot.actionType == .planMutation {
-            return .mutationUnknown
-        }
         if error is CoachRetryUnavailableError {
             return .missingAttachment
         }

@@ -1281,7 +1281,7 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
     }
 
-    func testTransientConnectionFailurePersistsInlineFailedAssistantTurn() async throws {
+    func testTransientPlanEditConnectionFailurePersistsRetryableInlineFailure() async throws {
         let container = try makeContainer()
         let context = container.mainContext
         try seedTrainingData(in: context)
@@ -1293,8 +1293,8 @@ final class ChatFeatureTests: XCTestCase {
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertEqual(messages.map(\.role), [.user, .assistant])
         let failed = try XCTUnwrap(messages.last)
-        XCTAssertEqual(failed.assistantStatus, .reconciling)
-        XCTAssertEqual(failed.errorCategory, .mutationUnknown)
+        XCTAssertEqual(failed.assistantStatus, .failed)
+        XCTAssertEqual(failed.errorCategory, .retryableResponse)
         XCTAssertEqual(failed.parentUserTurnID, messages.first?.turnID)
         XCTAssertEqual(failed.attemptCount, 1)
         XCTAssertEqual(failed.text, "")
