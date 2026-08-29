@@ -209,6 +209,9 @@ enum GoalAssessmentLabelKey: String, Equatable {
     case metricProbabilityExplanation
     case viewRecommendation
     case viewMoreItems
+    case remainingPlan
+    case currentTrainingPlan
+    case healthData
     case weeklyVolumeBehindTitle
     case missedKeyWorkoutTitle
     case missedSessionsTitle

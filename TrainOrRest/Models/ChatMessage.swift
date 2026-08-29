@@ -9,6 +9,37 @@ enum AssistantTurnStatus: String, Codable {
     case queued, streaming, completed, failed, retrying, dismissed, reconciling, cancelled
 }
 
+enum CoachProcessingStage: String, Codable, Equatable {
+    case preparingContext
+    case readingTrainingPlan
+    case comparingWithGoal
+    case checkingTrainingLoad
+    case checkingRecovery
+    case reviewingUpcomingWorkouts
+    case buildingRecommendation
+    case finalizing
+}
+
+enum CoachGenerationState: Equatable {
+    case idle
+    case sending(messageId: UUID)
+    case processing(messageId: UUID, stage: CoachProcessingStage?)
+    case streaming(messageId: UUID)
+    case awaitingChoice(messageId: UUID, interactionId: String)
+    case completed(messageId: UUID)
+    case failed(messageId: UUID, error: CoachErrorCategory?)
+    case cancelled(messageId: UUID)
+
+    var messageId: UUID? {
+        switch self {
+        case .idle:
+            return nil
+        case .sending(let id), .processing(let id, _), .streaming(let id), .awaitingChoice(let id, _), .completed(let id), .failed(let id, _), .cancelled(let id):
+            return id
+        }
+    }
+}
+
 enum CoachErrorCategory: String, Codable {
     case retryableResponse
     case offline
@@ -47,6 +78,7 @@ final class ChatMessage {
     var isIncompleteStorage: Bool?
     var announcedFailureStorage: Bool?
     var interactionJSON: String?
+    var contextItemsJSON: String?
 
     init(
         uuid: UUID = UUID(),
@@ -67,7 +99,8 @@ final class ChatMessage {
         operationID: UUID? = nil,
         isIncomplete: Bool = false,
         announcedFailure: Bool = false,
-        interaction: CoachResponseInteraction? = nil
+        interaction: CoachResponseInteraction? = nil,
+        contextItems: [CoachContextItem] = []
     ) {
         self.uuid = uuid
         self.roleRaw = role.rawValue
@@ -88,6 +121,7 @@ final class ChatMessage {
         self.isIncompleteStorage = isIncomplete
         self.announcedFailureStorage = announcedFailure
         self.interactionJSON = CoachInteractionCodec.encode(interaction)
+        self.contextItemsJSON = Self.encode(contextItems)
     }
 
     var role: ChatRole {
@@ -135,6 +169,22 @@ final class ChatMessage {
         get { CoachInteractionCodec.decode(interactionJSON) }
         set { interactionJSON = CoachInteractionCodec.encode(newValue) }
     }
+
+    var contextItems: [CoachContextItem] {
+        get { Self.decode([CoachContextItem].self, from: contextItemsJSON ?? "") ?? [] }
+        set { contextItemsJSON = Self.encode(newValue) }
+    }
+
+    private static func encode<T: Encodable>(_ value: T) -> String {
+        guard let data = try? JSONEncoder().encode(value),
+              let string = String(data: data, encoding: .utf8) else { return "" }
+        return string
+    }
+
+    private static func decode<T: Decodable>(_ type: T.Type, from string: String) -> T? {
+        guard let data = string.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
+    }
 }
 
 @Model
@@ -156,6 +206,10 @@ final class CoachRequestSnapshot {
     var interactionId: String?
     var selectedOptionId: String?
     var isCustomInteractionResponseStorage: Bool?
+    var expectedResponseInteractionJSON: String?
+    var displayText: String?
+    var contextSnapshotId: String?
+    var contextItemsJSON: String?
 
     init(
         id: UUID = UUID(),
@@ -173,7 +227,11 @@ final class CoachRequestSnapshot {
         threadID: UUID?,
         interactionId: String? = nil,
         selectedOptionId: String? = nil,
-        isCustomInteractionResponse: Bool = false
+        isCustomInteractionResponse: Bool = false,
+        expectedResponseInteraction: CoachResponseInteraction? = nil,
+        displayText: String? = nil,
+        contextSnapshotId: String? = nil,
+        contextItems: [CoachContextItem] = []
     ) {
         self.id = id
         self.userTurnID = userTurnID
@@ -192,6 +250,10 @@ final class CoachRequestSnapshot {
         self.interactionId = interactionId
         self.selectedOptionId = selectedOptionId
         self.isCustomInteractionResponseStorage = isCustomInteractionResponse
+        self.expectedResponseInteractionJSON = CoachInteractionCodec.encode(expectedResponseInteraction)
+        self.displayText = displayText
+        self.contextSnapshotId = contextSnapshotId
+        self.contextItemsJSON = Self.encode(contextItems)
     }
 
     var actionType: CoachRequestActionType {
@@ -209,6 +271,16 @@ final class CoachRequestSnapshot {
     var isCustomInteractionResponse: Bool {
         get { isCustomInteractionResponseStorage ?? false }
         set { isCustomInteractionResponseStorage = newValue }
+    }
+
+    var expectedResponseInteraction: CoachResponseInteraction? {
+        get { CoachInteractionCodec.decode(expectedResponseInteractionJSON) }
+        set { expectedResponseInteractionJSON = CoachInteractionCodec.encode(newValue) }
+    }
+
+    var contextItems: [CoachContextItem] {
+        get { Self.decode([CoachContextItem].self, from: contextItemsJSON ?? "") ?? [] }
+        set { contextItemsJSON = Self.encode(newValue) }
     }
 
     var interactionMetadataPrompt: String? {

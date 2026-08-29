@@ -10,6 +10,7 @@ private struct CoachRetryUnavailableError: LocalizedError {
 final class CoachChatStore: ObservableObject {
     @Published private(set) var isSending = false
     @Published private(set) var isRetrying = false
+    @Published private(set) var generationState: CoachGenerationState = .idle
     @Published var lastError: String?
 
     private let anthropicClient: ClaudeServicing
@@ -45,6 +46,10 @@ final class CoachChatStore: ObservableObject {
         selectedOptionId: String? = nil,
         isCustomInteractionResponse: Bool = false,
         actionTypeOverride: CoachRequestActionType? = nil,
+        expectedResponseInteraction: CoachResponseInteraction? = nil,
+        displayText: String? = nil,
+        contextSnapshotId: String? = nil,
+        contextItems: [CoachContextItem] = [],
         in context: ModelContext
     ) async -> Bool {
         let account = CoachModelProvider.apiKeyAccount(for: model)
@@ -64,6 +69,10 @@ final class CoachChatStore: ObservableObject {
             selectedOptionId: selectedOptionId,
             isCustomInteractionResponse: isCustomInteractionResponse,
             actionTypeOverride: actionTypeOverride,
+            expectedResponseInteraction: expectedResponseInteraction,
+            displayText: displayText,
+            contextSnapshotId: contextSnapshotId,
+            contextItems: contextItems,
             in: context
         )
     }
@@ -81,6 +90,10 @@ final class CoachChatStore: ObservableObject {
         selectedOptionId: String? = nil,
         isCustomInteractionResponse: Bool = false,
         actionTypeOverride: CoachRequestActionType? = nil,
+        expectedResponseInteraction: CoachResponseInteraction? = nil,
+        displayText: String? = nil,
+        contextSnapshotId: String? = nil,
+        contextItems: [CoachContextItem] = [],
         in context: ModelContext
     ) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -110,7 +123,14 @@ final class CoachChatStore: ObservableObject {
         isSending = true
         lastError = nil
 
-        let userTurn = ChatMessage(role: .user, text: trimmed, date: messageDate, threadID: threadID)
+        let visibleText = (displayText ?? trimmed).trimmingCharacters(in: .whitespacesAndNewlines)
+        let userTurn = ChatMessage(
+            role: .user,
+            text: visibleText.isEmpty ? trimmed : visibleText,
+            date: messageDate,
+            threadID: threadID,
+            contextItems: contextItems
+        )
         context.insert(userTurn)
         let snapshot = CoachRequestSnapshot(
             userTurnID: userTurn.turnID,
@@ -125,7 +145,11 @@ final class CoachChatStore: ObservableObject {
             threadID: threadID,
             interactionId: interactionId,
             selectedOptionId: selectedOptionId,
-            isCustomInteractionResponse: isCustomInteractionResponse
+            isCustomInteractionResponse: isCustomInteractionResponse,
+            expectedResponseInteraction: expectedResponseInteraction,
+            displayText: visibleText.isEmpty ? trimmed : visibleText,
+            contextSnapshotId: contextSnapshotId,
+            contextItems: contextItems
         )
         context.insert(snapshot)
         let assistantTurn = ChatMessage(
@@ -141,7 +165,8 @@ final class CoachChatStore: ObservableObject {
             operationID: snapshot.operationID
         )
         context.insert(assistantTurn)
-        updateThread(threadID, titleFrom: trimmed, in: context)
+        generationState = .sending(messageId: assistantTurn.turnID)
+        updateThread(threadID, titleFrom: visibleText.isEmpty ? trimmed : visibleText, in: context)
 
         do {
             if try handleContextualDistanceShortcut(
@@ -193,6 +218,11 @@ final class CoachChatStore: ObservableObject {
             statusBeforeStreaming: .streaming
         )
         isSending = false
+        if assistantTurn.assistantStatus == .completed, let interaction = assistantTurn.interaction, interaction.status == .pending {
+            generationState = .awaitingChoice(messageId: assistantTurn.turnID, interactionId: interaction.id)
+        } else if assistantTurn.assistantStatus == .completed {
+            generationState = .completed(messageId: assistantTurn.turnID)
+        }
         return assistantTurn.assistantStatus == .completed
     }
 
@@ -452,6 +482,7 @@ final class CoachChatStore: ObservableObject {
         assistantTurn.errorCategory = nil
         assistantTurn.errorMessage = nil
         assistantTurn.interaction = nil
+        generationState = .processing(messageId: assistantTurn.turnID, stage: .preparingContext)
         try? context.save()
 
         do {
@@ -486,6 +517,7 @@ final class CoachChatStore: ObservableObject {
         in context: ModelContext
     ) async throws {
         let today = snapshot.createdAt
+        generationState = .processing(messageId: assistantTurn.turnID, stage: .preparingContext)
         var system = try CoachContextBuilder.build(in: context, today: today, calendar: calendar)
         let directive = CoachLanguage(rawValue: snapshot.locale)?.systemPromptDirective ?? CoachLanguage.current.systemPromptDirective
         if !directive.isEmpty {
@@ -496,6 +528,9 @@ final class CoachChatStore: ObservableObject {
 When your reply asks the user to choose between next steps, call `\(CoachToolCatalog.coachResponseName)` with `content` and structured `interaction` metadata instead of writing the choices only as prose. Use `single_choice`, 2-4 concise options, and `allowOther: true` when a custom answer is useful. If no decision is needed, a normal text response is fine.
 """
         let attachments = try attachments(from: snapshot, in: context)
+        if !attachments.isEmpty {
+            generationState = .processing(messageId: assistantTurn.turnID, stage: progressStage(for: attachments, snapshot: snapshot))
+        }
         var conversation = try messageHistory(
             threadID: snapshot.threadID,
             boundaryMessageID: snapshot.contextBoundaryMessageID,
@@ -531,6 +566,9 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
                 messages: conversation
             )
             let client = CoachModelProvider.client(for: model, anthropicClient: anthropicClient, openAIClient: openAIClient)
+            if assistantTurn.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                generationState = .processing(messageId: assistantTurn.turnID, stage: .buildingRecommendation)
+            }
             let events = try await client.stream(request, apiKey: apiKey)
             var replacementStarted = false
             var lastStreamSave = Date.distantPast
@@ -543,6 +581,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
                         assistantTurn.text = ""
                         assistantTurn.assistantStatus = .streaming
                         assistantTurn.isIncomplete = false
+                        self.generationState = .streaming(messageId: assistantTurn.turnID)
                         replacementStarted = true
                     }
                     assistantTurn.text += delta
@@ -596,14 +635,18 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
                     break
                 }
                 assistantTurn.text = text.isEmpty ? "I could not produce a response." : text
+                assistantTurn.interaction = fallbackInteraction(from: snapshot)
                 assistantTurn.appliedAdjustment = applied.isEmpty ? nil : applied.joined(separator: "; ")
+                if let interaction = assistantTurn.interaction, interaction.status == .pending {
+                    generationState = .awaitingChoice(messageId: assistantTurn.turnID, interactionId: interaction.id)
+                }
                 try context.save()
                 return
             }
 
             if toolUses.count == 1, toolUses[0].1 == CoachToolCatalog.coachResponseName {
                 let payload = try toolUses[0].2.decoded(CoachStructuredResponsePayload.self)
-                var interaction = payload.interaction
+                var interaction = payload.interaction ?? fallbackInteraction(from: snapshot)
                 interaction?.normalizeForNewAssistantMessage(
                     fallbackLanguage: CoachLanguage(rawValue: snapshot.locale) ?? .current
                 )
@@ -614,6 +657,9 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
                 assistantTurn.text = content.isEmpty ? response.content.textContent : content
                 assistantTurn.interaction = interaction
                 assistantTurn.appliedAdjustment = applied.isEmpty ? nil : applied.joined(separator: "; ")
+                if let interaction, interaction.status == .pending {
+                    generationState = .awaitingChoice(messageId: assistantTurn.turnID, interactionId: interaction.id)
+                }
                 try context.save()
                 return
             }
@@ -693,7 +739,34 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         assistantTurn.isIncomplete = !assistantTurn.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         assistantTurn.activeAttemptID = nil
         lastError = message
+        generationState = .failed(messageId: assistantTurn.turnID, error: category)
         try? context.save()
+    }
+
+    private func progressStage(
+        for attachments: [CoachContextAttachment],
+        snapshot: CoachRequestSnapshot
+    ) -> CoachProcessingStage {
+        if snapshot.messageText.localizedCaseInsensitiveContains("goal")
+            || snapshot.contextItems.contains(where: { $0.type == .raceGoal || $0.type == .planAssessment }) {
+            return .comparingWithGoal
+        }
+        if attachments.contains(where: {
+            if case .plannedWorkout = $0 { return true }
+            return false
+        }) {
+            return .reviewingUpcomingWorkouts
+        }
+        if attachments.contains(where: {
+            if case .completedActivity = $0 { return true }
+            return false
+        }) {
+            return .readingTrainingPlan
+        }
+        if attachments.contains(.health) {
+            return .checkingRecovery
+        }
+        return .preparingContext
     }
 
     private func failureCategory(for error: Error, snapshot: CoachRequestSnapshot) -> CoachErrorCategory {
@@ -742,6 +815,14 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         case .planMutation:
             return .auto
         }
+    }
+
+    private func fallbackInteraction(from snapshot: CoachRequestSnapshot) -> CoachResponseInteraction? {
+        guard var interaction = snapshot.expectedResponseInteraction else { return nil }
+        interaction.normalizeForNewAssistantMessage(
+            fallbackLanguage: CoachLanguage(rawValue: snapshot.locale) ?? .current
+        )
+        return interaction.options.count >= 2 ? interaction : nil
     }
 
     private func attachments(from snapshot: CoachRequestSnapshot, in context: ModelContext) throws -> [CoachContextAttachment] {
@@ -1146,12 +1227,21 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         let all = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
             .filter { $0.threadID == threadID }
         guard let boundaryIndex = all.firstIndex(where: { $0.turnID == boundaryMessageID }) else { return [] }
+        let snapshots = try context.fetch(FetchDescriptor<CoachRequestSnapshot>())
+            .reduce(into: [UUID: CoachRequestSnapshot]()) { result, snapshot in
+                result[snapshot.userTurnID] = snapshot
+            }
         return all[...boundaryIndex]
             .suffix(CoachChatConfig.historyLimit)
             .filter { message in
                 message.role == .user || message.assistantStatus == .completed
             }
-            .map { ClaudeMessageParam(role: $0.role.rawValue, content: [.text($0.text)]) }
+            .map { message in
+                let text = message.role == .user
+                    ? (snapshots[message.turnID]?.messageText ?? message.text)
+                    : message.text
+                return ClaudeMessageParam(role: message.role.rawValue, content: [.text(text)])
+            }
     }
 
     private func updateThread(_ threadID: UUID?, titleFrom text: String, in context: ModelContext) {

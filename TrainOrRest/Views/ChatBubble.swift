@@ -37,6 +37,7 @@ struct ChatBubble: View {
     var onCancelRetry: (ChatMessage) -> Void = { _ in }
     var actionableInteractionID: String?
     var isSubmittingInteraction = false
+    var processingStage: CoachProcessingStage?
     var onSelectInteractionOption: (ChatMessage, CoachChoiceOption) -> Void = { _, _ in }
     var onSelectInteractionOther: (ChatMessage, CoachResponseInteraction) -> Void = { _, _ in }
 
@@ -45,6 +46,9 @@ struct ChatBubble: View {
     private var isUser: Bool { message.role == .user }
     private var hasVisibleAssistantText: Bool {
         !isUser && !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    private var showsProcessingState: Bool {
+        !isUser && !hasVisibleAssistantText && [.queued, .streaming].contains(message.assistantStatus)
     }
     private var showsInlineFailureState: Bool {
         !isUser && [.failed, .retrying, .reconciling].contains(message.assistantStatus)
@@ -69,6 +73,20 @@ struct ChatBubble: View {
                         .background(bubbleShape.fill(isUser ? Theme.accent : Theme.card))
                         .overlay { if !isUser { bubbleShape.strokeBorder(Theme.border, lineWidth: 1) } }
                         .shadow(color: isUser ? .clear : Color.black.opacity(0.045), radius: 10, x: 0, y: 4)
+                }
+
+                if isUser, !message.contextItems.isEmpty {
+                    CoachContextChipRow(items: message.contextItems)
+                        .padding(.top, 2)
+                }
+
+                if showsProcessingState {
+                    CoachProcessingRow(
+                        label: language.processingLabel(for: processingStage),
+                        reduceMotion: UIAccessibility.isReduceMotionEnabled
+                    )
+                    .padding(.top, 2)
+                    .transition(.opacity)
                 }
 
                 if message.isIncomplete && hasVisibleAssistantText {
@@ -170,7 +188,7 @@ struct ChatBubble: View {
         if isUser {
             MarkdownMessageView(text: displayText, tone: .onAccent, allowsRuleTokens: false)
         } else {
-            MarkdownMessageView(text: displayText, tone: .standard, allowsRuleTokens: true)
+            CoachProgressiveResponseView(text: displayText, language: language)
                 .textSelection(.enabled)
         }
     }
@@ -351,6 +369,73 @@ struct CoachResponseInteractionView: View {
     }
 }
 
+private struct CoachProgressiveResponseView: View {
+    let text: String
+    let language: CoachLanguage
+    @State private var isExpanded = false
+
+    private var presentation: Presentation {
+        Presentation(text: text)
+    }
+
+    var body: some View {
+        if presentation.shouldCollapse {
+            VStack(alignment: .leading, spacing: 10) {
+                MarkdownMessageView(text: presentation.visibleText, tone: .standard, allowsRuleTokens: true)
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(isExpanded ? language.collapseDetailsLabel : language.expandDetailsLabel)
+                            .font(.caption.weight(.bold))
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption2.weight(.bold))
+                    }
+                    .foregroundStyle(Theme.accent)
+                    .frame(minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isExpanded ? language.collapseDetailsLabel : language.expandDetailsLabel)
+                .accessibilityValue(isExpanded ? language.collapseDetailsLabel : language.expandDetailsLabel)
+
+                if isExpanded {
+                    MarkdownMessageView(text: presentation.detailText, tone: .standard, allowsRuleTokens: true)
+                        .transition(.opacity)
+                }
+            }
+        } else {
+            MarkdownMessageView(text: text, tone: .standard, allowsRuleTokens: true)
+        }
+    }
+
+    private struct Presentation {
+        let visibleText: String
+        let detailText: String
+        let shouldCollapse: Bool
+
+        init(text: String) {
+            let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lines = normalized
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            let nonEmpty = lines.filter { !$0.isEmpty }
+            let bulletLines = nonEmpty.filter { $0.hasPrefix("- ") || $0.hasPrefix("• ") }
+            let cutoff = min(nonEmpty.count, bulletLines.count >= 4 ? 5 : 7)
+            self.shouldCollapse = normalized.count > 900 || nonEmpty.count > 10 || bulletLines.count >= 4
+            if shouldCollapse, cutoff < nonEmpty.count {
+                self.visibleText = nonEmpty.prefix(cutoff).joined(separator: "\n")
+                self.detailText = nonEmpty.dropFirst(cutoff).joined(separator: "\n")
+            } else {
+                self.visibleText = normalized
+                self.detailText = ""
+            }
+        }
+    }
+}
+
 private struct CoachChoiceOptionCard: View {
     let option: CoachChoiceOption
     let language: CoachLanguage
@@ -405,6 +490,93 @@ private struct CoachChoiceOptionCard: View {
             return trimmed?.isEmpty == false ? trimmed : nil
         }
         .joined(separator: ", ")
+    }
+}
+
+private struct CoachContextChipRow: View {
+    let items: [CoachContextItem]
+
+    var body: some View {
+        FlowLayout(spacing: 6, lineSpacing: 6) {
+            ForEach(items) { item in
+                HStack(spacing: 5) {
+                    Image(systemName: symbol(for: item.type))
+                        .font(.caption2.weight(.semibold))
+                        .accessibilityHidden(true)
+                    Text(item.label)
+                        .font(.caption2.weight(.semibold))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(Theme.dim)
+                .padding(.horizontal, 8)
+                .frame(minHeight: 28)
+                .background(Theme.chip, in: Capsule())
+                .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
+                .accessibilityLabel(item.label)
+            }
+        }
+        .frame(maxWidth: 320, alignment: .trailing)
+    }
+
+    private func symbol(for type: CoachContextItem.Kind) -> String {
+        switch type {
+        case .raceGoal:
+            return "flag.checkered"
+        case .remainingPlan, .trainingPlan:
+            return "calendar"
+        case .healthData:
+            return "heart"
+        case .workout, .completedRun:
+            return "figure.run"
+        case .planAssessment:
+            return "chart.line.uptrend.xyaxis"
+        }
+    }
+}
+
+private struct CoachProcessingRow: View {
+    let label: String
+    let reduceMotion: Bool
+    @State private var isPulsing = false
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: "sparkle")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 22, height: 22)
+                .background(Theme.accentSoft, in: Circle())
+                .accessibilityHidden(true)
+            Text(label)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(Theme.dim)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            if !reduceMotion {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(Theme.accent)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: 320, minHeight: 44, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+        .opacity(reduceMotion ? 1 : (isPulsing ? 0.74 : 1))
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                isPulsing = true
+            }
+            UIAccessibility.post(notification: .announcement, argument: label)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
     }
 }
 

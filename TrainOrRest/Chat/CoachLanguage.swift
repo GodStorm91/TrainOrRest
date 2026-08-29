@@ -273,6 +273,100 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         }
     }
 
+    var genericProcessingLabel: String {
+        switch self {
+        case .en: "Coach is analyzing..."
+        case .ja: "Coach が分析中…"
+        case .vi: "Coach đang phân tích…"
+        }
+    }
+
+    var stillProcessingLabel: String {
+        switch self {
+        case .en: "Still processing data..."
+        case .ja: "まだデータを処理中…"
+        case .vi: "Vẫn đang xử lý dữ liệu…"
+        }
+    }
+
+    var continueAnswerLabel: String {
+        switch self {
+        case .en: "Continue answer"
+        case .ja: "回答の続きを見る"
+        case .vi: "Tiếp tục câu trả lời"
+        }
+    }
+
+    var expandDetailsLabel: String {
+        switch self {
+        case .en: "View detailed analysis"
+        case .ja: "詳しい分析を見る"
+        case .vi: "Xem phân tích chi tiết"
+        }
+    }
+
+    var collapseDetailsLabel: String {
+        switch self {
+        case .en: "Collapse"
+        case .ja: "閉じる"
+        case .vi: "Thu gọn"
+        }
+    }
+
+    var responseStartedAnnouncement: String {
+        switch self {
+        case .en: "Coach started responding."
+        case .ja: "Coach の返信が始まりました。"
+        case .vi: "Coach bắt đầu trả lời."
+        }
+    }
+
+    var responseCompleteAnnouncement: String {
+        switch self {
+        case .en: "Coach response complete."
+        case .ja: "Coach の返信が完了しました。"
+        case .vi: "Coach đã trả lời xong."
+        }
+    }
+
+    var cancelledLabel: String {
+        switch self {
+        case .en: "Stopped"
+        case .ja: "停止しました"
+        case .vi: "Đã dừng"
+        }
+    }
+
+    func processingLabel(for stage: CoachProcessingStage?) -> String {
+        guard let stage else { return genericProcessingLabel }
+        switch (self, stage) {
+        case (.en, .preparingContext): return "Preparing data..."
+        case (.ja, .preparingContext): return "データを準備中…"
+        case (.vi, .preparingContext): return "Đang chuẩn bị dữ liệu…"
+        case (.en, .readingTrainingPlan): return "Reading the current plan..."
+        case (.ja, .readingTrainingPlan): return "現在の計画を確認中…"
+        case (.vi, .readingTrainingPlan): return "Đang đọc kế hoạch hiện tại…"
+        case (.en, .comparingWithGoal): return "Comparing with the race goal..."
+        case (.ja, .comparingWithGoal): return "レース目標と比較中…"
+        case (.vi, .comparingWithGoal): return "Đang so sánh với mục tiêu cuộc đua…"
+        case (.en, .checkingTrainingLoad): return "Checking training load..."
+        case (.ja, .checkingTrainingLoad): return "トレーニング負荷を確認中…"
+        case (.vi, .checkingTrainingLoad): return "Đang kiểm tra tải tập…"
+        case (.en, .checkingRecovery): return "Checking recovery..."
+        case (.ja, .checkingRecovery): return "回復状態を確認中…"
+        case (.vi, .checkingRecovery): return "Đang kiểm tra mức hồi phục…"
+        case (.en, .reviewingUpcomingWorkouts): return "Reviewing upcoming workouts..."
+        case (.ja, .reviewingUpcomingWorkouts): return "今後の練習を確認中…"
+        case (.vi, .reviewingUpcomingWorkouts): return "Đang xem các buổi tập sắp tới…"
+        case (.en, .buildingRecommendation): return "Building the recommendation..."
+        case (.ja, .buildingRecommendation): return "提案を作成中…"
+        case (.vi, .buildingRecommendation): return "Đang chuẩn bị đề xuất điều chỉnh…"
+        case (.en, .finalizing): return "Finalizing the response..."
+        case (.ja, .finalizing): return "回答を仕上げ中…"
+        case (.vi, .finalizing): return "Đang hoàn thiện câu trả lời…"
+        }
+    }
+
     var missingAttachmentFailureTitle: String {
         switch self {
         case .en: "Cannot retry with old data"
@@ -658,6 +752,9 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         case (_, .metricProbabilityExplanation): return self == .vi ? "Xác suất đã hiệu chuẩn từ mô hình dự đoán mục tiêu." : self == .ja ? "校正済みモデルによる目標達成確率です。" : "A calibrated probability from a validated goal-prediction model."
         case (_, .viewRecommendation): return self == .vi ? "Xem đề xuất điều chỉnh" : self == .ja ? "調整案を見る" : "View recommendation"
         case (_, .viewMoreItems): return self == .vi ? "Xem thêm \(value ?? 0) điểm" : self == .ja ? "他 \(value ?? 0) 件を見る" : "View \(value ?? 0) more"
+        case (_, .remainingPlan): return self == .vi ? "8 tuần còn lại" : self == .ja ? "残り8週間" : "Remaining plan"
+        case (_, .currentTrainingPlan): return self == .vi ? "Kế hoạch hiện tại" : self == .ja ? "現在の計画" : "Current training plan"
+        case (_, .healthData): return self == .vi ? "Dữ liệu sức khỏe" : self == .ja ? "健康データ" : "Health data"
         case (_, .weeklyVolumeBehindTitle): return self == .vi ? "Tải tập tuần này chưa theo kịp kế hoạch" : self == .ja ? "今週の負荷が計画より遅れています" : "This week's training load is behind plan"
         case (_, .missedKeyWorkoutTitle): return self == .vi ? "Buổi tập trọng điểm chưa hoàn thành" : self == .ja ? "重要練習が未完了です" : "Key workout not completed"
         case (_, .missedSessionsTitle): return self == .vi ? "Tính ổn định tập luyện đang giảm" : self == .ja ? "練習の一貫性が下がっています" : "Training consistency is slipping"

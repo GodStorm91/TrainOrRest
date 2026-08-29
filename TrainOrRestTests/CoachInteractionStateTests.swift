@@ -76,6 +76,30 @@ final class CoachInteractionStateTests: XCTestCase {
         XCTAssertNil(assistant.interaction)
     }
 
+    func testExpectedInteractionRendersWhenReadOnlyModelFallsBackToText() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedMinimalTrainingData(in: context)
+        let client = InteractionMockCoachClient(responses: [.textOnly])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(
+            text: "Propose a concrete adjustment. Do not modify the calendar directly.",
+            model: "claude-test",
+            apiKey: "test-key",
+            threadID: conversationID,
+            actionTypeOverride: .readOnly,
+            expectedResponseInteraction: choiceInteraction(id: "goal_plan_adjustment_next_step"),
+            in: context
+        )
+
+        let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertEqual(assistant.text, "Run easy today.")
+        XCTAssertEqual(assistant.interaction?.id, "goal_plan_adjustment_next_step")
+        XCTAssertEqual(assistant.interaction?.status, .pending)
+        XCTAssertEqual(assistant.interaction?.options.map(\.id), ["keep_plan", "adjust_plan"])
+    }
+
     func testReadOnlyCoachRequestForcesStructuredResponseTool() async throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -103,11 +127,13 @@ final class CoachInteractionStateTests: XCTestCase {
             apiKey: "test-key",
             threadID: conversationID,
             actionTypeOverride: .readOnly,
+            expectedResponseInteraction: choiceInteraction(id: "goal_plan_adjustment_next_step"),
             in: context
         )
 
         let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
         XCTAssertEqual(snapshot.actionType, .readOnly)
+        XCTAssertEqual(snapshot.expectedResponseInteraction?.id, "goal_plan_adjustment_next_step")
         XCTAssertEqual(client.requests.last?.tools.map(\.name), [CoachToolCatalog.coachResponseName])
         XCTAssertEqual(client.requests.last?.toolChoice, .tool(name: CoachToolCatalog.coachResponseName))
     }
@@ -120,6 +146,69 @@ final class CoachInteractionStateTests: XCTestCase {
 
         XCTAssertEqual(first.id, second.id)
         XCTAssertEqual(first.threadTitle, "Calendar schedule review")
+    }
+
+    func testStructuredContextIsNotRenderedInUserBubble() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedMinimalTrainingData(in: context)
+        let client = InteractionMockCoachClient(responses: [.textOnly])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+        let modelPrompt = """
+        Review the remaining training plan.
+        Goal ID: sub4
+        Raw structured context: {"remainingWeeks":8,"target":"3:59:00"}
+        """
+
+        await store.send(
+            text: modelPrompt,
+            model: "claude-test",
+            apiKey: "test-key",
+            threadID: conversationID,
+            actionTypeOverride: .readOnly,
+            displayText: "Hãy đề xuất điều chỉnh kế hoạch 8 tuần còn lại.",
+            contextSnapshotId: "goal-assessment-sub4",
+            contextItems: [
+                CoachContextItem(type: .raceGoal, label: "Mục tiêu Sub-4"),
+                CoachContextItem(type: .remainingPlan, label: "8 tuần còn lại"),
+                CoachContextItem(type: .trainingPlan, label: "Kế hoạch hiện tại")
+            ],
+            in: context
+        )
+
+        let user = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).first { $0.role == .user })
+        let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
+        XCTAssertEqual(user.text, "Hãy đề xuất điều chỉnh kế hoạch 8 tuần còn lại.")
+        XCTAssertFalse(user.text.contains("Raw structured context"))
+        XCTAssertEqual(user.contextItems.map(\.label), ["Mục tiêu Sub-4", "8 tuần còn lại", "Kế hoạch hiện tại"])
+        XCTAssertEqual(snapshot.messageText, modelPrompt)
+        XCTAssertEqual(snapshot.displayText, user.text)
+        XCTAssertEqual(snapshot.contextSnapshotId, "goal-assessment-sub4")
+        XCTAssertTrue(client.requests.last?.messages.last?.content.textContent.contains("Raw structured context") == true)
+    }
+
+    func testGenerationStateMovesThroughStreamingToCompleted() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedMinimalTrainingData(in: context)
+        let client = InteractionMockCoachClient(responses: [.textOnly])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        let didSend = await store.send(
+            text: "Review this run.",
+            model: "claude-test",
+            apiKey: "test-key",
+            threadID: conversationID,
+            in: context
+        )
+
+        XCTAssertTrue(didSend)
+        guard case .completed(let messageId) = store.generationState else {
+            return XCTFail("Expected completed generation state, got \(store.generationState)")
+        }
+        let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertEqual(messageId, assistant.turnID)
+        XCTAssertEqual(assistant.assistantStatus, .completed)
     }
 
     func testSelectingOptionSubmitsValueAndMetadata() async throws {

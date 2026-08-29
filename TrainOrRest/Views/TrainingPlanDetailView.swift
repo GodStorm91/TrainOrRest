@@ -574,36 +574,131 @@ struct TrainingPlanDetailView: View {
 
         return CalendarReviewChatRequest(
             id: "goal-attention-\(assessment.goalId)-\(item.id)",
+            displayText: language.goalAssessmentText(.viewRecommendation),
             prompt: """
-        Propose a concrete training-plan adjustment for this race-goal attention item.
+            Propose a concrete training-plan adjustment for this race-goal attention item.
 
-        Rules:
-        - Do not modify the calendar directly.
-        - Use the existing confirmation flow before applying any plan change.
-        - Base the recommendation only on the structured context below.
-        - End with a structured single-choice interaction so the runner can choose between keeping the plan, asking for a validated plan-adjustment draft, or entering another request.
+            Rules:
+            - Do not modify the calendar directly.
+            - Use the existing confirmation flow before applying any plan change.
+            - Base the recommendation only on the structured context below.
+            - End with a structured single-choice interaction using the provided next-step choices.
 
-        Goal ID: \(assessment.goalId)
-        Attention item ID: \(item.id)
-        Race: \(assessment.raceName)
-        Race date: \(assessment.raceDate.formatted(.dateTime.year().month().day()))
-        Target: \(assessment.targetLabel)
-        Goal metric: \(metricLine)
+            Goal ID: \(assessment.goalId)
+            Attention item ID: \(item.id)
+            Race: \(assessment.raceName)
+            Race date: \(assessment.raceDate.formatted(.dateTime.year().month().day()))
+            Target: \(assessment.targetLabel)
+            Goal metric: \(metricLine)
 
-        Main issue: \(language.goalAssessmentText(item.titleKey))
-        Evidence:
-        \(evidence)
+            Main issue: \(language.goalAssessmentText(item.titleKey))
+            Evidence:
+            \(evidence)
 
-        Factors:
-        \(factorLines)
+            Factors:
+            \(factorLines)
 
-        Upcoming workouts:
-        \(upcoming)
-        """,
+            Upcoming workouts:
+            \(upcoming)
+            """,
             threadTitle: goalAttentionCoachThreadTitle,
             actionTypeOverride: .readOnly,
-            autoSubmit: true
+            autoSubmit: true,
+            expectedResponseInteraction: goalAttentionExpectedInteraction,
+            contextSnapshotId: "goal-assessment-\(assessment.goalId)-\(item.id)",
+            contextItems: goalAttentionContextItems(assessment: assessment, item: item),
+            shouldFocusComposer: false
         )
+    }
+
+    private func goalAttentionContextItems(
+        assessment: GoalAssessment,
+        item: GoalAttentionItem
+    ) -> [CoachContextItem] {
+        [
+            CoachContextItem(type: .raceGoal, label: assessment.targetLabel),
+            CoachContextItem(type: .planAssessment, label: language.goalAssessmentText(item.titleKey)),
+            CoachContextItem(type: .remainingPlan, label: language.goalAssessmentText(.remainingPlan)),
+            CoachContextItem(type: .trainingPlan, label: language.goalAssessmentText(.currentTrainingPlan)),
+            CoachContextItem(type: .healthData, label: language.goalAssessmentText(.healthData))
+        ]
+    }
+
+    private var goalAttentionExpectedInteraction: CoachResponseInteraction {
+        switch language {
+        case .vi:
+            return CoachResponseInteraction(
+                id: "goal_plan_adjustment_next_step",
+                type: .singleChoice,
+                title: "Chọn bước tiếp theo",
+                options: [
+                    CoachChoiceOption(
+                        id: "keep_plan",
+                        label: "Giữ nguyên kế hoạch",
+                        description: "Không thay đổi các buổi tập sắp tới",
+                        value: "Giữ nguyên kế hoạch hiện tại."
+                    ),
+                    CoachChoiceOption(
+                        id: "adjust_plan",
+                        label: "Xem bản nháp điều chỉnh",
+                        description: "Coach chuẩn bị đề xuất để bạn xem trước rồi mới xác nhận",
+                        value: "Hãy tạo bản nháp điều chỉnh kế hoạch đã được kiểm tra để tôi xem trước."
+                    )
+                ],
+                allowOther: true,
+                otherLabel: "Yêu cầu khác…",
+                otherPlaceholder: "Bạn muốn Coach điều chỉnh như thế nào?",
+                status: .pending
+            )
+        case .ja:
+            return CoachResponseInteraction(
+                id: "goal_plan_adjustment_next_step",
+                type: .singleChoice,
+                title: "次のステップを選択",
+                options: [
+                    CoachChoiceOption(
+                        id: "keep_plan",
+                        label: "現在の計画を維持",
+                        description: "今後のワークアウトを変更しません",
+                        value: "現在の計画を維持します。"
+                    ),
+                    CoachChoiceOption(
+                        id: "adjust_plan",
+                        label: "調整案の下書きを見る",
+                        description: "確認してから適用できる提案を Coach が作成します",
+                        value: "確認用の計画調整案を作成してください。"
+                    )
+                ],
+                allowOther: true,
+                otherLabel: "別のリクエスト…",
+                otherPlaceholder: "Coach にどう調整してほしいですか？",
+                status: .pending
+            )
+        case .en:
+            return CoachResponseInteraction(
+                id: "goal_plan_adjustment_next_step",
+                type: .singleChoice,
+                title: "Choose next step",
+                options: [
+                    CoachChoiceOption(
+                        id: "keep_plan",
+                        label: "Keep current plan",
+                        description: "Do not change upcoming workouts",
+                        value: "Keep the current plan."
+                    ),
+                    CoachChoiceOption(
+                        id: "adjust_plan",
+                        label: "View adjustment draft",
+                        description: "Coach prepares a proposal for review before confirmation",
+                        value: "Create a validated plan-adjustment draft for me to review."
+                    )
+                ],
+                allowOther: true,
+                otherLabel: "Other request...",
+                otherPlaceholder: "How would you like Coach to adjust?",
+                status: .pending
+            )
+        }
     }
 
     private var goalAttentionCoachThreadTitle: String {

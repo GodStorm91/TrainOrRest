@@ -43,12 +43,18 @@ struct ChatView: View {
     @State private var pendingOtherResponse: PendingOtherCoachResponse?
     @State private var draftActionTypeOverride: CoachRequestActionType?
     @State private var draftActionTypeOverridePrompt: String?
+    @State private var scrollState = ChatScrollState()
+    @State private var chatViewportHeight: CGFloat = 0
+    @State private var bottomAnchorMaxY: CGFloat = 0
+    @State private var pendingScrollWorkItem: DispatchWorkItem?
+    @State private var hasPositionedInitialThread = false
     @FocusState private var composerFocused: Bool
     @AppStorage("coachEvidenceReviewed") private var coachEvidenceReviewed = false
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
 
     private let calendar = Calendar.current
     private let bottomAnchorID = "chat-feed-bottom-anchor"
+    private let nearBottomThreshold: CGFloat = 110
 
     init(
         bottomNavigation: AnyView? = nil,
@@ -155,6 +161,11 @@ struct ChatView: View {
         }
         .onChange(of: allMessages.count) {
             attachUnthreadedMessagesToActiveThread()
+        }
+        .onChange(of: chatStore.generationState) { _, state in
+            if case .completed = state {
+                UIAccessibility.post(notification: .announcement, argument: language.responseCompleteAnnouncement)
+            }
         }
         .onChange(of: selectedPhotoItem) { _, item in
             loadImageAttachment(from: item)
@@ -499,6 +510,7 @@ struct ChatView: View {
                             },
                             actionableInteractionID: newestPendingInteractionID,
                             isSubmittingInteraction: submittingInteractionID == message.interaction?.id,
+                            processingStage: processingStage(for: message),
                             onSelectInteractionOption: selectInteractionOption,
                             onSelectInteractionOther: selectInteractionOther
                         )
@@ -507,12 +519,25 @@ struct ChatView: View {
                     Color.clear
                         .frame(height: 1)
                         .id(bottomAnchorID)
+                        .background(
+                            GeometryReader { geometry in
+                                Color.clear.preference(
+                                    key: ChatBottomAnchorPreferenceKey.self,
+                                    value: geometry.frame(in: .named("chatFeed")).maxY
+                                )
+                            }
+                        )
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, 12)
                 .padding(.bottom, 18)
             }
             .coordinateSpace(name: "chatFeed")
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.preference(key: ChatViewportHeightPreferenceKey.self, value: geometry.size.height)
+                }
+            )
             .onPreferenceChange(ChatScrollOffsetPreferenceKey.self) { offset in
                 let collapsed = offset < -26
                 if collapsed != isHeaderCollapsed {
@@ -523,18 +548,75 @@ struct ChatView: View {
                     }
                 }
             }
+            .onPreferenceChange(ChatViewportHeightPreferenceKey.self) { height in
+                chatViewportHeight = height
+                updateNearBottomState()
+            }
+            .onPreferenceChange(ChatBottomAnchorPreferenceKey.self) { maxY in
+                bottomAnchorMaxY = maxY
+                updateNearBottomState()
+                guard messages.isEmpty == false else { return }
+                if scrollState.isFollowingStream && !scrollState.isUserDragging {
+                    scheduleScrollToBottom(proxy, animated: false)
+                } else if !scrollState.isNearBottom, chatStore.isSending {
+                    scrollState.hasUnseenContent = true
+                }
+            }
             .scrollDismissesKeyboard(.interactively)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 6)
+                    .onChanged { value in
+                        scrollState.isUserDragging = true
+                        if value.translation.height > 12 || !scrollState.isNearBottom {
+                            scrollState.isFollowingStream = false
+                        }
+                    }
+                    .onEnded { _ in
+                        scrollState.isUserDragging = false
+                        if scrollState.isNearBottom {
+                            scrollState.isFollowingStream = true
+                            scrollState.hasUnseenContent = false
+                        }
+                    }
+            )
             .onAppear {
-                scrollToBottom(proxy, animated: false)
+                positionInitialConversation(proxy)
             }
             .onChange(of: messages.count) {
-                scrollToBottom(proxy, animated: true)
+                if hasPositionedInitialThread {
+                    if scrollState.isFollowingStream || scrollState.isNearBottom {
+                        scheduleScrollToBottom(proxy, animated: scrollState.isFollowingStream && !reduceMotion)
+                    } else if chatStore.isSending {
+                        scrollState.hasUnseenContent = true
+                    }
+                } else {
+                    positionInitialConversation(proxy)
+                }
             }
             .onChange(of: chatStore.isSending) {
-                scrollToBottom(proxy, animated: true)
+                if chatStore.isSending {
+                    if scrollState.isNearBottom {
+                        scrollState.isFollowingStream = true
+                        scheduleScrollToBottom(proxy, animated: false)
+                    }
+                } else if scrollState.isFollowingStream {
+                    scheduleScrollToBottom(proxy, animated: !reduceMotion)
+                }
             }
             .onChange(of: chatSession.activeThreadID) {
-                scrollToBottom(proxy, animated: false)
+                hasPositionedInitialThread = false
+                scrollState = ChatScrollState()
+                positionInitialConversation(proxy)
+            }
+            .onChange(of: softwareKeyboardHeight) {
+                if scrollState.isNearBottom || scrollState.isFollowingStream {
+                    scheduleScrollToBottom(proxy, animated: false)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .torChatContinueAnswerRequested)) { _ in
+                scrollState.isFollowingStream = true
+                scrollState.hasUnseenContent = false
+                scheduleScrollToBottom(proxy, animated: !reduceMotion)
             }
         }
     }
@@ -566,7 +648,29 @@ struct ChatView: View {
         return isLastInAssistantGroup && messages[index].groundingFootnote != nil
     }
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {        guard !messages.isEmpty else { return }
+    private func positionInitialConversation(_ proxy: ScrollViewProxy) {
+        guard !messages.isEmpty else { return }
+        DispatchQueue.main.async {
+            scrollToBottom(proxy, animated: false)
+            hasPositionedInitialThread = true
+            scrollState.isNearBottom = true
+            scrollState.isFollowingStream = true
+            scrollState.hasUnseenContent = false
+        }
+    }
+
+    private func scheduleScrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
+        guard messages.isEmpty == false, !scrollState.isUserDragging else { return }
+        pendingScrollWorkItem?.cancel()
+        let work = DispatchWorkItem {
+            scrollToBottom(proxy, animated: animated)
+        }
+        pendingScrollWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.09, execute: work)
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
+        guard !messages.isEmpty else { return }
         let action = { proxy.scrollTo(bottomAnchorID, anchor: .bottom) }
         DispatchQueue.main.async {
             if animated {
@@ -574,6 +678,17 @@ struct ChatView: View {
             } else {
                 action()
             }
+        }
+    }
+
+    private func updateNearBottomState() {
+        guard chatViewportHeight > 0 else { return }
+        let distance = bottomAnchorMaxY - chatViewportHeight
+        let near = distance <= nearBottomThreshold
+        scrollState.isNearBottom = near
+        if near && !scrollState.isUserDragging {
+            scrollState.isFollowingStream = true
+            scrollState.hasUnseenContent = false
         }
     }
 
@@ -592,6 +707,11 @@ struct ChatView: View {
 
     private var chatFooter: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if scrollState.hasUnseenContent {
+                continueAnswerButton
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
             if let transaction = planTransaction {
                 PlanTransactionCard(
                     transaction: transaction,
@@ -671,6 +791,26 @@ struct ChatView: View {
         .animation(.easeOut(duration: 0.2), value: replacementCoordinator.pending)
         .animation(.easeOut(duration: 0.2), value: replacementCoordinator.pendingProposal)
         .animation(.easeOut(duration: 0.2), value: isSoftwareKeyboardVisible)
+        .animation(.easeOut(duration: 0.16), value: scrollState.hasUnseenContent)
+    }
+
+    private var continueAnswerButton: some View {
+        Button {
+            scrollState.isFollowingStream = true
+            scrollState.hasUnseenContent = false
+            NotificationCenter.default.post(name: .torChatContinueAnswerRequested, object: nil)
+        } label: {
+            Label(language.continueAnswerLabel, systemImage: "arrow.down")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.white)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
+                .background(Theme.accent, in: Capsule())
+                .shadow(color: Theme.accentSoft, radius: 10, y: 4)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(language.continueAnswerLabel)
+        .accessibilityAddTraits(.isButton)
     }
 
     private var shouldShowSuggestions: Bool {
@@ -730,6 +870,14 @@ struct ChatView: View {
 
     private var hasPendingInteraction: Bool {
         newestPendingInteractionID != nil
+    }
+
+    private func processingStage(for message: ChatMessage) -> CoachProcessingStage? {
+        guard chatStore.generationState.messageId == message.turnID else { return nil }
+        if case .processing(_, let stage) = chatStore.generationState {
+            return stage
+        }
+        return nil
     }
 
     private var visiblePromptSuggestions: [CoachPromptSuggestion] {
@@ -1044,7 +1192,8 @@ struct ChatView: View {
             selectedOptionId: nil,
             isCustomInteractionResponse: pendingOtherResponse != nil,
             interactionMessageID: pendingOtherResponse?.messageID,
-            actionTypeOverride: draft == draftActionTypeOverridePrompt ? draftActionTypeOverride : nil
+            actionTypeOverride: draft == draftActionTypeOverridePrompt ? draftActionTypeOverride : nil,
+            focusComposerAfterSend: false
         )
         guard coachEvidenceReviewed else {
             presentEvidenceReview(confirming: pending)
@@ -1073,7 +1222,7 @@ struct ChatView: View {
         pendingOtherResponse = nil
         evidence = isContextualSession ? contextualEvidenceSelection : EvidenceSelection()
         clearImageAttachment()
-        composerFocused = true
+        composerFocused = pending.focusComposerAfterSend
         Task {
             let didSend = await chatStore.send(
                 text: pending.text,
@@ -1086,13 +1235,17 @@ struct ChatView: View {
                 selectedOptionId: pending.selectedOptionId,
                 isCustomInteractionResponse: pending.isCustomInteractionResponse,
                 actionTypeOverride: pending.actionTypeOverride,
+                expectedResponseInteraction: pending.expectedResponseInteraction,
+                displayText: pending.displayText,
+                contextSnapshotId: pending.contextSnapshotId,
+                contextItems: pending.contextItems,
                 in: modelContext
             )
             await MainActor.run {
                 if !didSend, let previousInteraction, let messageID = pending.interactionMessageID {
                     chatStore.restoreInteraction(messageID: messageID, interaction: previousInteraction, in: modelContext)
                 }
-                composerFocused = true
+                composerFocused = pending.focusComposerAfterSend
             }
         }
     }
@@ -1121,7 +1274,7 @@ struct ChatView: View {
             pendingOtherResponse = nil
             evidence = isContextualSession ? contextualEvidenceSelection : EvidenceSelection()
             clearImageAttachment()
-            composerFocused = true
+            composerFocused = pending.focusComposerAfterSend
         }
         return await chatStore.send(
             text: pending.text,
@@ -1134,6 +1287,10 @@ struct ChatView: View {
             selectedOptionId: pending.selectedOptionId,
             isCustomInteractionResponse: pending.isCustomInteractionResponse,
             actionTypeOverride: pending.actionTypeOverride,
+            expectedResponseInteraction: pending.expectedResponseInteraction,
+            displayText: pending.displayText,
+            contextSnapshotId: pending.contextSnapshotId,
+            contextItems: pending.contextItems,
             in: modelContext
         )
     }
@@ -1244,7 +1401,13 @@ struct ChatView: View {
                     interactionId: $0.interactionId,
                     selectedOptionId: $0.selectedOptionId,
                     isCustomInteractionResponse: $0.isCustomInteractionResponse,
-                    interactionMessageID: $0.interactionMessageID
+                    interactionMessageID: $0.interactionMessageID,
+                    actionTypeOverride: $0.actionTypeOverride,
+                    expectedResponseInteraction: $0.expectedResponseInteraction,
+                    displayText: $0.displayText,
+                    contextSnapshotId: $0.contextSnapshotId,
+                    contextItems: $0.contextItems,
+                    focusComposerAfterSend: $0.focusComposerAfterSend
                 )
             }
             evidenceReview = EvidenceReviewPresentation(snapshot: snapshot, pendingSend: pendingWithSnapshot)
@@ -1320,16 +1483,21 @@ struct ChatView: View {
                     text: request.prompt,
                     attachments: currentAttachments,
                     evidence: evidence,
-                    actionTypeOverride: request.actionTypeOverride
+                    actionTypeOverride: request.actionTypeOverride,
+                    expectedResponseInteraction: request.expectedResponseInteraction,
+                    displayText: request.displayText,
+                    contextSnapshotId: request.contextSnapshotId,
+                    contextItems: request.contextItems,
+                    focusComposerAfterSend: request.shouldFocusComposer
                 )
                 Task {
                     _ = await sendAlreadyReviewed(pending)
                 }
             } else {
-                draft = request.prompt
+                draft = request.displayText
                 draftActionTypeOverride = request.actionTypeOverride
-                draftActionTypeOverridePrompt = request.prompt
-                composerFocused = true
+                draftActionTypeOverridePrompt = request.displayText
+                composerFocused = request.shouldFocusComposer
             }
             return
         }
@@ -1346,16 +1514,16 @@ struct ChatView: View {
             existingThread.updatedAt = .now
             try? modelContext.save()
             threadID = existingThread.uuid
-            draft = messages(in: existingThread.uuid).isEmpty ? request.prompt : ""
+            draft = messages(in: existingThread.uuid).isEmpty ? request.displayText : ""
         } else {
             threadID = createNewThread(title: reviewThreadTitle(for: activity), reviewActivityUUID: activity.hkUUID)
-            draft = request.prompt
+            draft = request.displayText
         }
         draftActionTypeOverride = request.actionTypeOverride
-        draftActionTypeOverridePrompt = request.prompt
+        draftActionTypeOverridePrompt = request.displayText
         evidence = EvidenceSelection(readinessSnapshot: true, weekPlan: true, workout: .completed(activity.hkUUID), hasPhoto: false)
         chatSession.activeThreadID = threadID
-        composerFocused = true
+        composerFocused = request.shouldFocusComposer
         onReviewRequestConsumed(request)
     }
 
@@ -1764,6 +1932,32 @@ private struct ChatScrollOffsetPreferenceKey: PreferenceKey {
     }
 }
 
+private struct ChatViewportHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct ChatBottomAnchorPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct ChatScrollState: Equatable {
+    var isNearBottom = true
+    var isFollowingStream = true
+    var isUserDragging = false
+    var hasUnseenContent = false
+    var lastVisibleMessageId: UUID?
+}
+
+private extension Notification.Name {
+    static let torChatContinueAnswerRequested = Notification.Name("torChatContinueAnswerRequested")
+}
+
 private struct SavedPromptsSheet: View {
     let prompts: [String]
     let onSelect: (String) -> Void
@@ -2072,6 +2266,11 @@ private struct PendingCoachSend: Identifiable {
     var isCustomInteractionResponse = false
     var interactionMessageID: UUID? = nil
     var actionTypeOverride: CoachRequestActionType? = nil
+    var expectedResponseInteraction: CoachResponseInteraction? = nil
+    var displayText: String? = nil
+    var contextSnapshotId: String? = nil
+    var contextItems: [CoachContextItem] = []
+    var focusComposerAfterSend = false
 }
 
 private struct EvidenceReviewPresentation: Identifiable {
