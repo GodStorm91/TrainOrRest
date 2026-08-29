@@ -1055,16 +1055,28 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
 
     private func message(_ id: UUID?, in context: ModelContext) -> ChatMessage? {
         guard let id else { return nil }
-        var descriptor = FetchDescriptor<ChatMessage>()
-        descriptor.fetchLimit = 200
-        return (try? context.fetch(descriptor))?.first { $0.turnID == id }
+        var descriptor = FetchDescriptor<ChatMessage>(
+            predicate: #Predicate<ChatMessage> { message in
+                message.uuid == id
+            }
+        )
+        descriptor.fetchLimit = 1
+        if let match = (try? context.fetch(descriptor))?.first {
+            return match
+        }
+
+        return (try? context.fetch(FetchDescriptor<ChatMessage>()))?.first { $0.turnID == id }
     }
 
     private func snapshot(_ id: UUID?, in context: ModelContext) -> CoachRequestSnapshot? {
         guard let id else { return nil }
-        var descriptor = FetchDescriptor<CoachRequestSnapshot>()
-        descriptor.fetchLimit = 200
-        return (try? context.fetch(descriptor))?.first { $0.id == id }
+        var descriptor = FetchDescriptor<CoachRequestSnapshot>(
+            predicate: #Predicate<CoachRequestSnapshot> { snapshot in
+                snapshot.id == id
+            }
+        )
+        descriptor.fetchLimit = 1
+        return (try? context.fetch(descriptor))?.first
     }
 
     private func isLatestUnresolvedAssistantTurn(_ assistantTurn: ChatMessage, in context: ModelContext) -> Bool {

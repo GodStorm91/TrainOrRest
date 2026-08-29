@@ -1323,6 +1323,26 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(messages.last?.assistantStatus, .dismissed)
     }
 
+    func testDismissingInlineFailureWorksAfterLongChatHistory() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        try seedLongChatHistory(in: context, count: 240)
+        let client = MockClaudeClient(error: ClaudeClientError.connectionLost)
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(text: "Create workout tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
+
+        let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertEqual(failed.assistantStatus, .failed)
+
+        store.dismissFailedResponse(failed.turnID, in: context)
+
+        XCTAssertEqual(failed.assistantStatus, .dismissed)
+        XCTAssertNil(failed.errorCategory)
+        XCTAssertNil(failed.errorMessage)
+    }
+
     func testRetryFailedCoachResponseDoesNotDuplicateUserMessage() async throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -1347,6 +1367,29 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(messages.last?.turnID, failed.turnID)
         XCTAssertEqual(messages.last?.attemptCount, 2)
         XCTAssertEqual(messages.last?.assistantStatus, .completed)
+    }
+
+    func testRetryFailedCoachResponseWorksAfterLongChatHistory() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        try seedLongChatHistory(in: context, count: 240)
+        let client = MockClaudeClient(results: [
+            .failure(ClaudeClientError.connectionLost),
+            .success(ClaudeResponse(content: [.text("Retry recovered.")], stopReason: "end_turn"))
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(text: "What should I do today?", model: "claude-test", apiKey: "test-key", in: context)
+        let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertEqual(failed.assistantStatus, .failed)
+
+        await store.retryFailedResponse(failed.turnID, model: "claude-test", apiKey: "test-key", in: context)
+
+        XCTAssertEqual(client.requests.count, 2)
+        XCTAssertEqual(failed.text, "Retry recovered.")
+        XCTAssertEqual(failed.attemptCount, 2)
+        XCTAssertEqual(failed.assistantStatus, .completed)
     }
 
     func testFailedRetryReusesSameInlineCard() async throws {
@@ -1541,6 +1584,34 @@ final class ChatFeatureTests: XCTestCase {
             ),
             computedAt: today
         ))
+        try context.save()
+    }
+
+    private func seedLongChatHistory(in context: ModelContext, count: Int) throws {
+        let threadID = UUID()
+        for index in 0..<count {
+            let date = today.addingTimeInterval(TimeInterval(index - count) * 60)
+            let turn = ChatMessage(
+                role: index.isMultiple(of: 2) ? .user : .assistant,
+                text: "Historical chat row \(index)",
+                date: date,
+                threadID: threadID,
+                status: index.isMultiple(of: 2) ? nil : .completed
+            )
+            context.insert(turn)
+            context.insert(CoachRequestSnapshot(
+                userTurnID: UUID(),
+                messageText: "Historical snapshot \(index)",
+                attachmentReferences: [],
+                selectedEvidenceSources: EvidenceSelection(),
+                contextBoundaryMessageID: UUID(),
+                locale: CoachLanguage.en.rawValue,
+                createdAt: date,
+                actionType: .readOnly,
+                groundingSnapshot: nil,
+                threadID: threadID
+            ))
+        }
         try context.save()
     }
 

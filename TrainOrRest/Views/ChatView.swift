@@ -72,7 +72,9 @@ struct ChatView: View {
 
     private var messages: [ChatMessage] {
         guard let activeThreadID = chatSession.activeThreadID else { return [] }
-        return allMessages.filter { $0.threadID == activeThreadID && !isPlanAuditMessage($0) }
+        return allMessages.filter { message in
+            message.threadID == activeThreadID && isVisibleConversationMessage(message)
+        }
     }
 
     private var isSoftwareKeyboardVisible: Bool { softwareKeyboardHeight > 80 }
@@ -1744,6 +1746,14 @@ struct ChatView: View {
 
     private func isPlanAuditMessage(_ message: ChatMessage) -> Bool {
         message.role == .assistant && message.appliedAdjustment != nil && message.text.hasPrefix("Applied:")
+    }
+
+    private func isVisibleConversationMessage(_ message: ChatMessage) -> Bool {
+        if isPlanAuditMessage(message) { return false }
+        guard message.role == .assistant, message.assistantStatus == .dismissed else { return true }
+        return !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || message.interaction != nil
+            || message.appliedAdjustment != nil
     }
 }
 
