@@ -69,11 +69,13 @@ struct ClaudeRequest: Encodable {
     var maxTokens: Int = CoachChatConfig.maxOutputTokens
     var system: String
     var tools: [ClaudeTool]
+    var toolChoice: CoachToolCatalog.ToolChoice? = nil
     var messages: [ClaudeMessageParam]
 
     enum CodingKeys: String, CodingKey {
         case model, system, tools, messages
         case maxTokens = "max_tokens"
+        case toolChoice = "tool_choice"
     }
 }
 
@@ -255,12 +257,14 @@ private struct StreamingClaudeRequest: Encodable {
     var maxTokens: Int
     var system: String
     var tools: [ClaudeTool]
+    var toolChoice: CoachToolCatalog.ToolChoice?
     var messages: [ClaudeMessageParam]
     var stream = true
 
     enum CodingKeys: String, CodingKey {
         case model, system, tools, messages, stream
         case maxTokens = "max_tokens"
+        case toolChoice = "tool_choice"
     }
 
     init(request: ClaudeRequest) {
@@ -268,6 +272,7 @@ private struct StreamingClaudeRequest: Encodable {
         maxTokens = request.maxTokens
         system = request.system
         tools = request.tools
+        toolChoice = request.toolChoice
         messages = request.messages
     }
 }

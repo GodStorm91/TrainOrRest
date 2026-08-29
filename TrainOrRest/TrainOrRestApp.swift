@@ -111,26 +111,26 @@ struct TrainOrRestApp: App {
     }
 }
 
-/// Routes between onboarding (HealthKit permission not yet requested) and the
-/// dashboard. HealthKit never reveals read-grant status, so once the request
-/// was shown we always proceed; empty data renders the waiting state.
+/// Routes between first-run setup and the dashboard. Existing installs that
+/// already saw the Health sheet skip the new tour.
 struct RootView: View {
     @EnvironmentObject private var engine: SyncEngine
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.system.rawValue
+    @AppStorage(OnboardingGate.completedKey) private var onboardingCompleted = false
 
     private var appearance: AppAppearance {
         AppAppearance(rawValue: appearanceRaw) ?? .system
     }
 
-    private enum AuthorizationStage {
+    private enum LaunchStage {
         case checking
         case unavailable
-        case needsRequest
+        case firstRun
         case ready
     }
 
-    @State private var stage: AuthorizationStage = .checking
+    @State private var stage: LaunchStage = .checking
     private var health: HealthKitService { engine.health }
 
     var body: some View {
@@ -144,8 +144,8 @@ struct RootView: View {
                     systemImage: "heart.slash",
                     description: Text("This device does not provide Apple Health data.")
                 )
-            case .needsRequest:
-                OnboardingView(health: health, onAuthorized: activate)
+            case .firstRun:
+                FirstRunFlowView(health: health, onFinished: activate)
             case .ready:
                 RootTabView()
             }
@@ -165,63 +165,25 @@ struct RootView: View {
             return
         }
         let needsRequest = (try? await health.needsAuthorizationRequest()) ?? true
-        if needsRequest {
-            stage = .needsRequest
+        OnboardingGate.adoptExistingInstallIfNeeded(healthAlreadyRequested: !needsRequest)
+        onboardingCompleted = OnboardingGate.isCompleted()
+        if OnboardingGate.shouldShowFirstRun(
+            completed: onboardingCompleted,
+            healthUnavailable: false
+        ) {
+            stage = .firstRun
         } else {
             activate()
         }
     }
 
     private func activate() {
+        onboardingCompleted = true
+        OnboardingGate.markCompleted()
         stage = .ready
         Task {
             await VerdictNotifier.requestPermission()
             await engine.syncAll()
-        }
-    }
-}
-
-struct OnboardingView: View {
-    let health: HealthKitService
-    let onAuthorized: () -> Void
-    @State private var isRequesting = false
-
-    var body: some View {
-        VStack(spacing: 24) {
-            Image(systemName: "figure.run.circle.fill")
-                .font(.system(size: 72))
-                .foregroundStyle(.tint)
-            Text("TrainOrRest")
-                .font(.largeTitle.bold())
-            Text("Connect Apple Health to read your Garmin runs, sleep, HRV and resting heart rate. Everything stays on this device.")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal)
-            Button {
-                requestAccess()
-            } label: {
-                if isRequesting {
-                    ProgressView()
-                } else {
-                    Text("Connect Apple Health")
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(isRequesting)
-            .padding(.horizontal)
-        }
-        .padding()
-    }
-
-    private func requestAccess() {
-        isRequesting = true
-        Task {
-            defer { isRequesting = false }
-            // Proceed even if the sheet errors out: read-grant status is
-            // opaque, and the dashboard's empty state handles no data.
-            try? await health.requestAuthorization()
-            onAuthorized()
         }
     }
 }

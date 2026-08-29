@@ -11,7 +11,7 @@ enum ActivePlanStatus: String, Equatable {
         switch self {
         case .active: "Active"
         case .onTrack: "On track"
-        case .needsAttention: "Needs attention"
+        case .needsAttention: "Needs adjustment"
         case .paused: "Paused"
         case .completed: "Completed"
         }
@@ -21,7 +21,7 @@ enum ActivePlanStatus: String, Equatable {
         switch self {
         case .active: "PLAN ACTIVE"
         case .onTrack: "PLAN ON TRACK"
-        case .needsAttention: "PLAN NEEDS ATTENTION"
+        case .needsAttention: "PLAN NEEDS ADJUSTMENT"
         case .paused: "PLAN PAUSED"
         case .completed: "PLAN COMPLETED"
         }
@@ -117,7 +117,7 @@ struct ActivePlanWorkoutSummary: Equatable, Identifiable {
 
 enum ActivePlanSummaryBuilder {
     /// Conservative first-pass thresholds:
-    /// - Needs attention: <60% due sessions, <65% due volume, or 2+ missed key workouts.
+    /// - Needs adjustment: <60% due sessions, <65% due volume, or 2+ missed key workouts.
     /// - On track: 75%+ due sessions, 75%+ due volume, and no missed key workouts.
     /// - Otherwise the plan is simply Active, so existence alone never earns "On track".
     enum Tuning {

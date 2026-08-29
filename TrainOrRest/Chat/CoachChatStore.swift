@@ -519,10 +519,12 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         let shouldPublishStreamingText = snapshot.actionType != .planMutation
 
         for _ in 0..<CoachChatConfig.maxToolRounds {
+            let tools = tools(for: snapshot.actionType)
             let request = ClaudeRequest(
                 model: model,
                 system: system,
-                tools: CoachToolCatalog.tools(allowProposals: true),
+                tools: tools,
+                toolChoice: toolChoice(for: snapshot.actionType),
                 messages: conversation
             )
             let client = CoachModelProvider.client(for: model, anthropicClient: anthropicClient, openAIClient: openAIClient)
@@ -718,6 +720,24 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             return CoachLanguage.current.mutationReconciliationMessage
         case .nonRetryable:
             return raw
+        }
+    }
+
+    private func tools(for actionType: CoachRequestActionType) -> [ClaudeTool] {
+        switch actionType {
+        case .readOnly:
+            return [CoachToolCatalog.coachResponse]
+        case .planMutation:
+            return CoachToolCatalog.tools(allowProposals: true)
+        }
+    }
+
+    private func toolChoice(for actionType: CoachRequestActionType) -> CoachToolCatalog.ToolChoice? {
+        switch actionType {
+        case .readOnly:
+            return .tool(name: CoachToolCatalog.coachResponseName)
+        case .planMutation:
+            return .auto
         }
     }
 

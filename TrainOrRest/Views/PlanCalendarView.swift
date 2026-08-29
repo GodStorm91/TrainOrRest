@@ -176,7 +176,7 @@ struct PlanCalendarView: View {
     }
 
     private var goalButtonTitle: String {
-        goals.isEmpty ? "Set race goal" : "Change goal"
+        goals.isEmpty ? "Set the race you entered" : "Change goal"
     }
 
     private var googleConnection: GoogleCalendarConnection? {

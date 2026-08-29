@@ -12,11 +12,11 @@ final class CoachToolCatalogTests: XCTestCase {
     func testToolsOmitPlanEditDraftWhenProposalsAreDisallowed() {
         XCTAssertEqual(
             CoachToolCatalog.tools(allowProposals: false).map(\.name),
-            ["explain_only", "cite_rule"]
+            ["coach_response", "explain_only", "cite_rule"]
         )
         XCTAssertEqual(
             CoachToolCatalog.tools(allowProposals: true).map(\.name),
-            ["explain_only", "propose_plan_adjustment", "cite_rule"]
+            ["coach_response", "explain_only", "propose_plan_adjustment", "cite_rule"]
         )
     }
 
@@ -26,6 +26,25 @@ final class CoachToolCatalogTests: XCTestCase {
         XCTAssertEqual(
             try encodedJSON(CoachToolCatalog.ToolChoice.tool(name: "explain_only")),
             .object(["type": .string("tool"), "name": .string("explain_only")])
+        )
+    }
+
+    func testClaudeRequestIncludesToolChoiceWhenProvided() throws {
+        let request = ClaudeRequest(
+            model: "claude-test",
+            system: "Reply with structured content.",
+            tools: [CoachToolCatalog.coachResponse],
+            toolChoice: .tool(name: CoachToolCatalog.coachResponseName),
+            messages: [ClaudeMessageParam(role: "user", content: [.text("Review this run.")])]
+        )
+
+        guard case .object(let json) = try encodedJSON(request) else {
+            return XCTFail("ClaudeRequest must encode as an object")
+        }
+
+        XCTAssertEqual(
+            json["tool_choice"],
+            .object(["type": .string("tool"), "name": .string(CoachToolCatalog.coachResponseName)])
         )
     }
 

@@ -577,10 +577,10 @@ struct ChatView: View {
         ContentUnavailableView {
             Label("API Key Needed", systemImage: "key")
         } description: {
-            Text("Add your Anthropic API key before chatting.")
+            Text("Add a \(CoachModelProvider.displayName(for: model)) API key before chatting.")
         } actions: {
-            NavigationLink("Open Settings") {
-                SettingsView()
+            NavigationLink("Add API key") {
+                CoachProviderSettingsView()
             }
             .buttonStyle(.borderedProminent)
         }

@@ -59,7 +59,7 @@ private struct OpenAIChatRequest: Encodable {
     var model: String
     var messages: [OpenAIMessage]
     var tools: [OpenAITool]?
-    var toolChoice: String?
+    var toolChoice: OpenAIToolChoice?
     var maxCompletionTokens: Int
     var reasoningEffort: String?
 
@@ -81,7 +81,44 @@ private struct OpenAIChatRequest: Encodable {
             toolChoice = nil
         } else {
             tools = request.tools.map(OpenAITool.init(from:))
-            toolChoice = "auto"
+            toolChoice = OpenAIToolChoice(from: request.toolChoice)
+        }
+    }
+}
+
+private enum OpenAIToolChoice: Encodable {
+    case mode(String)
+    case function(name: String)
+
+    private enum CodingKeys: String, CodingKey {
+        case type, function
+    }
+
+    private enum FunctionCodingKeys: String, CodingKey {
+        case name
+    }
+
+    init(from toolChoice: CoachToolCatalog.ToolChoice?) {
+        switch toolChoice {
+        case .auto, .none:
+            self = .mode("auto")
+        case .any:
+            self = .mode("required")
+        case .tool(let name):
+            self = .function(name: name)
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        switch self {
+        case .mode(let mode):
+            var container = encoder.singleValueContainer()
+            try container.encode(mode)
+        case .function(let name):
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode("function", forKey: .type)
+            var function = container.nestedContainer(keyedBy: FunctionCodingKeys.self, forKey: .function)
+            try function.encode(name, forKey: .name)
         }
     }
 }

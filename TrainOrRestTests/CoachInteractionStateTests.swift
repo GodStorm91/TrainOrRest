@@ -76,6 +76,20 @@ final class CoachInteractionStateTests: XCTestCase {
         XCTAssertNil(assistant.interaction)
     }
 
+    func testReadOnlyCoachRequestForcesStructuredResponseTool() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedMinimalTrainingData(in: context)
+        let client = InteractionMockCoachClient(responses: [.choiceResponse])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(text: "Review this run.", model: "claude-test", apiKey: "test-key", threadID: conversationID, in: context)
+
+        let request = try XCTUnwrap(client.requests.last)
+        XCTAssertEqual(request.tools.map(\.name), [CoachToolCatalog.coachResponseName])
+        XCTAssertEqual(request.toolChoice, .tool(name: CoachToolCatalog.coachResponseName))
+    }
+
     func testSelectingOptionSubmitsValueAndMetadata() async throws {
         let container = try makeContainer()
         let context = container.mainContext

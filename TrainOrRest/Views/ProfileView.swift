@@ -121,7 +121,7 @@ struct ProfileView: View {
                 emptyPlanCard
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Create training plan")
+            .accessibilityLabel("Set the race you entered")
         }
     }
 
@@ -184,11 +184,11 @@ struct ProfileView: View {
                 .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
             VStack(alignment: .leading, spacing: 4) {
                 TorEyebrow("PLAN")
-                Text("Set a goal and let Coach create a structured plan around your schedule.")
+                Text("Distance, date, and target time become the plan.")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(Theme.dim)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Create training plan")
+                Text("Set the race you entered")
                     .font(.torHeading(15, .bold))
                     .foregroundStyle(Theme.accent)
                     .frame(minHeight: 28, alignment: .leading)

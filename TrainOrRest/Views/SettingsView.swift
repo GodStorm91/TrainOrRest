@@ -244,6 +244,7 @@ struct LanguageSettingsView: View {
 
 struct IntervalsConnectionSettingsView: View {
     @AppStorage(WorkoutPushSettings.athleteIDKey) private var athleteID = ""
+    @AppStorage(WorkoutPushSettings.enabledKey) private var watchPushEnabled = false
     @EnvironmentObject private var pushService: WorkoutPushService
     @State private var apiKey = ""
     @State private var showAPIKey = false
@@ -288,7 +289,14 @@ struct IntervalsConnectionSettingsView: View {
             } header: {
                 Text("Manage connection")
             } footer: {
-                Text("Credentials stay in the device keychain. Enable Garmin upload in intervals.icu if you expect workouts to appear on supported devices.")
+                Text("On the web: intervals.icu Settings, Developer Settings. Generate an API key and copy the Athlete ID from that page. Then Settings, Connections, Garmin, Upload planned workouts. Without that tick the watch stays empty.")
+            }
+
+            Section {
+                Toggle("Watch Push", isOn: $watchPushEnabled)
+                    .frame(minHeight: 44)
+            } footer: {
+                Text("Watch Push sends planned workouts through intervals.icu after the connection is saved.")
             }
 
             if let status {

@@ -14,6 +14,9 @@ struct TrainingPlanDetailView: View {
     @State private var showGoalEntry = false
     @State private var weeklySuggestions: [WeeklySmartSchedulingSuggestion] = []
     @State private var isShowingWeeklyScheduleReview = false
+    @State private var isShowingGoalMetricDetail = false
+    @State private var isShowingGoalAssessmentDetail = false
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
 
     private let calendar = Calendar.current
 
@@ -21,11 +24,38 @@ struct TrainingPlanDetailView: View {
         ActivePlanSummaryBuilder.build(goal: goals.first, plan: plans.first, activities: activities, calendar: calendar)
     }
 
+    private var language: CoachLanguage {
+        CoachLanguage(rawValue: languageRaw) ?? .en
+    }
+
+    private var goalAssessment: GoalAssessment? {
+        guard let goal = goals.first, let plan = plans.first else { return nil }
+        return GoalAssessmentBuilder.build(goal: goal, plan: plan, activities: activities, calendar: calendar)
+    }
+
     var body: some View {
         ScrollView {
             if let summary {
                 VStack(alignment: .leading, spacing: 18) {
-                    hero(summary)
+                    if let assessment = goalAssessment {
+                        RaceGoalStatusCard(
+                            assessment: assessment,
+                            language: language,
+                            onShowMetricDetail: { isShowingGoalMetricDetail = true },
+                            onShowAssessmentDetail: { isShowingGoalAssessmentDetail = true }
+                        )
+                        if let attention = GoalAssessmentBuilder.primaryAttentionItem(for: assessment) {
+                            PrimaryAttentionCard(
+                                assessment: assessment,
+                                item: attention,
+                                language: language,
+                                onShowDetails: { isShowingGoalAssessmentDetail = true },
+                                coachRequest: goalAttentionCoachRequest(assessment: assessment, item: attention)
+                            )
+                        }
+                    } else {
+                        hero(summary)
+                    }
                     if let phase = summary.currentPhase {
                         currentPhase(phase)
                     }
@@ -77,6 +107,18 @@ struct TrainingPlanDetailView: View {
             }
         }
         .sheet(isPresented: $showGoalEntry) { GoalEntryView() }
+        .sheet(isPresented: $isShowingGoalMetricDetail) {
+            if let assessment = goalAssessment {
+                GoalMetricDetailSheet(assessment: assessment, language: language)
+                    .presentationDetents([.medium, .large])
+            }
+        }
+        .sheet(isPresented: $isShowingGoalAssessmentDetail) {
+            if let assessment = goalAssessment {
+                GoalAssessmentDetailSheet(assessment: assessment, language: language)
+                    .presentationDetents([.medium, .large])
+            }
+        }
         .sheet(isPresented: $isShowingWeeklyScheduleReview) {
             WeeklySmartSchedulingReviewView(suggestions: weeklySuggestions) { suggestions in
                 suggestions.forEach { googleCalendar.acceptSmartSchedulingCandidate($0.candidate) }
@@ -473,6 +515,64 @@ struct TrainingPlanDetailView: View {
         String(format: "%.1f km", km)
     }
 
+    private func goalAttentionCoachRequest(
+        assessment: GoalAssessment,
+        item: GoalAttentionItem
+    ) -> CalendarReviewChatRequest {
+        let evidence = item.evidence.map { "- \(goalEvidenceText($0, language: language))" }.joined(separator: "\n")
+        let factorLines = assessment.factors.map {
+            "- \(language.goalAssessmentText($0.labelKey)): \(goalFactorValueText($0, language: language)), \(localizedStatus($0.status))"
+        }.joined(separator: "\n")
+        let upcoming = summary?.upcomingWorkouts.map {
+            "- \($0.displayName), \(distanceText($0.distanceKm)), \($0.date.formatted(.dateTime.year().month().day()))"
+        }.joined(separator: "\n") ?? "- None"
+        let metricLine = assessment.metric.map {
+            "\(metricLabel($0)): \($0.value)%"
+        } ?? language.goalAssessmentText(.insufficientData)
+
+        return CalendarReviewChatRequest(prompt: """
+        Propose a concrete training-plan adjustment for this race-goal attention item.
+
+        Rules:
+        - Do not modify the calendar directly.
+        - Use the existing confirmation flow before applying any plan change.
+        - Base the recommendation only on the structured context below.
+
+        Goal ID: \(assessment.goalId)
+        Attention item ID: \(item.id)
+        Race: \(assessment.raceName)
+        Race date: \(assessment.raceDate.formatted(.dateTime.year().month().day()))
+        Target: \(assessment.targetLabel)
+        Goal metric: \(metricLine)
+
+        Main issue: \(language.goalAssessmentText(item.titleKey))
+        Evidence:
+        \(evidence)
+
+        Factors:
+        \(factorLines)
+
+        Upcoming workouts:
+        \(upcoming)
+        """)
+    }
+
+    private func metricLabel(_ metric: GoalAssessmentMetric) -> String {
+        switch metric {
+        case .calibratedProbability: language.goalAssessmentText(.goalConfidence)
+        case .goalAlignmentScore: language.goalAssessmentText(.goalAlignment)
+        }
+    }
+
+    private func localizedStatus(_ status: GoalAssessmentFactorStatus) -> String {
+        switch status {
+        case .positive: language.goalAssessmentText(.good)
+        case .neutral: language.goalAssessmentText(.stable)
+        case .negative: language.goalAssessmentText(.needsAdjustment)
+        case .unknown: language.goalAssessmentText(.unknown)
+        }
+    }
+
     private func statusColor(_ status: ActivePlanStatus) -> Color {
         switch status {
         case .onTrack: Theme.good
@@ -498,6 +598,664 @@ struct TrainingPlanDetailView: View {
     private func togglePause(_ plan: TrainingPlan) {
         plan.pausedAt = plan.pausedAt == nil ? .now : nil
         try? modelContext.save()
+    }
+}
+
+private func goalEvidenceText(_ evidence: GoalAttentionEvidence, language: CoachLanguage) -> String {
+    switch evidence.kind {
+    case .missingQualifyingRuns:
+        switch language {
+        case .vi: return "Cần thêm \(evidence.primaryValue) buổi chạy hợp lệ, tối thiểu 3 km và 12 phút, để ước tính ổn định hơn."
+        case .ja: return "安定した推定には、3km以上かつ12分以上の有効なランがあと\(evidence.primaryValue)回必要です。"
+        case .en: return "Need \(evidence.primaryValue) more qualifying runs of at least 3 km and 12 minutes for a stable estimate."
+        }
+    case .completedPlannedDistance:
+        switch language {
+        case .vi: return "Đã hoàn thành \(evidence.primaryValue)% quãng đường đã đến hạn trong kế hoạch."
+        case .ja: return "期限到来済みの計画距離の\(evidence.primaryValue)%を完了。"
+        case .en: return "Completed \(evidence.primaryValue)% of due planned distance."
+        }
+    case .missedKeyWorkouts:
+        switch language {
+        case .vi: return "Đã bỏ lỡ \(evidence.primaryValue) buổi tập trọng điểm đến hạn."
+        case .ja: return "期限到来済みの重要練習を\(evidence.primaryValue)回未完了。"
+        case .en: return "Missed \(evidence.primaryValue) due key workout\(evidence.primaryValue == "1" ? "" : "s")."
+        }
+    case .completedPlannedSessions:
+        switch language {
+        case .vi: return "Đã hoàn thành \(evidence.primaryValue)% số buổi tập đã đến hạn."
+        case .ja: return "期限到来済みの計画セッションの\(evidence.primaryValue)%を完了。"
+        case .en: return "Completed \(evidence.primaryValue)% of due planned sessions."
+        }
+    case .longestRunBehind:
+        switch language {
+        case .vi: return "Long run gần đây nhất đang \(goalLocalizedShortfall(evidence.primaryValue, language: language)) so với mốc sức bền cần có."
+        case .ja: return "直近の最長ランは、レース向け持久力目標に対して\(goalLocalizedShortfall(evidence.primaryValue, language: language))です。"
+        case .en: return "Longest recent run is \(goalLocalizedShortfall(evidence.primaryValue, language: language)) versus the race-specific endurance target."
+        }
+    }
+}
+
+private func goalFactorValueText(_ factor: GoalAssessmentFactor, language: CoachLanguage) -> String {
+    if factor.displayValue == "—" {
+        switch language {
+        case .vi: return "Chưa đủ"
+        case .ja: return "不足"
+        case .en: return "Not enough"
+        }
+    }
+    switch factor.id {
+    case "key_workout_performance":
+        let count = factor.displayValue.split(separator: " ").first.map(String.init) ?? factor.displayValue
+        switch language {
+        case .vi: return "\(count) buổi lỡ"
+        case .ja: return "\(count)回未完了"
+        case .en: return factor.displayValue
+        }
+    case "long_run_progression":
+        return goalLocalizedShortfall(factor.displayValue, language: language)
+    case "time_remaining":
+        let weeks = factor.displayValue.split(separator: " ").first.map(String.init) ?? factor.displayValue
+        switch language {
+        case .vi: return "\(weeks) tuần"
+        case .ja: return "\(weeks)週"
+        case .en: return factor.displayValue
+        }
+    case "data_quality":
+        if factor.displayValue.hasPrefix("Need ") {
+            let missing = factor.displayValue
+                .replacingOccurrences(of: "Need ", with: "")
+                .replacingOccurrences(of: " more", with: "")
+            switch language {
+            case .vi: return "Cần thêm \(missing)"
+            case .ja: return "あと\(missing)回"
+            case .en: return factor.displayValue
+            }
+        }
+        let count = factor.displayValue.split(separator: " ").first.map(String.init) ?? factor.displayValue
+        switch language {
+        case .vi: return "\(count) buổi"
+        case .ja: return "\(count)回"
+        case .en: return factor.displayValue
+        }
+    default:
+        return factor.displayValue
+    }
+}
+
+private func goalLocalizedShortfall(_ value: String, language: CoachLanguage) -> String {
+    guard value.hasPrefix("Short ") else { return value }
+    let amount = value.replacingOccurrences(of: "Short ", with: "")
+    switch language {
+    case .vi: return "thiếu \(amount)"
+    case .ja: return "\(amount)不足"
+    case .en: return value.lowercased()
+    }
+}
+
+private func goalDataSourceValueText(_ value: String, language: CoachLanguage) -> String {
+    guard value == "—" else { return value }
+    switch language {
+    case .vi: return "Chưa có"
+    case .ja: return "未取得"
+    case .en: return "Not available"
+    }
+}
+
+struct RaceGoalStatusCard: View {
+    let assessment: GoalAssessment
+    let language: CoachLanguage
+    let onShowMetricDetail: () -> Void
+    let onShowAssessmentDetail: () -> Void
+
+    private var metricValue: Int? { assessment.metric?.value }
+
+    var body: some View {
+        TorCard(padding: 18, cornerRadius: 22) {
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                HStack(alignment: .center, spacing: 16) {
+                    metricBlock
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(language.goalAssessmentText(assessment.summaryKey))
+                            .font(.torHeading(22, .bold))
+                            .foregroundStyle(Theme.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(language.goalAssessmentText(assessment.summaryDetailKey))
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Theme.dim)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let trend = assessment.trend {
+                            trendRow(trend)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                targetComparison
+                factorSummary
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            TorEyebrow(language.goalAssessmentText(.raceGoal))
+            Text(assessment.raceName)
+                .font(.torHeading(24, .bold))
+                .foregroundStyle(Theme.text)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("\(raceDateText) · \(weeksRemainingText)")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.dim)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var metricBlock: some View {
+        VStack(spacing: 9) {
+            ZStack {
+                Circle()
+                    .stroke(Theme.line, lineWidth: 8)
+                if let metricValue {
+                    Circle()
+                        .trim(from: 0, to: CGFloat(metricValue) / 100)
+                        .stroke(metricColor, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .accessibilityHidden(true)
+                }
+                Text(metricDisplayText)
+                    .font(.torNumber(metricValue == nil ? 22 : 36, .bold))
+                    .monospacedDigit()
+                    .foregroundStyle(metricColor)
+                    .minimumScaleFactor(0.74)
+            }
+            .frame(width: 108, height: 108)
+            .accessibilityLabel(metricAccessibilityLabel)
+            .accessibilityValue(metricValue.map { "\($0) percent" } ?? language.goalAssessmentText(.insufficientData))
+
+            Text(metricLabel)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.dim)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let metricValue {
+                Button {
+                    onShowMetricDetail()
+                } label: {
+                    Label(language.goalAssessmentText(.whyMetric, value: metricValue), systemImage: "info.circle")
+                        .font(.caption.weight(.semibold))
+                        .frame(minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.accent)
+                .accessibilityLabel(language.goalAssessmentText(.whyMetric, value: metricValue))
+            }
+        }
+        .frame(width: 124)
+    }
+
+    private var targetComparison: some View {
+        HStack(spacing: 10) {
+            comparisonColumn(
+                label: language.goalAssessmentText(.targetTime),
+                value: assessment.targetFinishTimeSeconds.map(Formatters.duration) ?? assessment.targetLabel
+            )
+            comparisonColumn(
+                label: language.goalAssessmentText(.currentPrediction),
+                value: predictionText
+            )
+        }
+    }
+
+    private func comparisonColumn(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.faint)
+            Text(value)
+                .font(.torHeading(18, .bold))
+                .monospacedDigit()
+                .foregroundStyle(Theme.text)
+                .lineLimit(2)
+                .minimumScaleFactor(0.84)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var factorSummary: some View {
+        VStack(spacing: 9) {
+            ForEach(Array(assessment.factors.prefix(3))) { factor in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Circle()
+                        .fill(color(for: factor.status))
+                        .frame(width: 7, height: 7)
+                        .accessibilityHidden(true)
+                    Text(language.goalAssessmentText(factor.labelKey))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.text)
+                    Spacer(minLength: 8)
+                    Text("\(goalFactorValueText(factor, language: language)) · \(statusText(factor.status))")
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(color(for: factor.status))
+                        .multilineTextAlignment(.trailing)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .layoutPriority(1)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(language.goalAssessmentText(factor.labelKey)), \(goalFactorValueText(factor, language: language)), \(statusText(factor.status))")
+            }
+            Button {
+                onShowAssessmentDetail()
+            } label: {
+                HStack {
+                    Text(language.goalAssessmentText(.why))
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                }
+                .font(.torHeading(14, .bold))
+                .foregroundStyle(Theme.accent)
+                .frame(minHeight: 44)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func trendRow(_ trend: GoalAssessmentTrend) -> some View {
+        let positive = trend.delta >= 0
+        return HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: positive ? "arrow.up.right" : "arrow.down.right")
+            Text(trendText(trend))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(positive ? Theme.good : Theme.warn)
+            .accessibilityLabel(trendText(trend))
+    }
+
+    private var weeksRemainingText: String {
+        let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: .now), to: assessment.raceDate).day ?? 0
+        let weeks = max(0, Int((Double(days) / 7).rounded()))
+        switch language {
+        case .vi: return "Còn \(weeks) tuần"
+        case .ja: return "あと\(weeks)週"
+        case .en: return "\(weeks) weeks remaining"
+        }
+    }
+
+    private var raceDateText: String {
+        switch language {
+        case .vi:
+            return assessment.raceDate.formatted(.dateTime.day(.twoDigits).month(.twoDigits).year())
+        case .ja:
+            return assessment.raceDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP")))
+        case .en:
+            return assessment.raceDate.formatted(.dateTime.month(.abbreviated).day().year().locale(Locale(identifier: "en_US")))
+        }
+    }
+
+    private var metricLabel: String {
+        guard let metric = assessment.metric else { return language.goalAssessmentText(.insufficientData) }
+        switch metric {
+        case .calibratedProbability: return language.goalAssessmentText(.goalConfidence)
+        case .goalAlignmentScore: return language.goalAssessmentText(.goalAlignment)
+        }
+    }
+
+    private var metricDisplayText: String {
+        guard let metricValue else {
+            switch language {
+            case .vi: return "Chưa đủ"
+            case .ja: return "不足"
+            case .en: return "Not enough"
+            }
+        }
+        return "\(metricValue)%"
+    }
+
+    private var metricColor: Color {
+        switch assessment.summaryStatus {
+        case .onTrack: Theme.good
+        case .adjustmentRecommended: Theme.warn
+        case .atRisk: Theme.bad
+        case .insufficientData: Theme.faint
+        }
+    }
+
+    private var predictionText: String {
+        guard let predicted = assessment.predictedFinishTime else {
+            return language.goalAssessmentText(.insufficientPrediction)
+        }
+        let lower = Formatters.duration(predicted.lowerSeconds)
+        let upper = Formatters.duration(predicted.upperSeconds)
+        return lower == upper ? lower : "\(lower)-\(upper)"
+    }
+
+    private var metricAccessibilityLabel: String {
+        guard let metricValue else { return language.goalAssessmentText(.insufficientData) }
+        return "\(metricValue)%, \(metricLabel)"
+    }
+
+    private var accessibilitySummary: String {
+        "\(assessment.raceName), \(metricAccessibilityLabel), \(language.goalAssessmentText(assessment.summaryKey)). \(language.goalAssessmentText(assessment.summaryDetailKey))"
+    }
+
+    private func trendText(_ trend: GoalAssessmentTrend) -> String {
+        let points = abs(trend.delta)
+        switch language {
+        case .vi: return trend.delta >= 0 ? "Tăng \(points) điểm so với lần trước" : "Giảm \(points) điểm so với lần trước"
+        case .ja: return trend.delta >= 0 ? "前回より\(points)ポイント上昇" : "前回より\(points)ポイント低下"
+        case .en: return trend.delta >= 0 ? "Up \(points) points from last check" : "Down \(points) points from last check"
+        }
+    }
+
+    private func statusText(_ status: GoalAssessmentFactorStatus) -> String {
+        switch status {
+        case .positive: language.goalAssessmentText(.good)
+        case .neutral: language.goalAssessmentText(.stable)
+        case .negative: language.goalAssessmentText(.needsAdjustment)
+        case .unknown: language.goalAssessmentText(.unknown)
+        }
+    }
+
+    private func color(for status: GoalAssessmentFactorStatus) -> Color {
+        switch status {
+        case .positive: Theme.good
+        case .neutral: Theme.dim
+        case .negative: Theme.warn
+        case .unknown: Theme.faint
+        }
+    }
+}
+
+struct PrimaryAttentionCard: View {
+    let assessment: GoalAssessment
+    let item: GoalAttentionItem
+    let language: CoachLanguage
+    let onShowDetails: () -> Void
+    let coachRequest: CalendarReviewChatRequest
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: iconName)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 30, height: 30)
+                    .background(Theme.soft(tint, 0.16), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                VStack(alignment: .leading, spacing: 5) {
+                    TorEyebrow(language.goalAssessmentText(.mostImportantAdjustment), color: tint)
+                    Text(language.goalAssessmentText(item.titleKey))
+                        .font(.torHeading(22, .bold))
+                        .foregroundStyle(Theme.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            labeledBlock(.evidence, text: item.evidence.map { goalEvidenceText($0, language: language) }.joined(separator: "\n"))
+            labeledBlock(.impact, text: impactText)
+
+            HStack(spacing: 10) {
+                NavigationLink {
+                    ChatView(reviewRequest: coachRequest)
+                } label: {
+                    Label(language.goalAssessmentText(.viewRecommendation), systemImage: "sparkles")
+                        .font(.torHeading(15, .bold))
+                        .foregroundStyle(Color.white)
+                        .frame(minHeight: 44)
+                        .frame(maxWidth: .infinity)
+                        .background(Theme.accent, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(language.goalAssessmentText(.viewRecommendation))
+
+                Button {
+                    onShowDetails()
+                } label: {
+                    Text(language.goalAssessmentText(.why))
+                        .font(.torHeading(15, .bold))
+                        .frame(minHeight: 44)
+                        .padding(.horizontal, 12)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.accent)
+                .accessibilityLabel(language.goalAssessmentText(.why))
+            }
+
+            let remaining = assessment.attentionItems.filter { $0.id != item.id }.count
+            if remaining > 0 {
+                Button {
+                    onShowDetails()
+                } label: {
+                    HStack {
+                        Text(language.goalAssessmentText(.viewMoreItems, value: remaining))
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.dim)
+                    .frame(minHeight: 44)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(16)
+        .background(surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.soft(tint, 0.36), lineWidth: 1))
+        .accessibilityElement(children: .contain)
+    }
+
+    private func labeledBlock(_ key: GoalAssessmentLabelKey, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(language.goalAssessmentText(key))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.faint)
+            Text(text)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.dim)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var impactText: String {
+        if let points = item.estimatedImpactPoints {
+            switch language {
+            case .vi: return "Yếu tố này đang kéo mức độ bám mục tiêu giảm khoảng \(points) điểm."
+            case .ja: return "この要因は目標整合度を約\(points)ポイント下げています。"
+            case .en: return "This factor is reducing goal alignment by about \(points) points."
+            }
+        }
+        return language.goalAssessmentText(item.impactExplanationKey)
+    }
+
+    private var iconName: String {
+        switch item.severity {
+        case .info: "info.circle"
+        case .adjustment: "exclamationmark.triangle"
+        case .highRisk: "exclamationmark.octagon"
+        }
+    }
+
+    private var tint: Color {
+        switch item.severity {
+        case .info: Theme.data
+        case .adjustment: Theme.warn
+        case .highRisk: Theme.bad
+        }
+    }
+
+    private var surface: Color {
+        switch item.severity {
+        case .info: Theme.soft(Theme.data, 0.10)
+        case .adjustment: Theme.soft(Theme.warn, 0.12)
+        case .highRisk: Theme.soft(Theme.bad, 0.12)
+        }
+    }
+}
+
+struct GoalMetricDetailSheet: View {
+    let assessment: GoalAssessment
+    let language: CoachLanguage
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section(language.goalAssessmentText(.metricMeaning)) {
+                    Text(metricMeaning)
+                }
+                Section(language.goalAssessmentText(.metricDataUsed)) {
+                    ForEach(assessment.dataSources) { source in
+                        LabeledContent(language.goalAssessmentText(source.labelKey), value: goalDataSourceValueText(source.value, language: language))
+                    }
+                }
+                Section(language.goalAssessmentText(.metricCalculatedAt)) {
+                    Text(calculatedAtText)
+                }
+                Section(language.goalAssessmentText(.metricFactors)) {
+                    ForEach(assessment.factors) { factor in
+                        LabeledContent(language.goalAssessmentText(factor.labelKey), value: "\(goalFactorValueText(factor, language: language)) · \(statusText(factor.status))")
+                    }
+                }
+                Section {
+                    Text(language.goalAssessmentText(.metricEstimateCaveat))
+                }
+            }
+            .navigationTitle(assessment.metric.map { language.goalAssessmentText(.whyMetric, value: $0.value) } ?? language.goalAssessmentText(.insufficientData))
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private var metricMeaning: String {
+        guard let metric = assessment.metric else { return language.goalAssessmentText(.insufficientDataSummary) }
+        switch metric {
+        case .calibratedProbability: return language.goalAssessmentText(.metricProbabilityExplanation)
+        case .goalAlignmentScore: return language.goalAssessmentText(.metricAlignmentExplanation)
+        }
+    }
+
+    private var calculatedAtText: String {
+        guard let metric = assessment.metric else { return language.goalAssessmentText(.insufficientData) }
+        return metric.calculatedAt.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func statusText(_ status: GoalAssessmentFactorStatus) -> String {
+        switch status {
+        case .positive: language.goalAssessmentText(.good)
+        case .neutral: language.goalAssessmentText(.stable)
+        case .negative: language.goalAssessmentText(.needsAdjustment)
+        case .unknown: language.goalAssessmentText(.unknown)
+        }
+    }
+}
+
+struct GoalAssessmentDetailSheet: View {
+    let assessment: GoalAssessment
+    let language: CoachLanguage
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                GoalAssessmentDetailContent(assessment: assessment, language: language)
+                    .padding(16)
+            }
+            .navigationTitle(language.goalAssessmentText(.raceGoal))
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+struct GoalAssessmentDetailContent: View {
+    let assessment: GoalAssessment
+    let language: CoachLanguage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            detailSection(language.goalAssessmentText(.mostImportantAdjustment)) {
+                if let item = GoalAssessmentBuilder.primaryAttentionItem(for: assessment) {
+                    attentionRow(item)
+                } else {
+                    Text(language.goalAssessmentText(.noAttention))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.dim)
+                }
+            }
+
+            detailSection(language.goalAssessmentText(.metricFactors)) {
+                VStack(spacing: 10) {
+                    ForEach(assessment.factors) { factor in
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Text(language.goalAssessmentText(factor.labelKey))
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Theme.text)
+                            Spacer(minLength: 8)
+                            Text("\(goalFactorValueText(factor, language: language)) · \(statusText(factor.status))")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Theme.dim)
+                                .multilineTextAlignment(.trailing)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+
+            if !assessment.attentionItems.isEmpty {
+                detailSection(language.goalAssessmentText(.needsAdjustment)) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        ForEach(assessment.attentionItems) { item in
+                            attentionRow(item)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func detailSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TorEyebrow(title)
+            content()
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.card2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+    }
+
+    private func attentionRow(_ item: GoalAttentionItem) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(language.goalAssessmentText(item.titleKey))
+                .font(.headline)
+            Text(item.evidence.map { goalEvidenceText($0, language: language) }.joined(separator: "\n"))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Text(item.estimatedImpactPoints.map { impactText($0) } ?? language.goalAssessmentText(item.impactExplanationKey))
+                .font(.subheadline.weight(.medium))
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func impactText(_ points: Int) -> String {
+        switch language {
+        case .vi: return "Giảm khoảng \(points) điểm."
+        case .ja: return "約\(points)ポイント低下。"
+        case .en: return "Down about \(points) points."
+        }
+    }
+
+    private func statusText(_ status: GoalAssessmentFactorStatus) -> String {
+        switch status {
+        case .positive: language.goalAssessmentText(.good)
+        case .neutral: language.goalAssessmentText(.stable)
+        case .negative: language.goalAssessmentText(.needsAdjustment)
+        case .unknown: language.goalAssessmentText(.unknown)
+        }
     }
 }
 

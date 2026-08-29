@@ -36,6 +36,25 @@ final class OpenAIClientTests: XCTestCase {
         XCTAssertNil(capturedBody["reasoning_effort"])
     }
 
+    func testNamedToolChoiceEncodesAsFunctionChoice() async throws {
+        var capturedBody: [String: Any] = [:]
+        let client = makeClient { request in
+            let body = try XCTUnwrap(request.bodyDataForTest)
+            capturedBody = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Self.textResponse("OK"))
+        }
+
+        var request = Self.request(model: "gpt-5-nano")
+        request.tools = [CoachToolCatalog.coachResponse]
+        request.toolChoice = .tool(name: CoachToolCatalog.coachResponseName)
+        _ = try await client.send(request, apiKey: "test-key")
+
+        let toolChoice = try XCTUnwrap(capturedBody["tool_choice"] as? [String: Any])
+        XCTAssertEqual(toolChoice["type"] as? String, "function")
+        let function = try XCTUnwrap(toolChoice["function"] as? [String: Any])
+        XCTAssertEqual(function["name"] as? String, CoachToolCatalog.coachResponseName)
+    }
+
     func testEmptyChoicesThrowsInvalidResponseInsteadOfFallbackText() async throws {
         let client = makeClient { request in
             (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, #"{"choices":[]}"#.data(using: .utf8)!)
