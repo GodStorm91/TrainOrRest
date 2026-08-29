@@ -1509,7 +1509,7 @@ final class ChatFeatureTests: XCTestCase {
             CompletedActivity.self, DailyWellness.self, SyncState.self,
             Goal.self, TrainingPlan.self, PlannedWorkout.self,
             DailyReadiness.self, DailyCheckIn.self, PlanSnapshot.self, ChatThread.self, ChatMessage.self,
-            CoachRequestSnapshot.self, CoachMemoryItem.self
+            CoachRequestSnapshot.self, CoachMemoryItem.self, CoachPromptSuggestionRecord.self
         ])
         let configuration = ModelConfiguration("ChatFeatureTests-\(UUID().uuidString)", schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: [configuration])

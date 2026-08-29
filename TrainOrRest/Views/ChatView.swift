@@ -38,6 +38,9 @@ struct ChatView: View {
     @State private var softwareKeyboardHeight: CGFloat = 0
     @State private var planTransaction: ChatPlanTransaction?
     @State private var lastConsumedReviewRequestID: UUID?
+    @State private var submittingPromptSuggestionKeys = Set<String>()
+    @State private var submittingInteractionID: String?
+    @State private var pendingOtherResponse: PendingOtherCoachResponse?
     @FocusState private var composerFocused: Bool
     @AppStorage("coachEvidenceReviewed") private var coachEvidenceReviewed = false
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
@@ -380,10 +383,9 @@ struct ChatView: View {
 
     private var contextualPromptRows: some View {
         VStack(spacing: 9) {
-            ForEach(contextualSuggestionPrompts.prefix(2), id: \.self) { prompt in
-                ChatPromptButton(prompt, systemImage: prompt.contains("Move") || prompt.contains("lịch") ? "calendar.badge.clock" : "sparkles") {
-                    draft = prompt
-                    composerFocused = true
+            ForEach(visibleContextualPromptSuggestions.prefix(2)) { suggestion in
+                ChatPromptButton(suggestion.prompt, systemImage: suggestion.prompt.contains("Move") || suggestion.prompt.contains("lịch") ? "calendar.badge.clock" : "sparkles") {
+                    submitPromptSuggestion(suggestion)
                 }
             }
         }
@@ -444,14 +446,10 @@ struct ChatView: View {
 
     private var suggestedPromptRows: some View {
         VStack(spacing: 9) {
-            ChatPromptButton("Phân tích buổi tập gần nhất", systemImage: "waveform.path.ecg") {
-                draft = "Phân tích buổi tập gần nhất"
-            }
-            ChatPromptButton("Tải tập tuần này của tôi thế nào?", systemImage: "chart.line.uptrend.xyaxis") {
-                draft = "Tải tập tuần này của tôi thế nào?"
-            }
-            ChatPromptButton("Hôm nay tôi nên tập gì?", systemImage: "sun.max") {
-                draft = "Hôm nay tôi nên tập gì?"
+            ForEach(visibleOpeningPromptSuggestions.prefix(3)) { suggestion in
+                ChatPromptButton(suggestion.prompt, systemImage: openingPromptIcon(for: suggestion.id)) {
+                    submitPromptSuggestion(suggestion)
+                }
             }
         }
     }
@@ -494,7 +492,11 @@ struct ChatView: View {
                             },
                             onCancelRetry: { failedTurn in
                                 chatStore.cancelRetry(failedTurn.turnID, in: modelContext)
-                            }
+                            },
+                            actionableInteractionID: newestPendingInteractionID,
+                            isSubmittingInteraction: submittingInteractionID == message.interaction?.id,
+                            onSelectInteractionOption: selectInteractionOption,
+                            onSelectInteractionOther: selectInteractionOther
                         )
                         .id(message.turnID)
                     }
@@ -625,11 +627,12 @@ struct ChatView: View {
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             } else if shouldShowContextualSuggestions {
                 CoachAskNextStrip(
-                    prompts: Array(contextualSuggestionPrompts.prefix(2)),
+                    prompts: Array(visibleContextualPromptSuggestions.prefix(2).map(\.prompt)),
                     label: contextualSuggestionLabel
                 ) { prompt in
-                    draft = prompt
-                    composerFocused = true
+                    if let suggestion = visibleContextualPromptSuggestions.first(where: { $0.prompt == prompt }) {
+                        submitPromptSuggestion(suggestion)
+                    }
                 }
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             } else if shouldShowDraftRelativeDateSuggestions {
@@ -642,7 +645,11 @@ struct ChatView: View {
                 }
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             } else if shouldShowSuggestions {
-                CoachAskNextStrip(prompts: Array(suggestionPrompts.prefix(2)), label: language.askNextLabel) { draft = $0 }
+                CoachAskNextStrip(prompts: Array(visiblePromptSuggestions.prefix(2).map(\.prompt)), label: language.askNextLabel) { prompt in
+                    if let suggestion = visiblePromptSuggestions.first(where: { $0.prompt == prompt }) {
+                        submitPromptSuggestion(suggestion)
+                    }
+                }
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
             attachmentChips
@@ -663,16 +670,18 @@ struct ChatView: View {
     }
 
     private var shouldShowSuggestions: Bool {
-        !isContextualSession && !isSoftwareKeyboardVisible && !messages.isEmpty && !chatStore.isSending
+        !hasPendingInteraction && !isContextualSession && !isSoftwareKeyboardVisible && !messages.isEmpty && !chatStore.isSending && !visiblePromptSuggestions.isEmpty
     }
 
     private var shouldShowContextualSuggestions: Bool {
         isContextualSession
+            && !hasPendingInteraction
             && !isSoftwareKeyboardVisible
             && !chatStore.isSending
             && !replacementCoordinator.hasPendingDecision
             && !replacementCoordinator.isConfirming
             && messages.count <= 2
+            && !visibleContextualPromptSuggestions.isEmpty
     }
 
     private var shouldShowDraftRelativeDateSuggestions: Bool {
@@ -704,6 +713,77 @@ struct ChatView: View {
         }
 
         return ["Ngày mai có \(workoutText). Anh muốn cập nhật buổi này thế nào?"]
+    }
+
+    private var newestPendingInteractionID: String? {
+        messages.reversed().compactMap { message -> String? in
+            guard message.role == .assistant,
+                  message.assistantStatus == .completed,
+                  message.interaction?.status == .pending else { return nil }
+            return message.interaction?.id
+        }.first
+    }
+
+    private var hasPendingInteraction: Bool {
+        newestPendingInteractionID != nil
+    }
+
+    private var visiblePromptSuggestions: [CoachPromptSuggestion] {
+        guard let conversationId = chatSession.activeThreadID else { return [] }
+        let candidates = suggestionPrompts.enumerated().map { index, prompt in
+            CoachPromptSuggestion(
+                id: "general-\(index)-\(prompt.stableSuggestionID)",
+                conversationId: conversationId,
+                title: prompt,
+                prompt: prompt,
+                status: .available
+            )
+        }
+        return chatStore.promptSuggestions(from: candidates, in: modelContext)
+            .filter { !submittingPromptSuggestionKeys.contains($0.scopeKey) }
+    }
+
+    private var visibleContextualPromptSuggestions: [CoachPromptSuggestion] {
+        guard let conversationId = chatSession.activeThreadID else { return [] }
+        let workoutId = contextualWorkoutID ?? contextualCompletedActivityID
+        let candidates = contextualSuggestionPrompts.enumerated().map { index, prompt in
+            CoachPromptSuggestion(
+                id: "context-\(index)-\(prompt.stableSuggestionID)",
+                workoutId: workoutId,
+                conversationId: conversationId,
+                title: prompt,
+                prompt: prompt,
+                status: .available
+            )
+        }
+        return chatStore.promptSuggestions(from: candidates, in: modelContext)
+            .filter { !submittingPromptSuggestionKeys.contains($0.scopeKey) }
+    }
+
+    private var visibleOpeningPromptSuggestions: [CoachPromptSuggestion] {
+        guard let conversationId = chatSession.activeThreadID else { return [] }
+        let prompts = [
+            ("latest-run", "Phân tích buổi tập gần nhất"),
+            ("weekly-load", "Tải tập tuần này của tôi thế nào?"),
+            ("today-workout", "Hôm nay tôi nên tập gì?")
+        ]
+        let candidates = prompts.map { id, prompt in
+            CoachPromptSuggestion(
+                id: "opening-\(id)",
+                conversationId: conversationId,
+                title: prompt,
+                prompt: prompt,
+                status: .available
+            )
+        }
+        return chatStore.promptSuggestions(from: candidates, in: modelContext)
+            .filter { !submittingPromptSuggestionKeys.contains($0.scopeKey) }
+    }
+
+    private func openingPromptIcon(for id: String) -> String {
+        if id.contains("latest-run") { return "waveform.path.ecg" }
+        if id.contains("weekly-load") { return "chart.line.uptrend.xyaxis" }
+        return "sun.max"
     }
 
     @ViewBuilder
@@ -788,7 +868,7 @@ struct ChatView: View {
                 .lineLimit(1...5)
                 .padding(.vertical, 12)
                 .focused($composerFocused)
-                .disabled(replacementCoordinator.hasPendingDecision || replacementCoordinator.isConfirming)
+                .disabled((replacementCoordinator.hasPendingDecision || replacementCoordinator.isConfirming) && pendingOtherResponse == nil)
 
             if isSoftwareKeyboardVisible {
                 Button {
@@ -852,9 +932,10 @@ struct ChatView: View {
         }
     }
 
-    private var isSendDisabled: Bool {        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    private var isSendDisabled: Bool {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || chatStore.isSending
-            || replacementCoordinator.hasPendingDecision
+            || (replacementCoordinator.hasPendingDecision && pendingOtherResponse == nil)
             || replacementCoordinator.isConfirming
     }
 
@@ -951,7 +1032,15 @@ struct ChatView: View {
     private func send() {
         let text = draft
         let attachments = currentAttachments
-        let pending = PendingCoachSend(text: text, attachments: attachments, evidence: evidence)
+        let pending = PendingCoachSend(
+            text: text,
+            attachments: attachments,
+            evidence: evidence,
+            interactionId: pendingOtherResponse?.interactionID,
+            selectedOptionId: nil,
+            isCustomInteractionResponse: pendingOtherResponse != nil,
+            interactionMessageID: pendingOtherResponse?.messageID
+        )
         guard coachEvidenceReviewed else {
             presentEvidenceReview(confirming: pending)
             return
@@ -960,26 +1049,125 @@ struct ChatView: View {
     }
 
     private func performSend(_ pending: PendingCoachSend) {
+        let previousInteraction = pending.interactionMessageID.flatMap { id in
+            messages.first(where: { $0.turnID == id })?.interaction
+        }
+        if let messageID = pending.interactionMessageID {
+            _ = chatStore.resolveInteraction(
+                messageID: messageID,
+                selectedOptionId: pending.selectedOptionId,
+                resolvedWithOther: pending.isCustomInteractionResponse,
+                in: modelContext
+            )
+        }
         let reviewedSnapshot = pending.reviewedSnapshot
         let threadID = chatSession.activeThreadID ?? createNewThread()
         draft = ""
+        pendingOtherResponse = nil
         evidence = isContextualSession ? contextualEvidenceSelection : EvidenceSelection()
         clearImageAttachment()
         composerFocused = true
         Task {
-            await chatStore.send(
+            let didSend = await chatStore.send(
                 text: pending.text,
                 model: model,
                 attachments: pending.attachments,
                 evidence: pending.evidence,
                 groundingSnapshot: reviewedSnapshot,
                 threadID: threadID,
+                interactionId: pending.interactionId,
+                selectedOptionId: pending.selectedOptionId,
+                isCustomInteractionResponse: pending.isCustomInteractionResponse,
                 in: modelContext
             )
             await MainActor.run {
+                if !didSend, let previousInteraction, let messageID = pending.interactionMessageID {
+                    chatStore.restoreInteraction(messageID: messageID, interaction: previousInteraction, in: modelContext)
+                }
                 composerFocused = true
             }
         }
+    }
+
+    private func submitPromptSuggestion(_ suggestion: CoachPromptSuggestion) {
+        guard !submittingPromptSuggestionKeys.contains(suggestion.scopeKey), !chatStore.isSending else { return }
+        submittingPromptSuggestionKeys.insert(suggestion.scopeKey)
+        chatStore.setPromptSuggestionStatus(.consumed, for: suggestion, in: modelContext)
+        let attachments = currentAttachments
+        let pending = PendingCoachSend(text: suggestion.prompt, attachments: attachments, evidence: evidence)
+        Task {
+            let didSend = await sendAlreadyReviewed(pending)
+            await MainActor.run {
+                submittingPromptSuggestionKeys.remove(suggestion.scopeKey)
+                if !didSend {
+                    chatStore.setPromptSuggestionStatus(.available, for: suggestion, in: modelContext)
+                }
+            }
+        }
+    }
+
+    private func sendAlreadyReviewed(_ pending: PendingCoachSend) async -> Bool {
+        let threadID = chatSession.activeThreadID ?? createNewThread()
+        await MainActor.run {
+            draft = ""
+            pendingOtherResponse = nil
+            evidence = isContextualSession ? contextualEvidenceSelection : EvidenceSelection()
+            clearImageAttachment()
+            composerFocused = true
+        }
+        return await chatStore.send(
+            text: pending.text,
+            model: model,
+            attachments: pending.attachments,
+            evidence: pending.evidence,
+            groundingSnapshot: pending.reviewedSnapshot,
+            threadID: threadID,
+            interactionId: pending.interactionId,
+            selectedOptionId: pending.selectedOptionId,
+            isCustomInteractionResponse: pending.isCustomInteractionResponse,
+            in: modelContext
+        )
+    }
+
+    private func selectInteractionOption(_ message: ChatMessage, option: CoachChoiceOption) {
+        guard submittingInteractionID == nil,
+              let interaction = message.interaction,
+              interaction.status == .pending,
+              interaction.id == newestPendingInteractionID else { return }
+        submittingInteractionID = interaction.id
+        let previousInteraction = interaction
+        _ = chatStore.resolveInteraction(
+            messageID: message.turnID,
+            selectedOptionId: option.id,
+            in: modelContext
+        )
+        let pending = PendingCoachSend(
+            text: option.value,
+            attachments: currentAttachments,
+            evidence: evidence,
+            interactionId: interaction.id,
+            selectedOptionId: option.id,
+            interactionMessageID: message.turnID
+        )
+        Task {
+            let didSend = await sendAlreadyReviewed(pending)
+            await MainActor.run {
+                submittingInteractionID = nil
+                if !didSend {
+                    chatStore.restoreInteraction(messageID: message.turnID, interaction: previousInteraction, in: modelContext)
+                }
+            }
+        }
+    }
+
+    private func selectInteractionOther(_ message: ChatMessage, interaction: CoachResponseInteraction) {
+        guard interaction.status == .pending, interaction.id == newestPendingInteractionID else { return }
+        pendingOtherResponse = PendingOtherCoachResponse(
+            messageID: message.turnID,
+            interactionID: interaction.id,
+            placeholder: interaction.otherPlaceholder ?? language.choiceOtherPlaceholder
+        )
+        composerFocused = true
     }
 
     private func applyReplacement(_ pending: PendingWorkoutReplacement) {
@@ -1043,7 +1231,11 @@ struct ChatView: View {
                     text: $0.text,
                     attachments: $0.attachments,
                     evidence: $0.evidence,
-                    reviewedSnapshot: snapshot
+                    reviewedSnapshot: snapshot,
+                    interactionId: $0.interactionId,
+                    selectedOptionId: $0.selectedOptionId,
+                    isCustomInteractionResponse: $0.isCustomInteractionResponse,
+                    interactionMessageID: $0.interactionMessageID
                 )
             }
             evidenceReview = EvidenceReviewPresentation(snapshot: snapshot, pendingSend: pendingWithSnapshot)
@@ -1309,6 +1501,9 @@ struct ChatView: View {
     }
 
     private var composerPlaceholder: String {
+        if let pendingOtherResponse {
+            return pendingOtherResponse.placeholder
+        }
         if isContextualSession {
             return isSoftwareKeyboardVisible ? "Nội dung đang nhập…" : "Ask Coach to change this workout…"
         }
@@ -1836,12 +2031,22 @@ private struct PendingCoachSend: Identifiable {
     let attachments: [CoachContextAttachment]
     let evidence: EvidenceSelection
     var reviewedSnapshot: GroundingSnapshot? = nil
+    var interactionId: String? = nil
+    var selectedOptionId: String? = nil
+    var isCustomInteractionResponse = false
+    var interactionMessageID: UUID? = nil
 }
 
 private struct EvidenceReviewPresentation: Identifiable {
     let id = UUID()
     let snapshot: GroundingSnapshot
     let pendingSend: PendingCoachSend?
+}
+
+private struct PendingOtherCoachResponse: Equatable {
+    var messageID: UUID
+    var interactionID: String
+    var placeholder: String
 }
 
 private enum ChatPlanRetry: Equatable {
@@ -1866,6 +2071,18 @@ private enum ChatPlanTransaction: Equatable {
 }
 
 private extension String {
+    var stableSuggestionID: String {
+        let folded = folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+            .lowercased()
+        let characters = folded.unicodeScalars.map { scalar -> Character in
+            CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : "-"
+        }
+        let collapsed = String(characters)
+            .split(separator: "-", omittingEmptySubsequences: true)
+            .joined(separator: "-")
+        return collapsed.isEmpty ? "suggestion" : collapsed
+    }
+
     var containsTomorrowReference: Bool {
         let lower = lowercased()
         return lower.contains("ngày mai")

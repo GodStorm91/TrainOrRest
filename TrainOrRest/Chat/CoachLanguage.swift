@@ -69,6 +69,70 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         }
     }
 
+    var nextSuggestionsLabel: String {
+        switch self {
+        case .en: "NEXT SUGGESTIONS"
+        case .ja: "次の提案"
+        case .vi: "GỢI Ý TIẾP THEO"
+        }
+    }
+
+    var choiceDefaultTitle: String {
+        switch self {
+        case .en: "Choose next step"
+        case .ja: "次のステップを選択"
+        case .vi: "Chọn bước tiếp theo"
+        }
+    }
+
+    var choiceOtherLabel: String {
+        switch self {
+        case .en: "Other request..."
+        case .ja: "別のリクエスト…"
+        case .vi: "Yêu cầu khác…"
+        }
+    }
+
+    var choiceOtherPlaceholder: String {
+        switch self {
+        case .en: "How would you like Coach to adjust?"
+        case .ja: "Coach にどう調整してほしいですか？"
+        case .vi: "Bạn muốn Coach điều chỉnh như thế nào?"
+        }
+    }
+
+    func choiceResolvedSelectedLabel(option: String) -> String {
+        switch self {
+        case .en: "Selected: \(option)"
+        case .ja: "選択済み: \(option)"
+        case .vi: "Đã chọn: \(option)"
+        }
+    }
+
+    var choiceResolvedOtherLabel: String {
+        switch self {
+        case .en: "Answered with another request"
+        case .ja: "別のリクエストで回答済み"
+        case .vi: "Đã trả lời bằng yêu cầu khác"
+        }
+    }
+
+    var choiceDisabledAccessibilitySuffix: String {
+        switch self {
+        case .en: "Disabled"
+        case .ja: "無効"
+        case .vi: "Đã tắt"
+        }
+    }
+
+    var choiceSelectedAccessibilitySuffix: String {
+        switch self {
+        case .en: "Selected"
+        case .ja: "選択済み"
+        case .vi: "Đã chọn"
+        }
+    }
+
     /// Copy-to-clipboard action under a chat bubble.
     var copyLabel: String {
         switch self {

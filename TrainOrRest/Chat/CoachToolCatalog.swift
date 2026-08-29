@@ -11,6 +11,30 @@ enum CoachToolCatalog {
     static let explainOnlyName = "explain_only"
     static let planEditDraftName = "propose_plan_adjustment"
     static let ruleRefName = "cite_rule"
+    static let coachResponseName = "coach_response"
+
+    static var coachResponse: ClaudeTool {
+        ClaudeTool(
+            name: coachResponseName,
+            description: """
+            Return the user-facing Coach message and, only when the user needs to choose between \
+            next steps, an optional structured single-choice interaction. Use natural language in \
+            content. Do not encode choices in the prose alone when a decision is requested.
+            """,
+            inputSchema: .object([
+                "type": .string("object"),
+                "additionalProperties": .bool(false),
+                "properties": .object([
+                    "content": .object([
+                        "type": .string("string"),
+                        "description": .string("Natural-language assistant message shown in the chat bubble.")
+                    ]),
+                    "interaction": interactionSchema
+                ]),
+                "required": .array([.string("content")])
+            ])
+        )
+    }
 
     static var explainOnly: ClaudeTool {
         ClaudeTool(
@@ -73,9 +97,49 @@ enum CoachToolCatalog {
     @MainActor
     static func tools(allowProposals: Bool) -> [ClaudeTool] {
         if allowProposals {
-            return [explainOnly, planEditDraft, ruleRef]
+            return [coachResponse, explainOnly, planEditDraft, ruleRef]
         }
-        return [explainOnly, ruleRef]
+        return [coachResponse, explainOnly, ruleRef]
+    }
+
+    private static var interactionSchema: JSONValue {
+        .object([
+            "type": .string("object"),
+            "additionalProperties": .bool(false),
+            "properties": .object([
+                "id": .object(["type": .string("string")]),
+                "type": .object([
+                    "type": .string("string"),
+                    "enum": .array([.string("single_choice")])
+                ]),
+                "title": .object(["type": .string("string")]),
+                "options": .object([
+                    "type": .string("array"),
+                    "minItems": .number(2),
+                    "maxItems": .number(4),
+                    "items": .object([
+                        "type": .string("object"),
+                        "additionalProperties": .bool(false),
+                        "properties": .object([
+                            "id": .object(["type": .string("string")]),
+                            "label": .object(["type": .string("string")]),
+                            "description": .object(["type": .string("string")]),
+                            "value": .object(["type": .string("string")])
+                        ]),
+                        "required": .array(["id", "label", "value"].map(JSONValue.string))
+                    ])
+                ]),
+                "allowOther": .object(["type": .string("boolean")]),
+                "otherLabel": .object(["type": .string("string")]),
+                "otherPlaceholder": .object(["type": .string("string")]),
+                "status": .object([
+                    "type": .string("string"),
+                    "enum": .array([.string("pending"), .string("resolved")])
+                ]),
+                "selectedOptionId": .object(["type": .string("string")])
+            ]),
+            "required": .array(["id", "type", "options", "allowOther"].map(JSONValue.string))
+        ])
     }
 
     enum ToolChoice: Encodable, Equatable {

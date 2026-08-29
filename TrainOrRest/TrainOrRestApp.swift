@@ -25,7 +25,7 @@ struct TrainOrRestApp: App {
                 Goal.self, TrainingPlan.self, PlannedWorkout.self,
                 DailyReadiness.self, DailyCheckIn.self, RuleOverride.self,
                 PlanSnapshot.self, ChatThread.self, ChatMessage.self, PlanEdit.self,
-                CoachRequestSnapshot.self, CoachMemoryItem.self,
+                CoachRequestSnapshot.self, CoachMemoryItem.self, CoachPromptSuggestionRecord.self,
                 GoogleCalendarConnection.self, GoogleCalendarEventLink.self,
                 GoogleCalendarInboundChange.self, ScheduleChangeOperation.self,
                 GoogleAvailabilityCalendar.self, DayAvailability.self,

@@ -46,6 +46,7 @@ final class ChatMessage {
     var operationID: UUID?
     var isIncompleteStorage: Bool?
     var announcedFailureStorage: Bool?
+    var interactionJSON: String?
 
     init(
         uuid: UUID = UUID(),
@@ -65,7 +66,8 @@ final class ChatMessage {
         activeAttemptID: UUID? = nil,
         operationID: UUID? = nil,
         isIncomplete: Bool = false,
-        announcedFailure: Bool = false
+        announcedFailure: Bool = false,
+        interaction: CoachResponseInteraction? = nil
     ) {
         self.uuid = uuid
         self.roleRaw = role.rawValue
@@ -85,6 +87,7 @@ final class ChatMessage {
         self.operationID = operationID
         self.isIncompleteStorage = isIncomplete
         self.announcedFailureStorage = announcedFailure
+        self.interactionJSON = CoachInteractionCodec.encode(interaction)
     }
 
     var role: ChatRole {
@@ -127,6 +130,11 @@ final class ChatMessage {
         get { announcedFailureStorage ?? false }
         set { announcedFailureStorage = newValue }
     }
+
+    var interaction: CoachResponseInteraction? {
+        get { CoachInteractionCodec.decode(interactionJSON) }
+        set { interactionJSON = CoachInteractionCodec.encode(newValue) }
+    }
 }
 
 @Model
@@ -145,6 +153,9 @@ final class CoachRequestSnapshot {
     var groundingFootnote: String?
     var groundingSummary: String?
     var threadID: UUID?
+    var interactionId: String?
+    var selectedOptionId: String?
+    var isCustomInteractionResponseStorage: Bool?
 
     init(
         id: UUID = UUID(),
@@ -159,7 +170,10 @@ final class CoachRequestSnapshot {
         actionType: CoachRequestActionType,
         operationID: UUID = UUID(),
         groundingSnapshot: GroundingSnapshot?,
-        threadID: UUID?
+        threadID: UUID?,
+        interactionId: String? = nil,
+        selectedOptionId: String? = nil,
+        isCustomInteractionResponse: Bool = false
     ) {
         self.id = id
         self.userTurnID = userTurnID
@@ -175,6 +189,9 @@ final class CoachRequestSnapshot {
         self.groundingFootnote = groundingSnapshot?.footnoteLine
         self.groundingSummary = groundingSnapshot?.summary
         self.threadID = threadID
+        self.interactionId = interactionId
+        self.selectedOptionId = selectedOptionId
+        self.isCustomInteractionResponseStorage = isCustomInteractionResponse
     }
 
     var actionType: CoachRequestActionType {
@@ -187,6 +204,23 @@ final class CoachRequestSnapshot {
 
     var selectedEvidenceSources: EvidenceSelection {
         (Self.decode(EvidenceSelection.Payload.self, from: selectedEvidenceSourcesJSON) ?? .default).selection
+    }
+
+    var isCustomInteractionResponse: Bool {
+        get { isCustomInteractionResponseStorage ?? false }
+        set { isCustomInteractionResponseStorage = newValue }
+    }
+
+    var interactionMetadataPrompt: String? {
+        guard let interactionId else { return nil }
+        var parts = ["interactionId=\(interactionId)"]
+        if let selectedOptionId {
+            parts.append("optionId=\(selectedOptionId)")
+        }
+        if isCustomInteractionResponse {
+            parts.append("response=other")
+        }
+        return "Coach response choice metadata: \(parts.joined(separator: ", "))."
     }
 
     private static func encode<T: Encodable>(_ value: T) -> String {

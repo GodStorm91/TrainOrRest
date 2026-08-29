@@ -33,6 +33,7 @@ final class CoachChatStore: ObservableObject {
         self.replacementCoordinator = replacementCoordinator
     }
 
+    @discardableResult
     func send(
         text: String,
         model: String,
@@ -40,14 +41,17 @@ final class CoachChatStore: ObservableObject {
         evidence: EvidenceSelection? = nil,
         groundingSnapshot: GroundingSnapshot? = nil,
         threadID: UUID? = nil,
+        interactionId: String? = nil,
+        selectedOptionId: String? = nil,
+        isCustomInteractionResponse: Bool = false,
         in context: ModelContext
-    ) async {
+    ) async -> Bool {
         let account = CoachModelProvider.apiKeyAccount(for: model)
         guard let apiKey = try? KeychainStore.load(account: account), !apiKey.isEmpty else {
             lastError = CoachLanguage.current.missingCoachKeyError(provider: CoachModelProvider.displayName(for: model))
-            return
+            return false
         }
-        await send(
+        return await send(
             text: text,
             model: model,
             attachments: attachments,
@@ -55,10 +59,14 @@ final class CoachChatStore: ObservableObject {
             groundingSnapshot: groundingSnapshot,
             apiKey: apiKey,
             threadID: threadID,
+            interactionId: interactionId,
+            selectedOptionId: selectedOptionId,
+            isCustomInteractionResponse: isCustomInteractionResponse,
             in: context
         )
     }
 
+    @discardableResult
     func send(
         text: String,
         model: String,
@@ -67,13 +75,17 @@ final class CoachChatStore: ObservableObject {
         groundingSnapshot: GroundingSnapshot? = nil,
         apiKey: String,
         threadID: UUID? = nil,
+        interactionId: String? = nil,
+        selectedOptionId: String? = nil,
+        isCustomInteractionResponse: Bool = false,
         in context: ModelContext
-    ) async {
+    ) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { return false }
+        guard !isSending else { return false }
         guard replacementCoordinator?.hasPendingDecision != true else {
             lastError = CoachLanguage.current.replacementPendingMessage
-            return
+            return false
         }
 
         let submittedAt = now()
@@ -89,7 +101,7 @@ final class CoachChatStore: ObservableObject {
             )
         } catch {
             lastError = technicalErrorMessage(error)
-            return
+            return false
         }
 
         isSending = true
@@ -107,7 +119,10 @@ final class CoachChatStore: ObservableObject {
             createdAt: submittedAt,
             actionType: classifyAction(trimmed),
             groundingSnapshot: grounding,
-            threadID: threadID
+            threadID: threadID,
+            interactionId: interactionId,
+            selectedOptionId: selectedOptionId,
+            isCustomInteractionResponse: isCustomInteractionResponse
         )
         context.insert(snapshot)
         let assistantTurn = ChatMessage(
@@ -140,7 +155,7 @@ final class CoachChatStore: ObservableObject {
                 in: context
             ) {
                 isSending = false
-                return
+                return true
             }
         } catch {
             if attachments.contains(where: {
@@ -161,7 +176,7 @@ final class CoachChatStore: ObservableObject {
             assistantTurn.activeAttemptID = nil
             try? context.save()
             isSending = false
-            return
+            return true
         }
 
         try? context.save()
@@ -175,6 +190,7 @@ final class CoachChatStore: ObservableObject {
             statusBeforeStreaming: .streaming
         )
         isSending = false
+        return assistantTurn.assistantStatus == .completed
     }
 
     private func handleContextualDistanceShortcut(
@@ -339,6 +355,70 @@ final class CoachChatStore: ObservableObject {
         lastError = message
     }
 
+    func promptSuggestions(
+        from candidates: [CoachPromptSuggestion],
+        in context: ModelContext
+    ) -> [CoachPromptSuggestion] {
+        let records = ((try? context.fetch(FetchDescriptor<CoachPromptSuggestionRecord>())) ?? [])
+            .reduce(into: [String: CoachPromptSuggestionRecord]()) { $0[$1.scopeKey] = $1 }
+        return candidates.compactMap { suggestion in
+            var suggestion = suggestion
+            if let status = records[suggestion.scopeKey]?.status {
+                suggestion.status = status
+            }
+            return suggestion.status == .available ? suggestion : nil
+        }
+    }
+
+    func setPromptSuggestionStatus(
+        _ status: CoachPromptSuggestionStatus,
+        for suggestion: CoachPromptSuggestion,
+        in context: ModelContext
+    ) {
+        let key = suggestion.scopeKey
+        var descriptor = FetchDescriptor<CoachPromptSuggestionRecord>()
+        descriptor.fetchLimit = 200
+        if let record = (try? context.fetch(descriptor))?.first(where: { $0.scopeKey == key }) {
+            record.status = status
+        } else {
+            context.insert(CoachPromptSuggestionRecord(
+                scopeKey: key,
+                conversationId: suggestion.conversationId,
+                workoutId: suggestion.workoutId,
+                suggestionId: suggestion.id,
+                status: status
+            ))
+        }
+        try? context.save()
+    }
+
+    func resolveInteraction(
+        messageID: UUID,
+        selectedOptionId: String?,
+        resolvedWithOther: Bool = false,
+        in context: ModelContext
+    ) -> CoachResponseInteraction? {
+        guard let message = message(messageID, in: context),
+              var interaction = message.interaction,
+              interaction.status == .pending else { return nil }
+        interaction.status = .resolved
+        interaction.selectedOptionId = selectedOptionId
+        interaction.resolvedWithOther = resolvedWithOther
+        message.interaction = interaction
+        try? context.save()
+        return interaction
+    }
+
+    func restoreInteraction(
+        messageID: UUID,
+        interaction: CoachResponseInteraction,
+        in context: ModelContext
+    ) {
+        guard let message = message(messageID, in: context) else { return }
+        message.interaction = interaction
+        try? context.save()
+    }
+
     func testConnection(apiKey: String, model: String) async -> String {
         let request = ClaudeRequest(
             model: model,
@@ -368,6 +448,7 @@ final class CoachChatStore: ObservableObject {
         assistantTurn.assistantStatus = statusBeforeStreaming
         assistantTurn.errorCategory = nil
         assistantTurn.errorMessage = nil
+        assistantTurn.interaction = nil
         try? context.save()
 
         do {
@@ -407,6 +488,10 @@ final class CoachChatStore: ObservableObject {
         if !directive.isEmpty {
             system += "\n\n\(directive)"
         }
+        system += """
+
+When your reply asks the user to choose between next steps, call `\(CoachToolCatalog.coachResponseName)` with `content` and structured `interaction` metadata instead of writing the choices only as prose. Use `single_choice`, 2-4 concise options, and `allowOther: true` when a custom answer is useful. If no decision is needed, a normal text response is fine.
+"""
         let attachments = try attachments(from: snapshot, in: context)
         var conversation = try messageHistory(
             threadID: snapshot.threadID,
@@ -423,12 +508,23 @@ final class CoachChatStore: ObservableObject {
             )
             conversation[conversation.count - 1] = last
         }
+        if let metadata = snapshot.interactionMetadataPrompt,
+           var last = conversation.last,
+           last.role == "user" {
+            last.content.append(.text(metadata))
+            conversation[conversation.count - 1] = last
+        }
         let applied: [String] = []
         var lastToolRejection: String?
         let shouldPublishStreamingText = snapshot.actionType != .planMutation
 
         for _ in 0..<CoachChatConfig.maxToolRounds {
-            let request = ClaudeRequest(model: model, system: system, tools: [CoachTools.tool], messages: conversation)
+            let request = ClaudeRequest(
+                model: model,
+                system: system,
+                tools: CoachToolCatalog.tools(allowProposals: true),
+                messages: conversation
+            )
             let client = CoachModelProvider.client(for: model, anthropicClient: anthropicClient, openAIClient: openAIClient)
             let events = try await client.stream(request, apiKey: apiKey)
             var replacementStarted = false
@@ -495,6 +591,23 @@ final class CoachChatStore: ObservableObject {
                     break
                 }
                 assistantTurn.text = text.isEmpty ? "I could not produce a response." : text
+                assistantTurn.appliedAdjustment = applied.isEmpty ? nil : applied.joined(separator: "; ")
+                try context.save()
+                return
+            }
+
+            if toolUses.count == 1, toolUses[0].1 == CoachToolCatalog.coachResponseName {
+                let payload = try toolUses[0].2.decoded(CoachStructuredResponsePayload.self)
+                var interaction = payload.interaction
+                interaction?.normalizeForNewAssistantMessage(
+                    fallbackLanguage: CoachLanguage(rawValue: snapshot.locale) ?? .current
+                )
+                if interaction?.options.count ?? 0 < 2 {
+                    interaction = nil
+                }
+                let content = payload.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                assistantTurn.text = content.isEmpty ? response.content.textContent : content
+                assistantTurn.interaction = interaction
                 assistantTurn.appliedAdjustment = applied.isEmpty ? nil : applied.joined(separator: "; ")
                 try context.save()
                 return
