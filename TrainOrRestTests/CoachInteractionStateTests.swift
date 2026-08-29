@@ -90,6 +90,38 @@ final class CoachInteractionStateTests: XCTestCase {
         XCTAssertEqual(request.toolChoice, .tool(name: CoachToolCatalog.coachResponseName))
     }
 
+    func testActionTypeOverridePreventsRecommendationPromptFromBecomingPlanMutation() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedMinimalTrainingData(in: context)
+        let client = InteractionMockCoachClient(responses: [.choiceResponse])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(
+            text: "Propose a concrete adjustment. Do not modify the calendar directly.",
+            model: "claude-test",
+            apiKey: "test-key",
+            threadID: conversationID,
+            actionTypeOverride: .readOnly,
+            in: context
+        )
+
+        let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
+        XCTAssertEqual(snapshot.actionType, .readOnly)
+        XCTAssertEqual(client.requests.last?.tools.map(\.name), [CoachToolCatalog.coachResponseName])
+        XCTAssertEqual(client.requests.last?.toolChoice, .tool(name: CoachToolCatalog.coachResponseName))
+    }
+
+    func testCalendarReviewPromptRequestUsesStableIdentity() {
+        let prompt = "Propose a concrete adjustment. Do not modify the calendar directly."
+
+        let first = CalendarReviewChatRequest(prompt: prompt)
+        let second = CalendarReviewChatRequest(prompt: prompt)
+
+        XCTAssertEqual(first.id, second.id)
+        XCTAssertEqual(first.threadTitle, "Calendar schedule review")
+    }
+
     func testSelectingOptionSubmitsValueAndMetadata() async throws {
         let container = try makeContainer()
         let context = container.mainContext

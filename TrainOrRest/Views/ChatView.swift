@@ -37,10 +37,12 @@ struct ChatView: View {
     @State private var isHeaderCollapsed = false
     @State private var softwareKeyboardHeight: CGFloat = 0
     @State private var planTransaction: ChatPlanTransaction?
-    @State private var lastConsumedReviewRequestID: UUID?
+    @State private var lastConsumedReviewRequestID: String?
     @State private var submittingPromptSuggestionKeys = Set<String>()
     @State private var submittingInteractionID: String?
     @State private var pendingOtherResponse: PendingOtherCoachResponse?
+    @State private var draftActionTypeOverride: CoachRequestActionType?
+    @State private var draftActionTypeOverridePrompt: String?
     @FocusState private var composerFocused: Bool
     @AppStorage("coachEvidenceReviewed") private var coachEvidenceReviewed = false
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
@@ -1039,7 +1041,8 @@ struct ChatView: View {
             interactionId: pendingOtherResponse?.interactionID,
             selectedOptionId: nil,
             isCustomInteractionResponse: pendingOtherResponse != nil,
-            interactionMessageID: pendingOtherResponse?.messageID
+            interactionMessageID: pendingOtherResponse?.messageID,
+            actionTypeOverride: draft == draftActionTypeOverridePrompt ? draftActionTypeOverride : nil
         )
         guard coachEvidenceReviewed else {
             presentEvidenceReview(confirming: pending)
@@ -1063,6 +1066,8 @@ struct ChatView: View {
         let reviewedSnapshot = pending.reviewedSnapshot
         let threadID = chatSession.activeThreadID ?? createNewThread()
         draft = ""
+        draftActionTypeOverride = nil
+        draftActionTypeOverridePrompt = nil
         pendingOtherResponse = nil
         evidence = isContextualSession ? contextualEvidenceSelection : EvidenceSelection()
         clearImageAttachment()
@@ -1078,6 +1083,7 @@ struct ChatView: View {
                 interactionId: pending.interactionId,
                 selectedOptionId: pending.selectedOptionId,
                 isCustomInteractionResponse: pending.isCustomInteractionResponse,
+                actionTypeOverride: pending.actionTypeOverride,
                 in: modelContext
             )
             await MainActor.run {
@@ -1125,6 +1131,7 @@ struct ChatView: View {
             interactionId: pending.interactionId,
             selectedOptionId: pending.selectedOptionId,
             isCustomInteractionResponse: pending.isCustomInteractionResponse,
+            actionTypeOverride: pending.actionTypeOverride,
             in: modelContext
         )
     }
@@ -1301,12 +1308,27 @@ struct ChatView: View {
         guard let request = reviewRequest, lastConsumedReviewRequestID != request.id else { return }
         lastConsumedReviewRequestID = request.id
         guard let activityUUID = request.activityUUID else {
-            let threadID = createNewThread(title: "Calendar schedule review")
-            draft = request.prompt
+            let threadID = createNewThread(title: request.threadTitle)
             evidence = EvidenceSelection(readinessSnapshot: true, weekPlan: true, workout: nil, hasPhoto: false)
             chatSession.activeThreadID = threadID
-            composerFocused = true
             onReviewRequestConsumed(request)
+            if request.autoSubmit {
+                composerFocused = false
+                let pending = PendingCoachSend(
+                    text: request.prompt,
+                    attachments: currentAttachments,
+                    evidence: evidence,
+                    actionTypeOverride: request.actionTypeOverride
+                )
+                Task {
+                    _ = await sendAlreadyReviewed(pending)
+                }
+            } else {
+                draft = request.prompt
+                draftActionTypeOverride = request.actionTypeOverride
+                draftActionTypeOverridePrompt = request.prompt
+                composerFocused = true
+            }
             return
         }
         guard let activity = completedActivities.first(where: { $0.hkUUID == activityUUID }) else {
@@ -1327,6 +1349,8 @@ struct ChatView: View {
             threadID = createNewThread(title: reviewThreadTitle(for: activity), reviewActivityUUID: activity.hkUUID)
             draft = request.prompt
         }
+        draftActionTypeOverride = request.actionTypeOverride
+        draftActionTypeOverridePrompt = request.prompt
         evidence = EvidenceSelection(readinessSnapshot: true, weekPlan: true, workout: .completed(activity.hkUUID), hasPhoto: false)
         chatSession.activeThreadID = threadID
         composerFocused = true
@@ -1360,6 +1384,8 @@ struct ChatView: View {
         modelContext.insert(thread)
         chatSession.activeThreadID = thread.uuid
         draft = ""
+        draftActionTypeOverride = nil
+        draftActionTypeOverridePrompt = nil
         evidence.workout = nil
         clearImageAttachment()
         try? modelContext.save()
@@ -2035,6 +2061,7 @@ private struct PendingCoachSend: Identifiable {
     var selectedOptionId: String? = nil
     var isCustomInteractionResponse = false
     var interactionMessageID: UUID? = nil
+    var actionTypeOverride: CoachRequestActionType? = nil
 }
 
 private struct EvidenceReviewPresentation: Identifiable {

@@ -16,6 +16,8 @@ struct TrainingPlanDetailView: View {
     @State private var isShowingWeeklyScheduleReview = false
     @State private var isShowingGoalMetricDetail = false
     @State private var isShowingGoalAssessmentDetail = false
+    @State private var isShowingPlanAdjustmentPreview = false
+    @State private var planAdjustmentError: String?
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
 
     private let calendar = Calendar.current
@@ -40,7 +42,9 @@ struct TrainingPlanDetailView: View {
                     if let assessment = goalAssessment {
                         RaceGoalStatusCard(
                             assessment: assessment,
+                            summary: summary,
                             language: language,
+                            onAdjustPlan: { isShowingPlanAdjustmentPreview = true },
                             onShowMetricDetail: { isShowingGoalMetricDetail = true },
                             onShowAssessmentDetail: { isShowingGoalAssessmentDetail = true }
                         )
@@ -118,6 +122,44 @@ struct TrainingPlanDetailView: View {
                 GoalAssessmentDetailSheet(assessment: assessment, language: language)
                     .presentationDetents([.medium, .large])
             }
+        }
+        .sheet(isPresented: $isShowingPlanAdjustmentPreview) {
+            if let assessment = goalAssessment, let plan = plans.first {
+                PlanAdjustmentPreviewSheet(
+                    proposal: GoalPlanAdjustmentEngine.proposal(
+                        assessment: assessment,
+                        summary: summary,
+                        plan: plan,
+                        today: .now,
+                        calendar: calendar,
+                        language: language
+                    ),
+                    language: language
+                ) { proposal in
+                    do {
+                        try GoalPlanAdjustmentEngine.apply(
+                            proposal,
+                            to: plan,
+                            in: modelContext,
+                            today: .now,
+                            calendar: calendar
+                        )
+                        isShowingPlanAdjustmentPreview = false
+                        planAdjustmentError = nil
+                    } catch {
+                        planAdjustmentError = error.localizedDescription
+                    }
+                }
+                .presentationDetents([.medium, .large])
+            }
+        }
+        .alert("Plan adjustment failed", isPresented: Binding(
+            get: { planAdjustmentError != nil },
+            set: { if !$0 { planAdjustmentError = nil } }
+        )) {
+            Button("OK", role: .cancel) { planAdjustmentError = nil }
+        } message: {
+            Text(planAdjustmentError ?? "")
         }
         .sheet(isPresented: $isShowingWeeklyScheduleReview) {
             WeeklySmartSchedulingReviewView(suggestions: weeklySuggestions) { suggestions in
@@ -530,13 +572,16 @@ struct TrainingPlanDetailView: View {
             "\(metricLabel($0)): \($0.value)%"
         } ?? language.goalAssessmentText(.insufficientData)
 
-        return CalendarReviewChatRequest(prompt: """
+        return CalendarReviewChatRequest(
+            id: "goal-attention-\(assessment.goalId)-\(item.id)",
+            prompt: """
         Propose a concrete training-plan adjustment for this race-goal attention item.
 
         Rules:
         - Do not modify the calendar directly.
         - Use the existing confirmation flow before applying any plan change.
         - Base the recommendation only on the structured context below.
+        - End with a structured single-choice interaction so the runner can choose between keeping the plan, asking for a validated plan-adjustment draft, or entering another request.
 
         Goal ID: \(assessment.goalId)
         Attention item ID: \(item.id)
@@ -554,7 +599,19 @@ struct TrainingPlanDetailView: View {
 
         Upcoming workouts:
         \(upcoming)
-        """)
+        """,
+            threadTitle: goalAttentionCoachThreadTitle,
+            actionTypeOverride: .readOnly,
+            autoSubmit: true
+        )
+    }
+
+    private var goalAttentionCoachThreadTitle: String {
+        switch language {
+        case .vi: "Đề xuất mục tiêu cuộc đua"
+        case .ja: "レース目標の提案"
+        case .en: "Race goal recommendation"
+        }
     }
 
     private func metricLabel(_ metric: GoalAssessmentMetric) -> String {
@@ -704,18 +761,39 @@ private func goalDataSourceValueText(_ value: String, language: CoachLanguage) -
 
 struct RaceGoalStatusCard: View {
     let assessment: GoalAssessment
+    let summary: ActivePlanSummary
     let language: CoachLanguage
+    let onAdjustPlan: () -> Void
     let onShowMetricDetail: () -> Void
     let onShowAssessmentDetail: () -> Void
 
     private var metricValue: Int? { assessment.metric?.value }
+    @State private var selectedWeekID: Int?
+
+    init(
+        assessment: GoalAssessment,
+        summary: ActivePlanSummary? = nil,
+        language: CoachLanguage,
+        initialSelectedWeekID: Int? = nil,
+        onAdjustPlan: @escaping () -> Void = {},
+        onShowMetricDetail: @escaping () -> Void,
+        onShowAssessmentDetail: @escaping () -> Void
+    ) {
+        self.assessment = assessment
+        self.summary = summary ?? Self.fallbackSummary(for: assessment)
+        self.language = language
+        self.onAdjustPlan = onAdjustPlan
+        self.onShowMetricDetail = onShowMetricDetail
+        self.onShowAssessmentDetail = onShowAssessmentDetail
+        self._selectedWeekID = State(initialValue: initialSelectedWeekID)
+    }
 
     var body: some View {
         TorCard(padding: 18, cornerRadius: 22) {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 HStack(alignment: .center, spacing: 16) {
-                    metricBlock
+                    predictionBlock
                     VStack(alignment: .leading, spacing: 7) {
                         Text(language.goalAssessmentText(assessment.summaryKey))
                             .font(.torHeading(22, .bold))
@@ -732,7 +810,9 @@ struct RaceGoalStatusCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 targetComparison
-                factorSummary
+                planActualChart
+                compactMetrics
+                actionButtons
             }
         }
         .accessibilityElement(children: .combine)
@@ -753,33 +833,26 @@ struct RaceGoalStatusCard: View {
         }
     }
 
-    private var metricBlock: some View {
+    private var predictionBlock: some View {
         VStack(spacing: 9) {
             ZStack {
-                Circle()
-                    .stroke(Theme.line, lineWidth: 8)
-                if let metricValue {
-                    Circle()
-                        .trim(from: 0, to: CGFloat(metricValue) / 100)
-                        .stroke(metricColor, style: StrokeStyle(lineWidth: 8, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                        .accessibilityHidden(true)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Theme.card2)
+                VStack(spacing: 5) {
+                    Text(primaryAssessmentValue)
+                        .font(.torNumber(34, .bold))
+                        .monospacedDigit()
+                        .foregroundStyle(metricColor)
+                        .minimumScaleFactor(0.68)
+                    Text(primaryAssessmentLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.dim)
+                        .multilineTextAlignment(.center)
                 }
-                Text(metricDisplayText)
-                    .font(.torNumber(metricValue == nil ? 22 : 36, .bold))
-                    .monospacedDigit()
-                    .foregroundStyle(metricColor)
-                    .minimumScaleFactor(0.74)
+                .padding(10)
             }
-            .frame(width: 108, height: 108)
-            .accessibilityLabel(metricAccessibilityLabel)
-            .accessibilityValue(metricValue.map { "\($0) percent" } ?? language.goalAssessmentText(.insufficientData))
-
-            Text(metricLabel)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Theme.dim)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+            .frame(width: 124, height: 108)
+            .accessibilityLabel(primaryAssessmentAccessibility)
 
             if let metricValue {
                 Button {
@@ -806,6 +879,10 @@ struct RaceGoalStatusCard: View {
             comparisonColumn(
                 label: language.goalAssessmentText(.currentPrediction),
                 value: predictionText
+            )
+            comparisonColumn(
+                label: language.goalAssessmentText(.targetGap),
+                value: gapText
             )
         }
     }
@@ -868,6 +945,162 @@ struct RaceGoalStatusCard: View {
         }
     }
 
+    private var planActualChart: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(language.goalAssessmentText(.planAndActual))
+                    .font(.torHeading(16, .bold))
+                    .foregroundStyle(Theme.text)
+                Spacer()
+                legend
+            }
+            Chart(chartWeeks) { week in
+                BarMark(
+                    x: .value("Week", week.weekIndex + 1),
+                    y: .value(language.goalAssessmentText(.planned), week.plannedDistanceKm)
+                )
+                .foregroundStyle(week.isFutureWeek ? Theme.faint.opacity(0.18) : Theme.faint.opacity(0.34))
+                .position(by: .value("Metric", language.goalAssessmentText(.planned)))
+
+                if !week.isFutureWeek {
+                    BarMark(
+                        x: .value("Week", week.weekIndex + 1),
+                        y: .value(language.goalAssessmentText(.actual), week.completedDistanceKm)
+                    )
+                    .foregroundStyle(Theme.accent)
+                    .position(by: .value("Metric", language.goalAssessmentText(.actual)))
+                }
+                if week.isCurrentWeek {
+                    RuleMark(x: .value(language.goalAssessmentText(.currentWeek), week.weekIndex + 1))
+                        .foregroundStyle(Theme.warn)
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                }
+            }
+            .chartXAxis {
+                AxisMarks(values: chartWeeks.map { $0.weekIndex + 1 }) { value in
+                    AxisValueLabel {
+                        if let intValue = value.as(Int.self) {
+                            Text("W\(intValue)")
+                        }
+                    }
+                }
+            }
+            .chartYAxis { AxisMarks(position: .leading) }
+            .frame(height: 164)
+            .chartOverlay { proxy in
+                GeometryReader { geo in
+                    Rectangle()
+                        .fill(.clear)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            SpatialTapGesture().onEnded { value in
+                                guard let plot = proxy.plotFrame else { return }
+                                let origin = geo[plot].origin
+                                let x = value.location.x - origin.x
+                                if let weekNumber: Int = proxy.value(atX: x) {
+                                    selectedWeekID = chartWeeks.min(by: {
+                                        abs(($0.weekIndex + 1) - weekNumber) < abs(($1.weekIndex + 1) - weekNumber)
+                                    })?.weekIndex
+                                }
+                            }
+                        )
+                }
+            }
+            .accessibilityLabel(chartAccessibility)
+
+            if let selectedWeek {
+                weekDetail(selectedWeek)
+            }
+        }
+        .padding(12)
+        .background(Theme.card2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var legend: some View {
+        HStack(spacing: 10) {
+            legendItem(color: Theme.faint.opacity(0.34), label: language.goalAssessmentText(.planned))
+            legendItem(color: Theme.accent, label: language.goalAssessmentText(.actual))
+        }
+    }
+
+    private func legendItem(color: Color, label: String) -> some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 10, height: 10)
+            Text(label).font(.caption2.weight(.semibold)).foregroundStyle(Theme.faint)
+        }
+    }
+
+    private func weekDetail(_ week: ActivePlanWeekSummary) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(weekRangeText(week))
+                .font(.torHeading(14, .bold))
+                .foregroundStyle(Theme.text)
+            detailLine(language.goalAssessmentText(.planned), distanceText(week.plannedDistanceKm))
+            if !week.isFutureWeek {
+                detailLine(language.goalAssessmentText(.actual), distanceText(week.completedDistanceKm))
+                detailLine(language.goalAssessmentText(.targetGap), signedDistanceText(week.completedDistanceKm - week.plannedDistanceKm))
+                detailLine(language.goalAssessmentText(.keyWorkout), "\(week.completedKeySessions)/\(week.plannedKeySessions)")
+                if let plannedLong = week.plannedLongRunKm {
+                    detailLine(language.goalAssessmentText(.longRunProgression), "\(distanceText(week.completedLongRunKm ?? 0))/\(distanceText(plannedLong))")
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func detailLine(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label).foregroundStyle(Theme.dim)
+            Spacer()
+            Text(value).foregroundStyle(Theme.text).monospacedDigit()
+        }
+        .font(.caption.weight(.semibold))
+    }
+
+    private var compactMetrics: some View {
+        HStack(spacing: 8) {
+            compactMetric(language.goalAssessmentText(.completedVolume), completedVolumeText, status: volumeStatusText)
+            compactMetric(language.goalAssessmentText(.keyWorkout), keyWorkoutText, status: keyWorkoutStatusText)
+            compactMetric(language.goalAssessmentText(.latestLongRun), longRunText, status: longRunStatusText)
+        }
+    }
+
+    private func compactMetric(_ label: String, _ value: String, status: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label).font(.caption2.weight(.semibold)).foregroundStyle(Theme.faint)
+            Text(value).font(.torHeading(14, .bold)).foregroundStyle(Theme.text).monospacedDigit()
+            Text(status).font(.caption2.weight(.medium)).foregroundStyle(Theme.dim).lineLimit(2)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 74, alignment: .leading)
+        .background(Theme.card2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: 10) {
+            Button(action: onAdjustPlan) {
+                Label(language.goalAssessmentText(.adjustPlan), systemImage: "slider.horizontal.3")
+                    .font(.torHeading(15, .bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(Theme.accent, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(language.goalAssessmentText(.adjustPlan))
+
+            Button(action: onShowAssessmentDetail) {
+                Text(language.goalAssessmentText(.assessmentMethod))
+                    .font(.torHeading(15, .bold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(minHeight: 44)
+                    .padding(.horizontal, 12)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     private func trendRow(_ trend: GoalAssessmentTrend) -> some View {
         let positive = trend.delta >= 0
         return HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -923,6 +1156,7 @@ struct RaceGoalStatusCard: View {
     private var metricColor: Color {
         switch assessment.summaryStatus {
         case .onTrack: Theme.good
+        case .closeToTarget: Theme.accent
         case .adjustmentRecommended: Theme.warn
         case .atRisk: Theme.bad
         case .insufficientData: Theme.faint
@@ -944,7 +1178,7 @@ struct RaceGoalStatusCard: View {
     }
 
     private var accessibilitySummary: String {
-        "\(assessment.raceName), \(metricAccessibilityLabel), \(language.goalAssessmentText(assessment.summaryKey)). \(language.goalAssessmentText(assessment.summaryDetailKey))"
+        "\(assessment.raceName), \(primaryAssessmentAccessibility), \(gapText), \(language.goalAssessmentText(assessment.summaryKey)). \(language.goalAssessmentText(assessment.summaryDetailKey))"
     }
 
     private func trendText(_ trend: GoalAssessmentTrend) -> String {
@@ -972,6 +1206,196 @@ struct RaceGoalStatusCard: View {
         case .negative: Theme.warn
         case .unknown: Theme.faint
         }
+    }
+
+    private var primaryAssessmentValue: String {
+        if let prediction = assessment.raceTimePrediction {
+            return shortTime(prediction.predictedTimeSeconds)
+        }
+        if let metricValue {
+            return "\(metricValue)/100"
+        }
+        return language.goalAssessmentText(.insufficientData)
+    }
+
+    private var primaryAssessmentLabel: String {
+        if assessment.raceTimePrediction != nil {
+            return language.goalAssessmentText(.currentPrediction)
+        }
+        if metricValue != nil {
+            switch language {
+            case .vi: return "Mức độ sẵn sàng cho mục tiêu"
+            case .ja: return "目標への準備度"
+            case .en: return "Goal readiness"
+            }
+        }
+        return language.goalAssessmentText(.insufficientData)
+    }
+
+    private var primaryAssessmentAccessibility: String {
+        "\(primaryAssessmentValue), \(primaryAssessmentLabel)"
+    }
+
+    private var gapText: String {
+        guard let prediction = assessment.raceTimePrediction else {
+            return language.goalAssessmentText(.insufficientPrediction)
+        }
+        return Self.targetGapText(predictedSeconds: prediction.predictedTimeSeconds, targetSeconds: prediction.targetTimeSeconds, language: language)
+    }
+
+    static func targetGapText(predictedSeconds: Double, targetSeconds: Double, language: CoachLanguage) -> String {
+        let gap = predictedSeconds - targetSeconds
+        let minutes = Int((abs(gap) / 60).rounded())
+        switch language {
+        case .vi:
+            if gap > 0 { return "+\(minutes) phút so với mục tiêu" }
+            if gap < 0 { return "Nhanh hơn mục tiêu \(minutes) phút" }
+            return "Đúng thời gian mục tiêu"
+        case .ja:
+            if gap > 0 { return "目標より+\(minutes)分" }
+            if gap < 0 { return "目標より\(minutes)分速い" }
+            return "目標タイム通り"
+        case .en:
+            if gap > 0 { return "+\(minutes) min vs target" }
+            if gap < 0 { return "\(minutes) min faster than target" }
+            return "On target time"
+        }
+    }
+
+    private var chartWeeks: [ActivePlanWeekSummary] {
+        let current = max(summary.currentWeek - 1, 0)
+        let lower = max(0, current - 4)
+        let upper = min(summary.weeklyProgress.count - 1, current + 3)
+        guard lower <= upper else { return summary.weeklyProgress }
+        return Array(summary.weeklyProgress[lower...upper])
+    }
+
+    private var selectedWeek: ActivePlanWeekSummary? {
+        let id = selectedWeekID ?? summary.currentWeek - 1
+        return chartWeeks.first { $0.weekIndex == id }
+    }
+
+    private var completedVolumeText: String {
+        let due = summary.weeklyProgress.filter { !$0.isFutureWeek }
+        let planned = due.reduce(0) { $0 + $1.plannedDistanceKm }
+        guard planned > 0 else { return "—" }
+        let actual = due.reduce(0) { $0 + $1.completedDistanceKm }
+        return "\(Int((actual / planned * 100).rounded()))%"
+    }
+
+    private var volumeStatusText: String {
+        switch language {
+        case .vi: return (summary.health.volumeCompliance ?? 1) < 0.75 ? "Thấp hơn kế hoạch" : "Ổn định"
+        case .ja: return (summary.health.volumeCompliance ?? 1) < 0.75 ? "計画より低い" : "安定"
+        case .en: return (summary.health.volumeCompliance ?? 1) < 0.75 ? "Below plan" : "Stable"
+        }
+    }
+
+    private var keyWorkoutText: String {
+        let dueKeys = summary.health.missedWorkoutAudit.entries.filter {
+            ($0.reason == .missed || $0.reason == .completed) && $0.isKeyWorkout
+        }.count
+        let completed = max(0, dueKeys - summary.health.missedKeySessions)
+        return "\(completed)/\(dueKeys)"
+    }
+
+    private var keyWorkoutStatusText: String {
+        switch language {
+        case .vi: return summary.health.missedKeySessions > 0 ? "Chưa đủ" : "Ổn định"
+        case .ja: return summary.health.missedKeySessions > 0 ? "不足" : "安定"
+        case .en: return summary.health.missedKeySessions > 0 ? "Not enough" : "Stable"
+        }
+    }
+
+    private var longRunText: String {
+        guard let component = assessment.factors.first(where: { $0.type == .longRunProgression }) else { return "—" }
+        return goalFactorValueText(component, language: language)
+    }
+
+    private var longRunStatusText: String {
+        guard let component = assessment.factors.first(where: { $0.type == .longRunProgression }) else { return language.goalAssessmentText(.unknown) }
+        return statusText(component.status)
+    }
+
+    private var chartAccessibility: String {
+        let planned = chartWeeks.reduce(0) { $0 + $1.plannedDistanceKm }
+        let actual = chartWeeks.filter { !$0.isFutureWeek }.reduce(0) { $0 + $1.completedDistanceKm }
+        return "\(language.goalAssessmentText(.planAndActual)). \(language.goalAssessmentText(.planned)) \(distanceText(planned)). \(language.goalAssessmentText(.actual)) \(distanceText(actual)). \(language.goalAssessmentText(.currentWeek)) \(summary.currentWeek)."
+    }
+
+    private func weekRangeText(_ week: ActivePlanWeekSummary) -> String {
+        switch language {
+        case .vi: return "Tuần \(week.startDate.formatted(.dateTime.day().month()))-\(week.endDate.formatted(.dateTime.day().month()))"
+        case .ja: return "\(week.startDate.formatted(.dateTime.month().day()))-\(week.endDate.formatted(.dateTime.month().day()))"
+        case .en: return "\(week.startDate.formatted(.dateTime.month(.abbreviated).day()))-\(week.endDate.formatted(.dateTime.month(.abbreviated).day()))"
+        }
+    }
+
+    private func signedDistanceText(_ km: Double) -> String {
+        let rounded = abs(km)
+        if km > 0 { return "+\(distanceText(rounded))" }
+        if km < 0 { return "-\(distanceText(rounded))" }
+        return distanceText(0)
+    }
+
+    private func distanceText(_ km: Double) -> String {
+        String(format: "%.0f km", km)
+    }
+
+    private func shortTime(_ seconds: Double) -> String {
+        let total = Int(seconds.rounded())
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        return String(format: "%d:%02d", hours, minutes)
+    }
+
+    private static func fallbackSummary(for assessment: GoalAssessment) -> ActivePlanSummary {
+        let start = Calendar.current.date(byAdding: .day, value: -28, to: assessment.raceDate) ?? assessment.raceDate
+        let weeks = (0..<4).map { index in
+            ActivePlanWeekSummary(
+                weekIndex: index,
+                startDate: Calendar.current.date(byAdding: .day, value: index * 7, to: start) ?? start,
+                endDate: Calendar.current.date(byAdding: .day, value: index * 7 + 6, to: start) ?? start,
+                plannedSessions: 0,
+                completedSessions: 0,
+                plannedDistanceKm: 0,
+                completedDistanceKm: 0,
+                plannedKeySessions: 0,
+                completedKeySessions: 0,
+                plannedLongRunKm: nil,
+                completedLongRunKm: nil,
+                isCurrentWeek: index == 0,
+                isFutureWeek: index > 0
+            )
+        }
+        return ActivePlanSummary(
+            title: assessment.raceName,
+            raceDate: assessment.raceDate,
+            targetTimeSeconds: assessment.targetFinishTimeSeconds ?? 0,
+            runningDaysPerWeek: 0,
+            startDate: start,
+            endDate: assessment.raceDate,
+            currentWeek: 1,
+            totalWeeks: 4,
+            timelineProgress: 0.25,
+            daysRemaining: nil,
+            isRaceDay: false,
+            health: PlanHealth(
+                status: .active,
+                reasons: [.insufficientData],
+                adherenceRate: nil,
+                volumeCompliance: nil,
+                missedKeySessions: 0,
+                missedWorkoutAudit: MissedWorkoutAudit(),
+                evaluatedAt: assessment.readiness.calculatedAt
+            ),
+            currentPhase: nil,
+            thisWeek: weeks.first,
+            nextWorkout: nil,
+            upcomingWorkouts: [],
+            weeklyProgress: weeks,
+            phases: []
+        )
     }
 }
 
@@ -1066,7 +1490,7 @@ struct PrimaryAttentionCard: View {
     }
 
     private var impactText: String {
-        if let points = item.estimatedImpactPoints {
+        if let points = item.estimatedImpactPoints, item.severity == .highRisk {
             switch language {
             case .vi: return "Yếu tố này đang kéo mức độ bám mục tiêu giảm khoảng \(points) điểm."
             case .ja: return "この要因は目標整合度を約\(points)ポイント下げています。"
@@ -1256,6 +1680,397 @@ struct GoalAssessmentDetailContent: View {
         case .negative: language.goalAssessmentText(.needsAdjustment)
         case .unknown: language.goalAssessmentText(.unknown)
         }
+    }
+}
+
+struct GoalPlanAdjustmentProposal: Identifiable, Equatable {
+    var id: String
+    var goalId: String
+    var basedOnAssessmentId: String
+    var explanation: String
+    var changes: [GoalPlanAdjustmentChange]
+    var warnings: [String]
+    var createdAt: Date
+}
+
+struct GoalPlanAdjustmentChange: Identifiable, Equatable {
+    enum ChangeType: String, Equatable {
+        case distanceChange
+        case intensityChange
+        case recoveryChange
+    }
+
+    var id: String
+    var type: ChangeType
+    var workoutId: UUID
+    var reason: String
+    var before: PlanWorkoutSnapshot
+    var after: PlanWorkoutSnapshot?
+}
+
+struct PlanWorkoutSnapshot: Equatable {
+    var date: Date
+    var kindRaw: String
+    var distanceKm: Double
+    var details: String
+}
+
+enum GoalPlanAdjustmentEngine {
+    static func proposal(
+        assessment: GoalAssessment,
+        summary: ActivePlanSummary?,
+        plan: TrainingPlan,
+        today: Date,
+        calendar: Calendar,
+        language: CoachLanguage
+    ) -> GoalPlanAdjustmentProposal {
+        let dayStart = calendar.startOfDay(for: today)
+        let future = plan.workouts
+            .filter { calendar.startOfDay(for: $0.date) >= dayStart && $0.status == .planned && !$0.isScheduleLocked && $0.kind != .race }
+            .sorted { ($0.date, $0.uuid.uuidString) < ($1.date, $1.uuid.uuidString) }
+        var changes: [GoalPlanAdjustmentChange] = []
+
+        if let longRun = future.first(where: { $0.kind == .long }) {
+            let target = min(longRun.distanceKm + 2, longRun.distanceKm * 1.10)
+            if target > longRun.distanceKm + 0.1 {
+                changes.append(change(
+                    workout: longRun,
+                    type: .distanceChange,
+                    afterDistance: PlanGenerator.rounded(target),
+                    afterKind: longRun.kind ?? .long,
+                    reason: localized(
+                        vi: "Tăng dần sức bền, không bù toàn bộ phần còn thiếu.",
+                        en: "Build endurance gradually without cramming all missed volume.",
+                        ja: "不足分を一気に詰め込まず、持久力を段階的に伸ばします。",
+                        language: language
+                    )
+                ))
+            }
+        }
+
+        if let quality = future.first(where: { $0.kind == .tempo || $0.kind == .threshold || $0.kind == .intervals }) {
+            let reduced = max(5, quality.distanceKm - 1)
+            changes.append(change(
+                workout: quality,
+                type: .intensityChange,
+                afterDistance: PlanGenerator.rounded(reduced),
+                afterKind: quality.kind ?? .tempo,
+                reason: localized(
+                    vi: "Giảm nhẹ tải buổi chất lượng để cân bằng với long run.",
+                    en: "Trim one quality session slightly to balance the long run.",
+                    ja: "ロングランとのバランスを取るため重要練習を少し軽くします。",
+                    language: language
+                )
+            ))
+        }
+
+        if let easy = future.first(where: { $0.kind == .easy }) {
+            changes.append(GoalPlanAdjustmentChange(
+                id: "recovery-\(easy.uuid.uuidString)",
+                type: .recoveryChange,
+                workoutId: easy.uuid,
+                reason: localized(
+                    vi: "Tạo khoảng hồi phục sau hai buổi chất lượng.",
+                    en: "Create recovery space after the harder sessions.",
+                    ja: "強度の高い練習後に回復余地を作ります。",
+                    language: language
+                ),
+                before: PlanWorkoutSnapshot(workout: easy),
+                after: nil
+            ))
+        }
+
+        let limited = Array(changes.prefix(4))
+        return GoalPlanAdjustmentProposal(
+            id: "goal-plan-adjustment-\(assessment.goalId)-\(Int(today.timeIntervalSince1970))",
+            goalId: assessment.goalId,
+            basedOnAssessmentId: "\(assessment.goalId)-\(assessment.readiness.calculatedAt.timeIntervalSince1970)",
+            explanation: localized(
+                vi: "Coach đề xuất \(limited.count) thay đổi cho phần kế hoạch còn lại. Các buổi đã lỡ sẽ không được dồn toàn bộ vào lịch mới.",
+                en: "Coach suggests \(limited.count) changes for the remaining plan. Missed workouts are not blindly stacked into the new calendar.",
+                ja: "残りの計画に\(limited.count)件の変更を提案します。未完了分を新しい予定に一気に積みません。",
+                language: language
+            ),
+            changes: limited,
+            warnings: future.contains(where: \.isScheduleLocked) ? [
+                localized(
+                    vi: "Một số buổi đã khóa lịch được giữ nguyên.",
+                    en: "Locked workouts are preserved.",
+                    ja: "ロックされた練習は維持されます。",
+                    language: language
+                )
+            ] : [],
+            createdAt: today
+        )
+    }
+
+    static func apply(
+        _ proposal: GoalPlanAdjustmentProposal,
+        to plan: TrainingPlan,
+        in context: ModelContext,
+        today: Date,
+        calendar: Calendar
+    ) throws {
+        guard !proposal.changes.isEmpty else { return }
+        let originalTargets = plan.weekTargetVolumesKm
+        var applied: [(workout: PlannedWorkout, snapshot: PlanWorkoutSnapshot, targetBefore: Double)] = []
+        do {
+            for change in proposal.changes {
+                guard let workout = plan.workouts.first(where: { $0.uuid == change.workoutId }) else {
+                    throw CoachTools.ValidationError("Workout changed before confirmation.")
+                }
+                guard calendar.startOfDay(for: workout.date) >= calendar.startOfDay(for: today),
+                      workout.status == .planned,
+                      !workout.isScheduleLocked,
+                      workout.kind != .race else {
+                    throw CoachTools.ValidationError("Workout is locked, completed, or no longer editable.")
+                }
+                guard plan.weekTargetVolumesKm.indices.contains(workout.weekIndex) else {
+                    throw CoachTools.ValidationError("Plan week is missing.")
+                }
+                let before = PlanWorkoutSnapshot(workout: workout)
+                let weekTargetBefore = plan.weekTargetVolumesKm[workout.weekIndex]
+                applied.append((workout, before, weekTargetBefore))
+                let after = change.after
+                let afterDistanceForWorkout = after?.distanceKm ?? workout.distanceKm
+                let weekTargetAfter = if let after {
+                    PlanGenerator.rounded(weekTargetBefore + after.distanceKm - workout.distanceKm)
+                } else {
+                    PlanGenerator.rounded(weekTargetBefore - workout.distanceKm)
+                }
+                let edit = PlanEdit(
+                    appliedAt: today,
+                    workout: workout,
+                    weekTargetVolumeKmBefore: weekTargetBefore,
+                    afterKindRaw: after?.kindRaw ?? workout.kindRaw,
+                    afterDistanceKm: afterDistanceForWorkout,
+                    afterPaceFastSecondsPerKm: workout.paceFastSecondsPerKm,
+                    afterPaceSlowSecondsPerKm: workout.paceSlowSecondsPerKm,
+                    afterDetails: after?.details ?? workout.details,
+                    afterStructure: workout.structure,
+                    afterStatusRaw: after == nil ? WorkoutStatus.skipped.rawValue : WorkoutStatus.planned.rawValue,
+                    afterManuallyOverridden: true,
+                    afterMatchedActivityUUID: nil,
+                    weekTargetVolumeKmAfter: weekTargetAfter,
+                    source: "goal_assessment"
+                )
+                context.insert(edit)
+
+                if let after {
+                    workout.kindRaw = after.kindRaw
+                    workout.distanceKm = after.distanceKm
+                    workout.details = after.details
+                    workout.manuallyOverridden = true
+                    workout.matchedActivityUUID = nil
+                } else {
+                    workout.status = .skipped
+                    workout.manuallyOverridden = true
+                    workout.matchedActivityUUID = nil
+                }
+                var targets = plan.weekTargetVolumesKm
+                targets[workout.weekIndex] = edit.weekTargetVolumeKmAfter
+                plan.weekTargetVolumesKm = targets
+            }
+            try context.save()
+            NotificationCenter.default.post(name: .planDidChange, object: nil)
+        } catch {
+            for item in applied {
+                item.workout.kindRaw = item.snapshot.kindRaw
+                item.workout.distanceKm = item.snapshot.distanceKm
+                item.workout.details = item.snapshot.details
+                item.workout.status = .planned
+                var targets = plan.weekTargetVolumesKm
+                if targets.indices.contains(item.workout.weekIndex) {
+                    targets[item.workout.weekIndex] = item.targetBefore
+                    plan.weekTargetVolumesKm = targets
+                }
+            }
+            plan.weekTargetVolumesKm = originalTargets
+            throw error
+        }
+    }
+
+    private static func change(
+        workout: PlannedWorkout,
+        type: GoalPlanAdjustmentChange.ChangeType,
+        afterDistance: Double,
+        afterKind: WorkoutKind,
+        reason: String
+    ) -> GoalPlanAdjustmentChange {
+        GoalPlanAdjustmentChange(
+            id: "\(type.rawValue)-\(workout.uuid.uuidString)",
+            type: type,
+            workoutId: workout.uuid,
+            reason: reason,
+            before: PlanWorkoutSnapshot(workout: workout),
+            after: PlanWorkoutSnapshot(
+                date: workout.date,
+                kindRaw: afterKind.rawValue,
+                distanceKm: afterDistance,
+                details: workout.details
+            )
+        )
+    }
+
+    private static func localized(vi: String, en: String, ja: String, language: CoachLanguage) -> String {
+        switch language {
+        case .vi: vi
+        case .en: en
+        case .ja: ja
+        }
+    }
+}
+
+extension PlanWorkoutSnapshot {
+    init(workout: PlannedWorkout) {
+        self.date = workout.date
+        self.kindRaw = workout.kindRaw
+        self.distanceKm = workout.distanceKm
+        self.details = workout.details
+    }
+}
+
+struct PlanAdjustmentPreviewSheet: View {
+    let proposal: GoalPlanAdjustmentProposal
+    let language: CoachLanguage
+    let onApply: (GoalPlanAdjustmentProposal) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(proposal.explanation)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.dim)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if proposal.changes.isEmpty {
+                        ContentUnavailableView(
+                            language.goalAssessmentText(.noAttention),
+                            systemImage: "checkmark.seal",
+                            description: Text(language.goalAssessmentText(.onTrackSummary))
+                        )
+                    } else {
+                        VStack(spacing: 10) {
+                            ForEach(proposal.changes) { change in
+                                PlanAdjustmentPreviewRow(change: change, language: language)
+                            }
+                        }
+                    }
+
+                    ForEach(proposal.warnings, id: \.self) { warning in
+                        Label(warning, systemImage: "lock")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.warn)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Theme.soft(Theme.warn, 0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                }
+                .padding(16)
+            }
+            .background(Theme.bg)
+            .navigationTitle(language.goalAssessmentText(.planAdjustmentProposal))
+            .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 8) {
+                    Button {
+                        onApply(proposal)
+                    } label: {
+                        Text(language.goalAssessmentText(.applyChanges, value: proposal.changes.count))
+                            .font(.torHeading(15, .bold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(Theme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(proposal.changes.isEmpty)
+
+                    Button {
+                        dismiss()
+                    } label: {
+                        Text(language.goalAssessmentText(.keepCurrentPlan))
+                            .font(.torHeading(15, .bold))
+                            .foregroundStyle(Theme.text)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(16)
+                .background(.bar)
+            }
+        }
+    }
+}
+
+struct PlanAdjustmentPreviewRow: View {
+    let change: GoalPlanAdjustmentChange
+    let language: CoachLanguage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.torHeading(16, .bold))
+                        .foregroundStyle(Theme.text)
+                    Text(change.before.date.formatted(date: .abbreviated, time: .omitted))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.faint)
+                }
+                Spacer()
+                Image(systemName: symbol)
+                    .foregroundStyle(Theme.accent)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(snapshotText(change.before))
+                    .foregroundStyle(Theme.faint)
+                    .strikethrough(change.after != nil)
+                Image(systemName: "arrow.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Theme.dim)
+                Text(change.after.map(snapshotText) ?? restText)
+                    .foregroundStyle(Theme.text)
+            }
+            .font(.subheadline.weight(.semibold))
+            .monospacedDigit()
+
+            Text(change.reason)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Theme.dim)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var title: String {
+        WorkoutKind(rawValue: change.before.kindRaw)?.displayName ?? change.before.kindRaw.capitalized
+    }
+
+    private var symbol: String {
+        switch change.type {
+        case .distanceChange: "arrow.up.forward"
+        case .intensityChange: "slider.horizontal.3"
+        case .recoveryChange: "bed.double"
+        }
+    }
+
+    private var restText: String {
+        switch language {
+        case .vi: "Nghỉ"
+        case .ja: "休み"
+        case .en: "Rest"
+        }
+    }
+
+    private func snapshotText(_ snapshot: PlanWorkoutSnapshot) -> String {
+        let kind = WorkoutKind(rawValue: snapshot.kindRaw)?.displayName ?? snapshot.kindRaw.capitalized
+        return "\(kind) \(String(format: "%.0f", snapshot.distanceKm)) km"
     }
 }
 

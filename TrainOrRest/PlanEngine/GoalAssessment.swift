@@ -21,6 +21,7 @@ enum GoalAssessmentMetric: Equatable {
 
 enum GoalAssessmentSummaryStatus: String, Equatable {
     case onTrack = "on_track"
+    case closeToTarget = "close_to_target"
     case adjustmentRecommended = "adjustment_recommended"
     case atRisk = "at_risk"
     case insufficientData = "insufficient_data"
@@ -99,6 +100,8 @@ struct GoalAssessment: Equatable {
     var raceDate: Date
     var targetLabel: String
     var targetFinishTimeSeconds: Double?
+    var raceTimePrediction: RaceTimePrediction?
+    var readiness: GoalReadinessAssessment
     var metric: GoalAssessmentMetric?
     var predictedFinishTime: PredictedFinishTime?
     var trend: GoalAssessmentTrend?
@@ -108,6 +111,29 @@ struct GoalAssessment: Equatable {
     var factors: [GoalAssessmentFactor]
     var attentionItems: [GoalAttentionItem]
     var dataSources: [GoalAssessmentDataSource]
+}
+
+struct RaceTimePrediction: Equatable {
+    var targetTimeSeconds: Double
+    var predictedTimeSeconds: Double
+    var predictedRange: ClosedRange<Double>?
+    var calculatedAt: Date
+    var modelVersion: String?
+}
+
+struct GoalReadinessAssessment: Equatable {
+    var score: Int?
+    var status: GoalAssessmentSummaryStatus
+    var components: [GoalReadinessComponent]
+    var calculatedAt: Date
+}
+
+struct GoalReadinessComponent: Identifiable, Equatable {
+    var id: String
+    var type: GoalAssessmentFactorType
+    var weight: Double
+    var value: Double?
+    var explanation: String
 }
 
 struct PredictedFinishTime: Equatable {
@@ -133,6 +159,19 @@ enum GoalAssessmentLabelKey: String, Equatable {
     case goalAlignment
     case targetTime
     case currentPrediction
+    case targetGap
+    case goalStatus
+    case planAndActual
+    case planned
+    case actual
+    case currentWeek
+    case completedVolume
+    case latestLongRun
+    case adjustPlan
+    case assessmentMethod
+    case planAdjustmentProposal
+    case applyChanges
+    case keepCurrentPlan
     case insufficientPrediction
     case onTrack
     case adjustmentRecommended
@@ -190,15 +229,19 @@ enum GoalAssessmentLabelKey: String, Equatable {
 enum GoalAssessmentBuilder {
     enum Tuning {
         static let minimumCompletedRunsForPrediction = FitnessEstimator.minQualifyingRuns
-        static let onTrackScore = 76
-        static let highRiskScore = 45
-        static let keyMissPenalty = 10
-        static let sessionMissPenalty = 4
-        static let volumePenaltyWeight = 35.0
+        static let onTrackScore = 80
+        static let closeScore = 60
+        static let adjustmentScore = 40
         static let longRunPenaltyPerKm = 2.0
         static let maximumLongRunPenalty = 14
         static let longRunTargetMarathonShare = 0.66
         static let longRunTargetOtherShare = 0.72
+        static let performanceWeight = 0.35
+        static let adherenceWeight = 0.20
+        static let keyWorkoutWeight = 0.15
+        static let longRunWeight = 0.15
+        static let consistencyWeight = 0.10
+        static let recoveryWeight = 0.05
     }
 
     static func build(
@@ -225,14 +268,21 @@ enum GoalAssessmentBuilder {
         let timeFactor = timeFactor(summary: summary)
         let factors = [adherenceFactor, keyFactor, longRunFactor, volumeFactor, timeFactor, dataQualityFactor]
 
-        let metric = alignmentMetric(
+        let prediction = raceTimePrediction(
+            goal: goalSpec,
+            fitness: fitness,
+            calculatedAt: todayStart
+        )
+        let readiness = readinessAssessment(
             summary: summary,
-            factors: factors,
+            goal: goalSpec,
+            prediction: prediction,
             fitness: fitness,
             runSamples: runSamples,
             calculatedAt: todayStart
         )
-        let status = summaryStatus(summary: summary, metric: metric, fitness: fitness, runSamples: runSamples)
+        let metric = readiness.score.map { GoalAssessmentMetric.goalAlignmentScore(value: $0, calculatedAt: todayStart) }
+        let status = readiness.status
         let attentionItems = attentionItems(
             summary: summary,
             factors: factors,
@@ -242,11 +292,13 @@ enum GoalAssessmentBuilder {
             today: todayStart,
             calendar: calendar
         )
-        let prediction = predictedFinishTime(
-            goal: goalSpec,
-            fitness: fitness,
-            calculatedAt: todayStart
-        )
+        let finishRange = prediction.map {
+            PredictedFinishTime(
+                lowerSeconds: $0.predictedRange?.lowerBound ?? $0.predictedTimeSeconds,
+                upperSeconds: $0.predictedRange?.upperBound ?? $0.predictedTimeSeconds,
+                calculatedAt: $0.calculatedAt
+            )
+        }
 
         return GoalAssessment(
             goalId: "\(goal.distanceRaw)-\(Int(goal.targetTimeSeconds.rounded()))-\(Int(goal.raceDate.timeIntervalSince1970))",
@@ -254,8 +306,10 @@ enum GoalAssessmentBuilder {
             raceDate: summary.raceDate,
             targetLabel: summary.title,
             targetFinishTimeSeconds: summary.targetTimeSeconds,
+            raceTimePrediction: prediction,
+            readiness: readiness,
             metric: metric,
-            predictedFinishTime: prediction,
+            predictedFinishTime: finishRange,
             trend: nil,
             summaryStatus: status,
             summaryKey: summaryTitleKey(for: status),
@@ -282,58 +336,90 @@ enum GoalAssessmentBuilder {
         )
     }
 
-    private static func alignmentMetric(
+    private static func readinessAssessment(
         summary: ActivePlanSummary,
-        factors: [GoalAssessmentFactor],
+        goal: GoalSpec,
+        prediction: RaceTimePrediction?,
         fitness: FitnessProfile?,
         runSamples: [RunSample],
         calculatedAt: Date
-    ) -> GoalAssessmentMetric? {
-        guard runSamples.count >= Tuning.minimumCompletedRunsForPrediction,
-              summary.health.adherenceRate != nil || summary.health.volumeCompliance != nil
-        else { return nil }
-
-        var score = 100
-        if let adherence = summary.health.adherenceRate {
-            score -= Int(max(0, 1 - adherence) * 42)
+    ) -> GoalReadinessAssessment {
+        let components = readinessComponents(summary: summary, goal: goal, prediction: prediction, fitness: fitness)
+        let available = components.filter { $0.value != nil && $0.weight > 0 }
+        let score: Int?
+        if runSamples.count < Tuning.minimumCompletedRunsForPrediction || available.isEmpty {
+            score = nil
+        } else {
+            let totalWeight = available.reduce(0) { $0 + $1.weight }
+            let weighted = available.reduce(0) { partial, component in
+                partial + min(max(component.value ?? 0, 0), 100) * (component.weight / totalWeight)
+            }
+            score = Int(weighted.rounded())
         }
-        if let volume = summary.health.volumeCompliance {
-            score -= Int(max(0, 1 - min(volume, 1)) * Tuning.volumePenaltyWeight)
-        }
-        score -= summary.health.missedKeySessions * Tuning.keyMissPenalty
-        score -= factors.compactMap(\.impactScore).filter { $0 < 0 }.map(abs).reduce(0, +) / 2
-        if fitness == nil { score -= 12 }
-        return .goalAlignmentScore(value: min(max(score, 0), 100), calculatedAt: calculatedAt)
+        let status = status(for: score)
+        return GoalReadinessAssessment(score: score, status: status, components: components, calculatedAt: calculatedAt)
     }
 
-    private static func predictedFinishTime(
+    private static func raceTimePrediction(
         goal: GoalSpec,
         fitness: FitnessProfile?,
         calculatedAt: Date
-    ) -> PredictedFinishTime? {
+    ) -> RaceTimePrediction? {
         guard let fitness else { return nil }
         let seconds = VDOTTable.predictedTimeSeconds(distanceMeters: goal.distance.meters, vdot: fitness.vdot)
-        return PredictedFinishTime(lowerSeconds: seconds, upperSeconds: seconds, calculatedAt: calculatedAt)
+        return RaceTimePrediction(
+            targetTimeSeconds: goal.targetTimeSeconds,
+            predictedTimeSeconds: seconds,
+            predictedRange: nil,
+            calculatedAt: calculatedAt,
+            modelVersion: "vdot-v1"
+        )
     }
 
-    private static func summaryStatus(
+    private static func readinessComponents(
         summary: ActivePlanSummary,
-        metric: GoalAssessmentMetric?,
-        fitness: FitnessProfile?,
-        runSamples: [RunSample]
-    ) -> GoalAssessmentSummaryStatus {
-        if runSamples.count < Tuning.minimumCompletedRunsForPrediction || metric == nil {
-            return .insufficientData
+        goal: GoalSpec,
+        prediction: RaceTimePrediction?,
+        fitness: FitnessProfile?
+    ) -> [GoalReadinessComponent] {
+        let performance = prediction.map { prediction in
+            let gap = prediction.predictedTimeSeconds - prediction.targetTimeSeconds
+            if gap <= 0 { return 100.0 }
+            let allowedSlowdown = max(prediction.targetTimeSeconds * 0.15, 60)
+            return 100 - min(gap / allowedSlowdown, 1) * 100
         }
-        if summary.health.status == .needsAttention || (metric?.value ?? 100) < Tuning.onTrackScore {
-            return (metric?.value ?? 100) < Tuning.highRiskScore ? .atRisk : .adjustmentRecommended
-        }
-        return .onTrack
+        let dueKeyCount = summary.health.missedWorkoutAudit.entries.filter {
+            ($0.reason == .missed || $0.reason == .completed) && $0.isKeyWorkout
+        }.count
+        let keyCompleted = dueKeyCount - summary.health.missedKeySessions
+        let keyScore = dueKeyCount > 0 ? Double(keyCompleted) / Double(dueKeyCount) * 100 : nil
+        let longRunTarget = longRunTargetKm(goal)
+        let longRunScore = fitness.map { min($0.longestRecentRunKm / max(longRunTarget, 0.1), 1) * 100 }
+        let adherenceScore = summary.health.adherenceRate.map { min(max($0, 0), 1) * 100 }
+        let volumeScore = summary.health.volumeCompliance.map { min(max($0, 0), 1) * 100 }
+
+        return [
+            GoalReadinessComponent(id: "predicted_performance", type: .keyWorkoutPerformance, weight: Tuning.performanceWeight, value: performance, explanation: "Prediction gap versus target finish time."),
+            GoalReadinessComponent(id: "plan_adherence", type: .planAdherence, weight: Tuning.adherenceWeight, value: adherenceScore, explanation: "Completed due planned workouts divided by expected due workouts."),
+            GoalReadinessComponent(id: "key_workout_completion", type: .keyWorkoutPerformance, weight: Tuning.keyWorkoutWeight, value: keyScore, explanation: "Completed due key workouts divided by due key workouts after audit exclusions."),
+            GoalReadinessComponent(id: "long_run_progression", type: .longRunProgression, weight: Tuning.longRunWeight, value: longRunScore, explanation: "Longest recent run compared with the race-specific long-run target."),
+            GoalReadinessComponent(id: "training_load", type: .trainingLoad, weight: Tuning.consistencyWeight, value: volumeScore, explanation: "Completed due distance divided by planned due distance."),
+            GoalReadinessComponent(id: "recovery", type: .recovery, weight: Tuning.recoveryWeight, value: nil, explanation: "Recovery signal is omitted until enough wellness data is available.")
+        ]
+    }
+
+    private static func status(for score: Int?) -> GoalAssessmentSummaryStatus {
+        guard let score else { return .insufficientData }
+        if score >= Tuning.onTrackScore { return .onTrack }
+        if score >= Tuning.closeScore { return .closeToTarget }
+        if score >= Tuning.adjustmentScore { return .adjustmentRecommended }
+        return .atRisk
     }
 
     private static func summaryTitleKey(for status: GoalAssessmentSummaryStatus) -> GoalAssessmentLabelKey {
         switch status {
         case .onTrack: .onTrack
+        case .closeToTarget: .adjustmentRecommended
         case .adjustmentRecommended: .adjustmentRecommended
         case .atRisk: .atRisk
         case .insufficientData: .insufficientData
@@ -343,6 +429,7 @@ enum GoalAssessmentBuilder {
     private static func summaryDetailKey(for status: GoalAssessmentSummaryStatus) -> GoalAssessmentLabelKey {
         switch status {
         case .onTrack: .onTrackSummary
+        case .closeToTarget: .adjustmentSummary
         case .adjustmentRecommended: .adjustmentSummary
         case .atRisk: .atRiskSummary
         case .insufficientData: .insufficientDataSummary
@@ -376,7 +463,7 @@ enum GoalAssessmentBuilder {
             status: missed == 0 ? .positive : missed >= ActivePlanSummaryBuilder.Tuning.missedKeySessionLimit ? .negative : .neutral,
             displayValue: missed == 0 ? "0 missed" : "\(missed) missed",
             explanationKey: nil,
-            impactScore: missed > 0 ? -missed * Tuning.keyMissPenalty : 4
+            impactScore: missed > 0 ? -min(15, missed * 5) : 4
         )
     }
 
@@ -392,8 +479,7 @@ enum GoalAssessmentBuilder {
                 impactScore: nil
             )
         }
-        let share = goal.distance == .marathon ? Tuning.longRunTargetMarathonShare : Tuning.longRunTargetOtherShare
-        let target = min(goal.distance.kilometers * share, goal.distance == .marathon ? 30 : goal.distance.kilometers)
+        let target = longRunTargetKm(goal)
         let gap = max(0, target - fitness.longestRecentRunKm)
         let status: GoalAssessmentFactorStatus = if gap <= 1 {
             .positive
@@ -455,6 +541,11 @@ enum GoalAssessmentBuilder {
             explanationKey: nil,
             impactScore: missing == 0 ? 2 : nil
         )
+    }
+
+    private static func longRunTargetKm(_ goal: GoalSpec) -> Double {
+        let share = goal.distance == .marathon ? Tuning.longRunTargetMarathonShare : Tuning.longRunTargetOtherShare
+        return min(goal.distance.kilometers * share, goal.distance == .marathon ? 30 : goal.distance.kilometers)
     }
 
     private static func attentionItems(

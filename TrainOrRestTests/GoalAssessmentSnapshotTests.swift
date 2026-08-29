@@ -23,6 +23,58 @@ final class GoalAssessmentSnapshotTests: XCTestCase {
             output: output
         )
 
+        let weeklySummary = planSummary(adjusted: false)
+        let predictionAssessment = assessment(status: .adjustmentRecommended, metric: 52, attentionItems: [])
+        try render(
+            RaceGoalStatusCard(
+                assessment: predictionAssessment,
+                summary: weeklySummary,
+                language: .vi,
+                onShowMetricDetail: {},
+                onShowAssessmentDetail: {}
+            ),
+            name: "predicted-time-state",
+            output: output,
+            height: 980
+        )
+        try render(
+            RaceGoalStatusCard(
+                assessment: predictionAssessment,
+                summary: weeklySummary,
+                language: .vi,
+                onShowMetricDetail: {},
+                onShowAssessmentDetail: {}
+            ),
+            name: "plan-vs-actual-chart",
+            output: output,
+            height: 980
+        )
+        try render(
+            RaceGoalStatusCard(
+                assessment: predictionAssessment,
+                summary: weeklySummary,
+                language: .vi,
+                initialSelectedWeekID: 4,
+                onShowMetricDetail: {},
+                onShowAssessmentDetail: {}
+            ),
+            name: "week-detail-interaction",
+            output: output,
+            height: 1080
+        )
+        try render(
+            RaceGoalStatusCard(
+                assessment: predictionAssessment,
+                summary: planSummary(adjusted: true),
+                language: .vi,
+                onShowMetricDetail: {},
+                onShowAssessmentDetail: {}
+            ),
+            name: "applied-plan-state",
+            output: output,
+            height: 980
+        )
+
         let adjustment = attention(
             id: "long_run_progression",
             type: .longRunProgression,
@@ -130,6 +182,17 @@ final class GoalAssessmentSnapshotTests: XCTestCase {
             output: output,
             height: 760
         )
+
+        try render(
+            PlanAdjustmentPreviewSheet(
+                proposal: previewProposal(),
+                language: .vi,
+                onApply: { _ in }
+            ),
+            name: "plan-adjustment-preview",
+            output: output,
+            height: 760
+        )
     }
 
     private func render<Content: View>(
@@ -163,6 +226,19 @@ final class GoalAssessmentSnapshotTests: XCTestCase {
             raceDate: date(2026, 10, 25),
             targetLabel: "Sub 4",
             targetFinishTimeSeconds: 14_399,
+            raceTimePrediction: metric == nil ? nil : RaceTimePrediction(
+                targetTimeSeconds: 14_399,
+                predictedTimeSeconds: 14_760,
+                predictedRange: 14_580...14_940,
+                calculatedAt: date(2026, 8, 29),
+                modelVersion: "snapshot"
+            ),
+            readiness: GoalReadinessAssessment(
+                score: metric,
+                status: status,
+                components: [],
+                calculatedAt: date(2026, 8, 29)
+            ),
             metric: metric.map { .goalAlignmentScore(value: $0, calculatedAt: date(2026, 8, 29)) },
             predictedFinishTime: metric == nil ? nil : PredictedFinishTime(
                 lowerSeconds: 14_580,
@@ -211,6 +287,7 @@ final class GoalAssessmentSnapshotTests: XCTestCase {
     private func summaryKey(_ status: GoalAssessmentSummaryStatus) -> GoalAssessmentLabelKey {
         switch status {
         case .onTrack: .onTrack
+        case .closeToTarget: .adjustmentRecommended
         case .adjustmentRecommended: .adjustmentRecommended
         case .atRisk: .atRisk
         case .insufficientData: .insufficientData
@@ -220,6 +297,7 @@ final class GoalAssessmentSnapshotTests: XCTestCase {
     private func summaryDetailKey(_ status: GoalAssessmentSummaryStatus) -> GoalAssessmentLabelKey {
         switch status {
         case .onTrack: .onTrackSummary
+        case .closeToTarget: .adjustmentSummary
         case .adjustmentRecommended: .adjustmentSummary
         case .atRisk: .atRiskSummary
         case .insufficientData: .insufficientDataSummary
@@ -235,5 +313,115 @@ final class GoalAssessmentSnapshotTests: XCTestCase {
         components.day = day
         components.hour = 8
         return components.date!
+    }
+
+    private func planSummary(adjusted: Bool) -> ActivePlanSummary {
+        let weeks = [
+            week(0, "2026-07-20", planned: 35, actual: 32, key: (2, 2), longRun: (18, 18), current: false, future: false),
+            week(1, "2026-07-27", planned: 38, actual: 34, key: (2, 1), longRun: (21, 19), current: false, future: false),
+            week(2, "2026-08-03", planned: 40, actual: 31, key: (2, 1), longRun: (24, 20), current: false, future: false),
+            week(3, "2026-08-10", planned: 42, actual: 36, key: (2, 1), longRun: (26, 23), current: false, future: false),
+            week(4, "2026-08-17", planned: adjusted ? 39 : 44, actual: 31, key: (2, 1), longRun: (28, 23), current: true, future: false),
+            week(5, "2026-08-24", planned: adjusted ? 42 : 46, actual: nil, key: (2, 0), longRun: (adjusted ? 26 : 30, nil), current: false, future: true),
+            week(6, "2026-08-31", planned: adjusted ? 45 : 50, actual: nil, key: (2, 0), longRun: (adjusted ? 28 : 32, nil), current: false, future: true),
+            week(7, "2026-09-07", planned: adjusted ? 48 : 52, actual: nil, key: (2, 0), longRun: (adjusted ? 30 : 34, nil), current: false, future: true)
+        ]
+        return ActivePlanSummary(
+            title: "Mito Marathon · Sub 4",
+            raceDate: date(2026, 10, 25),
+            targetTimeSeconds: 14_399,
+            runningDaysPerWeek: 5,
+            startDate: date(2026, 7, 20),
+            endDate: date(2026, 10, 25),
+            currentWeek: 5,
+            totalWeeks: 14,
+            timelineProgress: 0.42,
+            daysRemaining: 57,
+            isRaceDay: false,
+            health: PlanHealth(
+                status: .needsAttention,
+                reasons: [.missedKeySessions(3), .weeklyVolumeBehind],
+                adherenceRate: 0.47,
+                volumeCompliance: 0.47,
+                missedKeySessions: 3,
+                missedWorkoutAudit: MissedWorkoutAudit(),
+                evaluatedAt: date(2026, 8, 29)
+            ),
+            currentPhase: nil,
+            thisWeek: weeks[4],
+            nextWorkout: nil,
+            upcomingWorkouts: [],
+            weeklyProgress: weeks,
+            phases: []
+        )
+    }
+
+    private func week(
+        _ index: Int,
+        _ start: String,
+        planned: Double,
+        actual: Double?,
+        key: (Int, Int),
+        longRun: (Double?, Double?),
+        current: Bool,
+        future: Bool
+    ) -> ActivePlanWeekSummary {
+        let startDate = isoDate(start)
+        return ActivePlanWeekSummary(
+            weekIndex: index,
+            startDate: startDate,
+            endDate: Calendar(identifier: .gregorian).date(byAdding: .day, value: 6, to: startDate)!,
+            plannedSessions: 5,
+            completedSessions: actual == nil ? 0 : 4,
+            plannedDistanceKm: planned,
+            completedDistanceKm: actual ?? 0,
+            plannedKeySessions: key.0,
+            completedKeySessions: key.1,
+            plannedLongRunKm: longRun.0,
+            completedLongRunKm: longRun.1,
+            isCurrentWeek: current,
+            isFutureWeek: future
+        )
+    }
+
+    private func previewProposal() -> GoalPlanAdjustmentProposal {
+        GoalPlanAdjustmentProposal(
+            id: "snapshot-proposal",
+            goalId: "snapshot-goal",
+            basedOnAssessmentId: "snapshot-assessment",
+            explanation: "Coach đề xuất 4 thay đổi cho 8 tuần còn lại. Các buổi đã lỡ sẽ không được dồn toàn bộ vào lịch mới.",
+            changes: [
+                previewChange("long-run", type: .distanceChange, before: ("2026-09-06", "Long run", 24), after: ("2026-09-06", "Long run", 26), reason: "Tăng dần sức bền, không bù toàn bộ 7 km còn thiếu."),
+                previewChange("tempo", type: .intensityChange, before: ("2026-09-09", "Tempo", 8), after: ("2026-09-09", "Tempo", 7), reason: "Giảm tải để cân bằng với long run."),
+                previewChange("recovery", type: .recoveryChange, before: ("2026-09-10", "Easy", 6), after: nil, reason: "Tạo khoảng hồi phục sau hai buổi chất lượng.")
+            ],
+            warnings: ["Một số buổi đã khóa lịch được giữ nguyên."],
+            createdAt: date(2026, 8, 29)
+        )
+    }
+
+    private func previewChange(
+        _ id: String,
+        type: GoalPlanAdjustmentChange.ChangeType,
+        before: (String, String, Double),
+        after: (String, String, Double)?,
+        reason: String
+    ) -> GoalPlanAdjustmentChange {
+        GoalPlanAdjustmentChange(
+            id: id,
+            type: type,
+            workoutId: UUID(),
+            reason: reason,
+            before: PlanWorkoutSnapshot(date: isoDate(before.0), kindRaw: before.1, distanceKm: before.2, details: before.1),
+            after: after.map { PlanWorkoutSnapshot(date: isoDate($0.0), kindRaw: $0.1, distanceKm: $0.2, details: $0.1) }
+        )
+    }
+
+    private func isoDate(_ value: String) -> Date {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: value)!
     }
 }

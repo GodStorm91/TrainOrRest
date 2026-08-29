@@ -252,6 +252,67 @@ final class ActivePlanSummaryTests: XCTestCase {
         XCTAssertEqual(summary?.currentPhase?.phase, .build)
     }
 
+    func testDuplicateDueWorkoutsAreAuditedOnce() {
+        let fixture = makeFixture(today: date(2026, 8, 3))
+        let original = fixture.plan.workouts.sorted { $0.date < $1.date }[0]
+        let duplicate = PlannedWorkout(
+            spec: PlannedWorkoutSpec(
+                date: original.date,
+                kind: original.kind ?? .easy,
+                distanceKm: original.distanceKm,
+                paceBand: original.paceBand,
+                details: "Duplicate sync row"
+            ),
+            weekIndex: original.weekIndex,
+            phase: TrainingPhase(rawValue: original.phaseRaw) ?? .base
+        )
+        duplicate.plan = fixture.plan
+        fixture.plan.workouts.append(duplicate)
+
+        let summary = ActivePlanSummaryBuilder.build(
+            goal: fixture.goal,
+            plan: fixture.plan,
+            activities: [],
+            today: date(2026, 8, 12),
+            calendar: calendar
+        )
+
+        XCTAssertEqual(summary?.health.missedWorkoutAudit.entries.filter { $0.reason == .duplicateWorkout }.count, 1)
+    }
+
+    func testRescheduledWorkoutIsNotCountedAsMissed() {
+        let fixture = makeFixture(today: date(2026, 8, 3))
+        let moved = fixture.plan.workouts.sorted { $0.date < $1.date }[0]
+        moved.scheduleUpdatedFrom = "google_calendar"
+
+        let summary = ActivePlanSummaryBuilder.build(
+            goal: fixture.goal,
+            plan: fixture.plan,
+            activities: [],
+            today: date(2026, 8, 12),
+            calendar: calendar
+        )
+
+        XCTAssertTrue(summary?.health.missedWorkoutAudit.entries.contains { $0.id == moved.uuid && $0.reason == .movedWorkout } == true)
+        XCTAssertFalse(summary?.health.missedWorkoutAudit.missed.contains { $0.id == moved.uuid } == true)
+    }
+
+    func testTodayWorkoutWithoutCompletionIsStillSyncingNotMissed() {
+        let fixture = makeFixture(today: date(2026, 8, 3))
+        let todayWorkout = fixture.plan.workouts.sorted { $0.date < $1.date }[0]
+
+        let summary = ActivePlanSummaryBuilder.build(
+            goal: fixture.goal,
+            plan: fixture.plan,
+            activities: [],
+            today: todayWorkout.date,
+            calendar: calendar
+        )
+
+        XCTAssertTrue(summary?.health.missedWorkoutAudit.entries.contains { $0.id == todayWorkout.uuid && $0.reason == .todayStillSyncing } == true)
+        XCTAssertFalse(summary?.health.missedWorkoutAudit.missed.contains { $0.id == todayWorkout.uuid } == true)
+    }
+
     private struct Fixture {
         var goal: Goal
         var plan: TrainingPlan

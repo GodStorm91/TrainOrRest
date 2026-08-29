@@ -43,7 +43,35 @@ struct PlanHealth: Equatable {
     var adherenceRate: Double?
     var volumeCompliance: Double?
     var missedKeySessions: Int
+    var missedWorkoutAudit: MissedWorkoutAudit
     var evaluatedAt: Date
+}
+
+enum MissedWorkoutAuditReason: String, Equatable {
+    case missed
+    case completed
+    case futureWorkout
+    case todayStillSyncing
+    case skipped
+    case duplicateWorkout
+    case movedWorkout
+    case notExpected
+    case outsideCutoff
+}
+
+struct MissedWorkoutAuditEntry: Identifiable, Equatable {
+    var id: UUID
+    var date: Date
+    var kindRaw: String
+    var isKeyWorkout: Bool
+    var reason: MissedWorkoutAuditReason
+}
+
+struct MissedWorkoutAudit: Equatable {
+    var entries: [MissedWorkoutAuditEntry] = []
+
+    var missed: [MissedWorkoutAuditEntry] { entries.filter { $0.reason == .missed } }
+    var missedKeyWorkouts: [MissedWorkoutAuditEntry] { missed.filter(\.isKeyWorkout) }
 }
 
 struct ActivePlanSummary: Equatable {
@@ -90,6 +118,12 @@ struct ActivePlanWeekSummary: Equatable, Identifiable {
     var completedSessions: Int
     var plannedDistanceKm: Double
     var completedDistanceKm: Double
+    var plannedKeySessions: Int
+    var completedKeySessions: Int
+    var plannedLongRunKm: Double?
+    var completedLongRunKm: Double?
+    var isCurrentWeek: Bool
+    var isFutureWeek: Bool
 
     var adherenceRate: Double? {
         guard plannedSessions > 0 else { return nil }
@@ -171,6 +205,8 @@ enum ActivePlanSummaryBuilder {
             completionIndex: completionIndex,
             totalWeeks: totalWeeks,
             startDate: startDate,
+            today: planEvaluationDay,
+            currentWeekIndex: currentWeekIndex,
             calendar: calendar
         )
         let health = evaluateHealth(
@@ -336,6 +372,8 @@ enum ActivePlanSummaryBuilder {
         completionIndex: [UUID: CompletedActivity?],
         totalWeeks: Int,
         startDate: Date,
+        today: Date,
+        currentWeekIndex: Int,
         calendar: Calendar
     ) -> [ActivePlanWeekSummary] {
         (0..<totalWeeks).map { index in
@@ -343,6 +381,16 @@ enum ActivePlanSummaryBuilder {
             let weekEnd = calendar.date(byAdding: .day, value: 6, to: weekStart) ?? weekStart
             let weekWorkouts = workouts.filter { $0.weekIndex == index }
             let completed = weekWorkouts.filter { completionIndex.keys.contains($0.uuid) }
+            let keyWorkouts = weekWorkouts.filter { $0.kind?.isQuality == true && $0.kind != .race }
+            let completedKeys = keyWorkouts.filter { completionIndex.keys.contains($0.uuid) }
+            let plannedLongRun = weekWorkouts
+                .filter { $0.kind == .long }
+                .map(\.distanceKm)
+                .max()
+            let completedLongRun = completed
+                .filter { $0.kind == .long }
+                .map { completionDistanceKm(for: $0, completion: completionIndex[$0.uuid] ?? nil) }
+                .max()
             let plannedDistance = plan.weekTargetVolumesKm.indices.contains(index)
                 ? plan.weekTargetVolumesKm[index]
                 : weekWorkouts.reduce(0) { $0 + $1.distanceKm }
@@ -356,7 +404,13 @@ enum ActivePlanSummaryBuilder {
                 plannedSessions: weekWorkouts.count,
                 completedSessions: completed.count,
                 plannedDistanceKm: plannedDistance,
-                completedDistanceKm: completedDistance
+                completedDistanceKm: completedDistance,
+                plannedKeySessions: keyWorkouts.count,
+                completedKeySessions: completedKeys.count,
+                plannedLongRunKm: plannedLongRun,
+                completedLongRunKm: completedLongRun,
+                isCurrentWeek: index == currentWeekIndex,
+                isFutureWeek: weekStart > calendar.startOfDay(for: today)
             )
         }
     }
@@ -371,20 +425,28 @@ enum ActivePlanSummaryBuilder {
         calendar: Calendar
     ) -> PlanHealth {
         if plan.pausedAt != nil {
-            return PlanHealth(status: .paused, reasons: [.insufficientData], adherenceRate: nil, volumeCompliance: nil, missedKeySessions: 0, evaluatedAt: today)
+            return PlanHealth(status: .paused, reasons: [.insufficientData], adherenceRate: nil, volumeCompliance: nil, missedKeySessions: 0, missedWorkoutAudit: MissedWorkoutAudit(), evaluatedAt: today)
         }
 
         let raceDay = calendar.startOfDay(for: goal.raceDate)
         if raceDay < today {
-            return PlanHealth(status: .completed, reasons: [.raceDatePassed], adherenceRate: nil, volumeCompliance: nil, missedKeySessions: 0, evaluatedAt: today)
+            return PlanHealth(status: .completed, reasons: [.raceDatePassed], adherenceRate: nil, volumeCompliance: nil, missedKeySessions: 0, missedWorkoutAudit: MissedWorkoutAudit(), evaluatedAt: today)
         }
         if raceDay == today {
-            return PlanHealth(status: .active, reasons: [.raceDay], adherenceRate: nil, volumeCompliance: nil, missedKeySessions: 0, evaluatedAt: today)
+            return PlanHealth(status: .active, reasons: [.raceDay], adherenceRate: nil, volumeCompliance: nil, missedKeySessions: 0, missedWorkoutAudit: MissedWorkoutAudit(), evaluatedAt: today)
         }
 
-        let due = workouts.filter { calendar.startOfDay(for: $0.date) <= today && $0.status != .skipped }
+        let audit = dueWorkoutAudit(
+            workouts: workouts,
+            completionIndex: completionIndex,
+            today: today,
+            calendar: calendar
+        )
+        let due = workouts.filter { workout in
+            audit.entries.contains { $0.id == workout.uuid && ($0.reason == .missed || $0.reason == .completed) }
+        }
         guard due.count >= Tuning.minimumDueSessionsForAdherence else {
-            return PlanHealth(status: .active, reasons: [.insufficientData], adherenceRate: nil, volumeCompliance: nil, missedKeySessions: 0, evaluatedAt: today)
+            return PlanHealth(status: .active, reasons: [.insufficientData], adherenceRate: nil, volumeCompliance: nil, missedKeySessions: 0, missedWorkoutAudit: audit, evaluatedAt: today)
         }
 
         let completed = due.filter { completionIndex.keys.contains($0.uuid) }
@@ -392,11 +454,8 @@ enum ActivePlanSummaryBuilder {
         let completedDistance = completed.reduce(0) { partial, workout in
             partial + completionDistanceKm(for: workout, completion: completionIndex[workout.uuid] ?? nil)
         }
-        let missed = due.count - completed.count
-        let missedKeys = due.filter { workout in
-            guard workout.kind?.isQuality == true else { return false }
-            return !completionIndex.keys.contains(workout.uuid) && calendar.startOfDay(for: workout.date) < today
-        }.count
+        let missed = audit.missed.count
+        let missedKeys = audit.missedKeyWorkouts.count
         let adherence = Double(completed.count) / Double(due.count)
         let volume = plannedDistance > 0 ? completedDistance / plannedDistance : nil
 
@@ -427,8 +486,49 @@ enum ActivePlanSummaryBuilder {
             adherenceRate: adherence,
             volumeCompliance: volume,
             missedKeySessions: missedKeys,
+            missedWorkoutAudit: audit,
             evaluatedAt: today
         )
+    }
+
+    static func dueWorkoutAudit(
+        workouts: [PlannedWorkout],
+        completionIndex: [UUID: CompletedActivity?],
+        today: Date,
+        calendar: Calendar
+    ) -> MissedWorkoutAudit {
+        let cutoff = calendar.startOfDay(for: today)
+        var seenExpectedKeys: Set<String> = []
+        let entries = workouts.sorted { ($0.date, $0.uuid.uuidString) < ($1.date, $1.uuid.uuidString) }.map { workout -> MissedWorkoutAuditEntry in
+            let day = calendar.startOfDay(for: workout.date)
+            let key = "\(Int(day.timeIntervalSince1970))-\(workout.kindRaw)-\(String(format: "%.2f", workout.distanceKm))"
+            let reason: MissedWorkoutAuditReason
+            if workout.status == .skipped {
+                reason = .skipped
+            } else if day > cutoff {
+                reason = .futureWorkout
+            } else if day == cutoff && !completionIndex.keys.contains(workout.uuid) {
+                reason = .todayStillSyncing
+            } else if workout.scheduleUpdatedFrom != nil && day < cutoff && !completionIndex.keys.contains(workout.uuid) {
+                reason = .movedWorkout
+            } else if !seenExpectedKeys.insert(key).inserted {
+                reason = .duplicateWorkout
+            } else if completionIndex.keys.contains(workout.uuid) || workout.status == .done {
+                reason = .completed
+            } else if day < cutoff {
+                reason = .missed
+            } else {
+                reason = .outsideCutoff
+            }
+            return MissedWorkoutAuditEntry(
+                id: workout.uuid,
+                date: workout.date,
+                kindRaw: workout.kindRaw,
+                isKeyWorkout: workout.kind?.isQuality == true,
+                reason: reason
+            )
+        }
+        return MissedWorkoutAudit(entries: entries)
     }
 
     private static func completionDistanceKm(for workout: PlannedWorkout, completion: CompletedActivity?) -> Double {

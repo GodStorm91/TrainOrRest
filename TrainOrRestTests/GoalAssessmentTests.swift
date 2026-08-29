@@ -92,6 +92,43 @@ final class GoalAssessmentTests: XCTestCase {
         XCTAssertEqual(CoachLanguage.en.goalAssessmentText(.viewRecommendation), "View recommendation")
     }
 
+    func testPredictionGapRendersSevenMinutes() {
+        let target = 3 * 3600.0 + 59 * 60
+        let predicted = 4 * 3600.0 + 6 * 60
+
+        XCTAssertEqual(
+            RaceGoalStatusCard.targetGapText(predictedSeconds: predicted, targetSeconds: target, language: .vi),
+            "+7 phút so với mục tiêu"
+        )
+    }
+
+    func testReadinessScoreDoesNotCollapseFromOneFactor() throws {
+        let assessment = try makeAssessment(today: date(2026, 9, 7), completedThrough: 0)
+        let score = try XCTUnwrap(assessment.readiness.score)
+
+        XCTAssertGreaterThan(score, 0)
+        XCTAssertLessThanOrEqual(score, 100)
+    }
+
+    func testMissingComponentsAreRenormalized() throws {
+        let assessment = try makeAssessment(today: date(2026, 8, 24), completedThrough: 10)
+        let available = assessment.readiness.components.filter { $0.value != nil }
+        let totalWeight = available.reduce(0) { $0 + $1.weight }
+        let expected = Int(available.reduce(0) { partial, component in
+            partial + min(max(component.value ?? 0, 0), 100) * (component.weight / totalWeight)
+        }.rounded())
+
+        XCTAssertEqual(assessment.readiness.score, expected)
+        XCTAssertTrue(assessment.readiness.components.contains { $0.id == "recovery" && $0.value == nil })
+    }
+
+    func testMissingPredictionDoesNotRenderZero() throws {
+        let assessment = try makeAssessment(today: date(2026, 8, 5), completedThrough: 0, includeFitnessHistory: false)
+
+        XCTAssertNil(assessment.raceTimePrediction)
+        XCTAssertNil(assessment.readiness.score)
+    }
+
     private func makeAssessment(today: Date, completedThrough dueRuns: Int, includeFitnessHistory: Bool = true) throws -> GoalAssessment {
         let fixture = makeFixture(today: date(2026, 8, 3))
         let dueWorkouts = fixture.plan.workouts

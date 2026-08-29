@@ -44,6 +44,7 @@ final class CoachChatStore: ObservableObject {
         interactionId: String? = nil,
         selectedOptionId: String? = nil,
         isCustomInteractionResponse: Bool = false,
+        actionTypeOverride: CoachRequestActionType? = nil,
         in context: ModelContext
     ) async -> Bool {
         let account = CoachModelProvider.apiKeyAccount(for: model)
@@ -62,6 +63,7 @@ final class CoachChatStore: ObservableObject {
             interactionId: interactionId,
             selectedOptionId: selectedOptionId,
             isCustomInteractionResponse: isCustomInteractionResponse,
+            actionTypeOverride: actionTypeOverride,
             in: context
         )
     }
@@ -78,6 +80,7 @@ final class CoachChatStore: ObservableObject {
         interactionId: String? = nil,
         selectedOptionId: String? = nil,
         isCustomInteractionResponse: Bool = false,
+        actionTypeOverride: CoachRequestActionType? = nil,
         in context: ModelContext
     ) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -117,7 +120,7 @@ final class CoachChatStore: ObservableObject {
             contextBoundaryMessageID: userTurn.turnID,
             locale: CoachLanguage.current.rawValue,
             createdAt: submittedAt,
-            actionType: classifyAction(trimmed),
+            actionType: actionTypeOverride ?? classifyAction(trimmed),
             groundingSnapshot: grounding,
             threadID: threadID,
             interactionId: interactionId,
