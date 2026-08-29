@@ -1453,7 +1453,7 @@ struct ChatView: View {
             }
             evidenceReview = EvidenceReviewPresentation(snapshot: snapshot, pendingSend: pendingWithSnapshot)
         } catch {
-            chatStore.presentError((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            chatStore.presentError(error.coachTechnicalDescription)
         }
     }
 

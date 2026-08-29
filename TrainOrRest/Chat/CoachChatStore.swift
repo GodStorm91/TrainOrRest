@@ -1228,10 +1228,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
     }
 
     private func technicalErrorMessage(_ error: Error) -> String {
-        if let decodingError = error as? DecodingError {
-            return decodingError.coachDetail
-        }
-        return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        error.coachTechnicalDescription
     }
 
     private func messageHistory(threadID: UUID?, boundaryMessageID: UUID, in context: ModelContext) throws -> [ClaudeMessageParam] {
@@ -1360,5 +1357,17 @@ extension DecodingError {
         @unknown default:
             return localizedDescription
         }
+    }
+}
+
+extension Error {
+    // Single source of truth for a diagnosable technical string. Decoding
+    // failures name the exact field instead of Foundation's generic
+    // "The data couldn't be read because it is missing."
+    var coachTechnicalDescription: String {
+        if let decodingError = self as? DecodingError {
+            return decodingError.coachDetail
+        }
+        return (self as? LocalizedError)?.errorDescription ?? localizedDescription
     }
 }
