@@ -1,4 +1,6 @@
+import SwiftUI
 import SwiftData
+import UIKit
 import XCTest
 @testable import TrainOrRest
 
@@ -353,8 +355,111 @@ final class CoachInteractionStateTests: XCTestCase {
         XCTAssertEqual(actionable, "newest")
     }
 
+    func testCoachPetAppearsOnlyAfterRevealDelay() {
+        let startedAt = Date(timeIntervalSinceReferenceDate: 10_000)
+
+        XCTAssertFalse(CoachPetBehavior.shouldReveal(startedAt: startedAt, now: startedAt.addingTimeInterval(0.30)))
+        XCTAssertTrue(CoachPetBehavior.shouldReveal(startedAt: startedAt, now: startedAt.addingTimeInterval(0.46)))
+    }
+
+    func testCoachPetMapsProcessingStagesToWorkingStates() {
+        XCTAssertEqual(CoachPetBehavior.processingState(for: .preparingContext), .preparing)
+        XCTAssertEqual(CoachPetBehavior.processingState(for: .readingTrainingPlan), .analyzing)
+        XCTAssertEqual(CoachPetBehavior.processingState(for: .comparingWithGoal), .analyzing)
+        XCTAssertEqual(CoachPetBehavior.processingState(for: .checkingTrainingLoad), .analyzing)
+        XCTAssertEqual(CoachPetBehavior.processingState(for: .checkingRecovery), .analyzing)
+        XCTAssertEqual(CoachPetBehavior.processingState(for: .reviewingUpcomingWorkouts), .analyzing)
+        XCTAssertEqual(CoachPetBehavior.processingState(for: .buildingRecommendation), .buildingRecommendation)
+        XCTAssertEqual(CoachPetBehavior.processingState(for: .finalizing), .buildingRecommendation)
+    }
+
+    func testCoachPetStateFollowsGenerationState() {
+        let messageId = UUID()
+
+        XCTAssertEqual(CoachPetBehavior.state(for: .processing(messageId: messageId, stage: .buildingRecommendation)), .buildingRecommendation)
+        XCTAssertEqual(CoachPetBehavior.state(for: .streaming(messageId: messageId)), .streaming)
+        XCTAssertEqual(CoachPetBehavior.state(for: .completed(messageId: messageId)), .success)
+        XCTAssertEqual(CoachPetBehavior.state(for: .failed(messageId: messageId, error: .offline)), .error)
+        XCTAssertEqual(CoachPetBehavior.state(for: .cancelled(messageId: messageId)), .cancelled)
+    }
+
+    func testCoachPetLoopingStopsForTerminalStates() {
+        XCTAssertTrue(CoachPetBehavior.isLooping(.preparing))
+        XCTAssertTrue(CoachPetBehavior.isLooping(.analyzing))
+        XCTAssertTrue(CoachPetBehavior.isLooping(.buildingRecommendation))
+        XCTAssertFalse(CoachPetBehavior.isLooping(.streaming))
+        XCTAssertFalse(CoachPetBehavior.isLooping(.success))
+        XCTAssertFalse(CoachPetBehavior.isLooping(.error))
+        XCTAssertFalse(CoachPetBehavior.isLooping(.cancelled))
+        XCTAssertFalse(CoachPetBehavior.isLooping(.hidden))
+    }
+
+    func testRenderCoachPetCharacterSheet() throws {
+        let output = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "design/coach-pet", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+
+        try renderPetSheet(name: "character-sheet-dark", colorScheme: .dark, output: output)
+        try renderPetSheet(name: "character-sheet-light", colorScheme: .light, output: output)
+    }
+
     private var conversationID: UUID {
         UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
+    }
+
+    private func renderPetSheet(name: String, colorScheme: ColorScheme, output: URL) throws {
+        let states: [CoachPetState] = [.idle, .preparing, .analyzing, .buildingRecommendation, .streaming, .success, .error, .cancelled]
+        let view = VStack(alignment: .leading, spacing: 14) {
+            Text("TrainOrRest Coach Pet")
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundStyle(Theme.text)
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(118), spacing: 10), count: 2), spacing: 12) {
+                ForEach(states, id: \.self) { state in
+                    VStack(spacing: 8) {
+                        CoachPetView(state: state, reduceMotion: true, isActive: true)
+                            .frame(width: 58, height: 58)
+                            .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .strokeBorder(Theme.border, lineWidth: 1)
+                            )
+                        Text(self.petStatePreviewLabel(state))
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Theme.dim)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                    }
+                    .frame(width: 118, height: 92)
+                }
+            }
+        }
+        .padding(18)
+        .frame(width: 280)
+        .background(Theme.bg)
+        .environment(\.colorScheme, colorScheme)
+
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 2
+        guard let image = renderer.uiImage, let data = image.pngData() else {
+            return XCTFail("Could not render Coach pet character sheet.")
+        }
+        try data.write(to: output.appending(path: "\(name).png"))
+    }
+
+    private func petStatePreviewLabel(_ state: CoachPetState) -> String {
+        switch state {
+        case .hidden: "hidden"
+        case .idle: "idle"
+        case .preparing: "preparing"
+        case .analyzing: "analyzing"
+        case .buildingRecommendation: "building"
+        case .streaming: "streaming"
+        case .success: "success"
+        case .error: "error"
+        case .cancelled: "cancelled"
+        }
     }
 
     private func promptSuggestion() -> CoachPromptSuggestion {

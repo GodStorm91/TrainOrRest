@@ -1522,8 +1522,8 @@ struct PrimaryAttentionCard: View {
             labeledBlock(.impact, text: impactText)
 
             HStack(spacing: 10) {
-                NavigationLink {
-                    ChatView(reviewRequest: coachRequest)
+                Button {
+                    NotificationCenter.default.post(name: .torOpenCoachChat, object: coachRequest)
                 } label: {
                     Label(language.goalAssessmentText(.viewRecommendation), systemImage: "sparkles")
                         .font(.torHeading(15, .bold))

@@ -39,6 +39,13 @@ struct RootTabView: View {
             let hidden = notification.object as? Bool ?? false
             withAnimation(.easeOut(duration: 0.18)) { isBottomDockHiddenByChild = hidden }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .torOpenCoachChat)) { notification in
+            guard let request = notification.object as? CalendarReviewChatRequest else { return }
+            pendingReviewChatRequest = request
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                selection = .chat
+            }
+        }
         .animation(.smooth(duration: 0.26), value: selection)
         .tint(Theme.accent)
     }

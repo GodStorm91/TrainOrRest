@@ -140,9 +140,7 @@ struct ChatView: View {
             consumeReviewRequestIfNeeded()
         }
         .onAppear {
-            if isContextualSession {
-                NotificationCenter.default.post(name: .torSetBottomDockHidden, object: true)
-            }
+            NotificationCenter.default.post(name: .torSetBottomDockHidden, object: true)
             refreshKeyState()
             chatStore.resetError()
             migrateLegacyMessagesIfNeeded()
@@ -155,9 +153,7 @@ struct ChatView: View {
             consumeReviewRequestIfNeeded()
         }
         .onDisappear {
-            if isContextualSession {
-                NotificationCenter.default.post(name: .torSetBottomDockHidden, object: false)
-            }
+            NotificationCenter.default.post(name: .torSetBottomDockHidden, object: false)
         }
         .onChange(of: allMessages.count) {
             attachUnthreadedMessagesToActiveThread()

@@ -976,6 +976,7 @@ private struct CoachMemoryEditorView: View {
 
 extension Notification.Name {
     static let torSetBottomDockHidden = Notification.Name("torSetBottomDockHidden")
+    static let torOpenCoachChat = Notification.Name("torOpenCoachChat")
 }
 
 extension CoachLanguage {
