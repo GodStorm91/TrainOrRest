@@ -1299,9 +1299,26 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(failed.attemptCount, 1)
         XCTAssertEqual(failed.text, "")
         XCTAssertEqual(store.lastError, ClaudeClientError.connectionLost.errorDescription)
+        XCTAssertEqual(failed.errorDetail, ClaudeClientError.connectionLost.errorDescription)
         let snapshots = try context.fetch(FetchDescriptor<CoachRequestSnapshot>())
         XCTAssertEqual(snapshots.count, 1)
         XCTAssertEqual(snapshots.first?.messageText, "Create workout tomorrow.")
+    }
+
+    func testTimedOutSurfacesTimeoutDetailAndStaysRetryable() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(error: ClaudeClientError.timedOut)
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(text: "Create workout tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
+
+        let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertEqual(failed.assistantStatus, .failed)
+        XCTAssertEqual(failed.errorCategory, .retryableResponse)
+        XCTAssertEqual(failed.errorDetail, ClaudeClientError.timedOut.errorDescription)
+        XCTAssertEqual(failed.errorMessage, CoachLanguage.en.interruptedFailureMessage)
     }
 
     func testTruncatedPlanEditReplyReportsCutOffNotConnectionDrop() async throws {

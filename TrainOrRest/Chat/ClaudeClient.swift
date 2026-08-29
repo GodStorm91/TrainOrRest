@@ -51,7 +51,7 @@ enum CoachChatConfig {
 }
 
 enum ClaudeClientError: LocalizedError, Equatable {
-    case badKey, rateLimited, offline, connectionLost, invalidResponse, api(String)
+    case badKey, rateLimited, offline, connectionLost, timedOut, invalidResponse, api(String)
 
     var errorDescription: String? {
         switch self {
@@ -59,6 +59,7 @@ enum ClaudeClientError: LocalizedError, Equatable {
         case .rateLimited: "The coach provider is rate limited right now. Try again shortly."
         case .offline: "No network connection. Your chat history is safe."
         case .connectionLost: "Connection to the coach provider dropped mid-reply. Try again; your chat history is safe."
+        case .timedOut: "The coach provider did not respond in time. A large plan edit can exceed the limit; try one change at a time."
         case .invalidResponse: "The coach provider returned an unexpected response."
         case .api(let message): message
         }
@@ -227,7 +228,9 @@ final class ClaudeClient: ClaudeServicing {
         switch error.code {
         case .notConnectedToInternet:
             return .offline
-        case .networkConnectionLost, .timedOut:
+        case .timedOut:
+            return .timedOut
+        case .networkConnectionLost:
             return .connectionLost
         default:
             return .api(error.localizedDescription)

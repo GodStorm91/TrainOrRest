@@ -485,6 +485,7 @@ final class CoachChatStore: ObservableObject {
         assistantTurn.assistantStatus = statusBeforeStreaming
         assistantTurn.errorCategory = nil
         assistantTurn.errorMessage = nil
+        assistantTurn.errorDetail = nil
         assistantTurn.interaction = nil
         generationState = .processing(messageId: assistantTurn.turnID, stage: .preparingContext)
         try? context.save()
@@ -739,6 +740,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         assistantTurn.assistantStatus = category == .mutationUnknown ? .reconciling : .failed
         assistantTurn.errorCategory = category
         assistantTurn.errorMessage = userFacingInlineError(for: category, raw: message)
+        assistantTurn.errorDetail = message
         assistantTurn.isIncomplete = !assistantTurn.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         assistantTurn.activeAttemptID = nil
         lastError = message
@@ -783,7 +785,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             return .offline
         case .badKey:
             return .authentication
-        case .connectionLost, .rateLimited, .invalidResponse, .api:
+        case .connectionLost, .timedOut, .rateLimited, .invalidResponse, .api:
             return .retryableResponse
         }
     }

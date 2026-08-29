@@ -807,6 +807,8 @@ private struct CoachInlineFailureCard: View {
     let onChooseDataAgain: () -> Void
     let onCheckConnection: () -> Void
 
+    @State private var showsDetail = false
+
     private var category: CoachErrorCategory {
         message.errorCategory ?? .retryableResponse
     }
@@ -875,6 +877,21 @@ private struct CoachInlineFailureCard: View {
                 }
             }
             .frame(minHeight: 44)
+
+            if let detail = message.errorDetail, !detail.isEmpty {
+                DisclosureGroup(language.viewTechnicalDetailsLabel, isExpanded: $showsDetail) {
+                    Text(detail)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(Theme.faint)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 4)
+                }
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Theme.dim)
+                .tint(Theme.dim)
+            }
         }
         .padding(12)
         .frame(maxWidth: 310, alignment: .leading)

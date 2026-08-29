@@ -73,6 +73,7 @@ final class ChatMessage {
     var statusRaw: String?
     var errorCategoryRaw: String?
     var errorMessage: String?
+    var errorDetail: String?
     var attemptCountStorage: Int?
     var activeAttemptID: UUID?
     var operationID: UUID?

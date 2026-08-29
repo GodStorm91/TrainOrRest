@@ -40,7 +40,9 @@ final class OpenAIClient: ClaudeServicing {
         switch error.code {
         case .notConnectedToInternet:
             return .offline
-        case .networkConnectionLost, .timedOut:
+        case .timedOut:
+            return .timedOut
+        case .networkConnectionLost:
             return .connectionLost
         default:
             return .api(error.localizedDescription)
