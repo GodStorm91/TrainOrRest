@@ -688,138 +688,64 @@ struct CoachPetView: View {
 
     var body: some View {
         ZStack {
-            tail
-                .offset(x: 12, y: 5)
-                .rotationEffect(.degrees(tailAngle), anchor: .leading)
-            shoes
-                .offset(y: 15)
-            petBody
-                .offset(y: bodyOffset)
-            ears
-                .offset(y: -14 + bodyOffset)
-            face
-                .offset(y: -5 + bodyOffset)
-            prop
+            Image(assetName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 42, height: 42)
+                .scaleEffect(scale)
+                .offset(x: horizontalOffset, y: bodyOffset)
+                .rotationEffect(.degrees(rotationAngle))
+                .opacity(state == .cancelled ? 0.72 : 1)
+
+            stateOverlay
         }
         .frame(width: 42, height: 42)
-        .drawingGroup()
         .onAppear { startAnimationIfNeeded() }
         .onChange(of: state) { _, _ in startAnimationIfNeeded() }
         .onChange(of: reduceMotion) { _, _ in startAnimationIfNeeded() }
         .onChange(of: isActive) { _, _ in startAnimationIfNeeded() }
     }
 
-    private var petBody: some View {
-        RoundedRectangle(cornerRadius: 13, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [Theme.accent.opacity(0.94), Theme.accent2.opacity(0.88)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .frame(width: 28, height: 30)
-            .overlay(alignment: .center) {
-                Image(systemName: "sparkle")
-                    .font(.system(size: 7, weight: .black))
-                    .foregroundStyle(.white.opacity(0.94))
-                    .offset(y: 5)
-            }
-    }
-
-    private var ears: some View {
-        HStack(spacing: 13) {
-            CoachPetEar()
-                .fill(Theme.accent2.opacity(0.92))
-                .frame(width: 8, height: 9)
-                .rotationEffect(.degrees(earAngle))
-            CoachPetEar()
-                .fill(Theme.accent.opacity(0.92))
-                .frame(width: 8, height: 9)
-                .scaleEffect(x: -1, y: 1)
-                .rotationEffect(.degrees(-earAngle))
-        }
-    }
-
-    private var face: some View {
-        VStack(spacing: 2) {
-            HStack(spacing: 7) {
-                Circle().fill(Color.white.opacity(0.94)).frame(width: 3.5, height: 3.5)
-                Circle().fill(Color.white.opacity(0.94)).frame(width: 3.5, height: 3.5)
-            }
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(Color.white.opacity(state == .error ? 0.55 : 0.78))
-                .frame(width: state == .error ? 6 : 8, height: 2)
-                .rotationEffect(.degrees(state == .error ? -8 : 0))
-        }
-    }
-
-    private var tail: some View {
-        Capsule(style: .continuous)
-            .fill(Color(uiColor: UIColor(hex: 0xD9B38C)).opacity(0.86))
-            .frame(width: 13, height: 7)
-            .overlay(alignment: .trailing) {
-                Capsule(style: .continuous)
-                    .fill(Theme.accent.opacity(0.85))
-                    .frame(width: 7, height: 7)
-            }
-    }
-
-    private var shoes: some View {
-        HStack(spacing: 8) {
-            Capsule(style: .continuous)
-                .fill(Color(uiColor: UIColor(hex: 0xF2E5D6)))
-                .frame(width: 11, height: 5)
-                .offset(y: shoeOffset)
-            Capsule(style: .continuous)
-                .fill(Color(uiColor: UIColor(hex: 0xF2E5D6)))
-                .frame(width: 11, height: 5)
-                .offset(y: -shoeOffset)
+    private var assetName: String {
+        switch state {
+        case .hidden, .idle, .cancelled:
+            return "coach-pet-idle"
+        case .preparing:
+            return "coach-pet-breathing"
+        case .analyzing:
+            return "coach-pet-analyzing"
+        case .buildingRecommendation:
+            return "coach-pet-building"
+        case .streaming:
+            return "coach-pet-jog"
+        case .success:
+            return "coach-pet-success"
+        case .error:
+            return "coach-pet-breathing"
         }
     }
 
     @ViewBuilder
-    private var prop: some View {
+    private var stateOverlay: some View {
         switch state {
         case .preparing:
             Circle()
                 .strokeBorder(Theme.accent.opacity(0.55), lineWidth: 1.3)
                 .frame(width: 8, height: 8)
                 .offset(x: -14, y: -11)
-        case .analyzing:
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .strokeBorder(Theme.faint.opacity(0.6), lineWidth: 1)
-                .frame(width: 10, height: 8)
-                .overlay(alignment: .bottom) {
-                    HStack(alignment: .bottom, spacing: 1) {
-                        Capsule().fill(Theme.accent.opacity(0.45)).frame(width: 1.5, height: 3)
-                        Capsule().fill(Theme.accent.opacity(0.65)).frame(width: 1.5, height: 5)
-                        Capsule().fill(Theme.accent.opacity(0.35)).frame(width: 1.5, height: 4)
-                    }
-                    .padding(.bottom, 1.5)
-                }
-                .offset(x: -15, y: -11)
-        case .buildingRecommendation:
-            Circle()
-                .fill(Color(uiColor: UIColor(hex: 0xF2E5D6)).opacity(0.9))
-                .frame(width: 5, height: 5)
-                .offset(x: loop && shouldAnimate ? -12 : -9, y: -8)
-        case .streaming:
-            Capsule(style: .continuous)
-                .fill(Theme.accent.opacity(0.28))
-                .frame(width: 12, height: 3)
-                .offset(x: -15, y: -10)
         case .error:
             Image(systemName: "exclamationmark")
-                .font(.system(size: 7, weight: .black))
+                .font(.system(size: 8, weight: .black))
                 .foregroundStyle(Theme.warn)
+                .frame(width: 13, height: 13)
+                .background(.thinMaterial, in: Circle())
                 .offset(x: -12, y: -12)
         case .cancelled:
             Circle()
                 .fill(Theme.faint.opacity(0.2))
                 .frame(width: 8, height: 8)
                 .offset(x: -13, y: -12)
-        case .hidden, .idle, .success:
+        case .hidden, .idle, .analyzing, .buildingRecommendation, .streaming, .success:
             EmptyView()
         }
     }
@@ -836,19 +762,38 @@ struct CoachPetView: View {
         }
     }
 
-    private var shoeOffset: CGFloat {
+    private var horizontalOffset: CGFloat {
         guard shouldAnimate else { return 0 }
-        return loop ? -1.5 : 1.5
+        switch state {
+        case .analyzing:
+            return loop ? -0.8 : 0.8
+        case .buildingRecommendation:
+            return loop ? 0.8 : -0.8
+        default:
+            return 0
+        }
     }
 
-    private var tailAngle: Double {
-        guard shouldAnimate else { return state == .cancelled ? -10 : 0 }
-        return loop ? 13 : -8
+    private var rotationAngle: Double {
+        guard shouldAnimate else { return 0 }
+        switch state {
+        case .buildingRecommendation:
+            return loop ? -1.8 : 1.8
+        case .analyzing:
+            return loop ? 1.2 : -1.2
+        default:
+            return 0
+        }
     }
 
-    private var earAngle: Double {
-        guard shouldAnimate else { return 0 }
-        return loop ? -5 : 4
+    private var scale: CGFloat {
+        if state == .success {
+            return shouldAnimate && loop ? 1.03 : 1
+        }
+        if state == .preparing {
+            return shouldAnimate && loop ? 1.015 : 1
+        }
+        return 1
     }
 
     private func startAnimationIfNeeded() {
@@ -857,17 +802,6 @@ struct CoachPetView: View {
         withAnimation(.easeInOut(duration: state == .buildingRecommendation ? 0.7 : 0.8).repeatForever(autoreverses: true)) {
             loop = true
         }
-    }
-}
-
-private struct CoachPetEar: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
-        path.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.maxY), control: CGPoint(x: rect.maxX, y: rect.midY * 0.55))
-        path.addQuadCurve(to: CGPoint(x: rect.minX, y: rect.maxY), control: CGPoint(x: rect.midX, y: rect.maxY * 1.1))
-        path.addQuadCurve(to: CGPoint(x: rect.midX, y: rect.minY), control: CGPoint(x: rect.minX, y: rect.midY * 0.55))
-        return path
     }
 }
 
