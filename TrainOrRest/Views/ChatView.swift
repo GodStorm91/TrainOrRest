@@ -255,18 +255,6 @@ struct ChatView: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-            RadialGradient(
-                colors: [Theme.accent.opacity(0.055), .clear],
-                center: .topTrailing,
-                startRadius: 20,
-                endRadius: 360
-            )
-            RadialGradient(
-                colors: [Theme.good.opacity(0.045), .clear],
-                center: .bottomLeading,
-                startRadius: 40,
-                endRadius: 420
-            )
         }
     }
 
@@ -320,7 +308,7 @@ struct ChatView: View {
             .buttonStyle(.plain)
             .accessibilityLabel(isContextualSession ? language.coachOptionsLabel : language.newConversationLabel)
         }
-        .frame(height: isHeaderCollapsed ? 44 : 52)
+        .frame(minHeight: isHeaderCollapsed ? 44 : 52)
         .padding(.horizontal, 8)
         .padding(.vertical, 2)
         .torGlass(cornerRadius: isHeaderCollapsed ? 22 : 24, tint: .subtle)
@@ -372,6 +360,12 @@ struct ChatView: View {
                     readinessGlassCard
                         .padding(.top, 54)
                     suggestedPromptRows
+                    Text(language.coachRoleLine)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.dim)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 2)
                 }
             }
             .padding(.horizontal, 18)
@@ -388,7 +382,7 @@ struct ChatView: View {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: contextualSymbolName)
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Theme.accent)
+                        .foregroundStyle(Theme.data)
                         .frame(width: 30, height: 30)
                         .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                     VStack(alignment: .leading, spacing: 3) {
@@ -444,7 +438,9 @@ struct ChatView: View {
                 ZStack {
                     Circle().fill(todayReadinessTint.opacity(0.16))
                     Circle().strokeBorder(todayReadinessTint.opacity(0.28), lineWidth: 1)
-                    Circle().fill(todayReadinessTint).frame(width: 9, height: 9)
+                    Image(systemName: todayVerdictSymbol)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(todayReadinessTint)
                 }
                 .frame(width: 30, height: 30)
 
@@ -465,9 +461,9 @@ struct ChatView: View {
             HStack(spacing: 10) {
                 Image(systemName: todayWorkout?.kind?.symbolName ?? "figure.run")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.good)
+                    .foregroundStyle(Theme.data)
                     .frame(width: 24, height: 24)
-                    .background(Theme.good.opacity(0.12), in: Circle())
+                    .background(Theme.data.opacity(0.12), in: Circle())
                 Text(todayPlannedWorkoutText)
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(Theme.text)
@@ -824,10 +820,10 @@ struct ChatView: View {
         .padding(.top, 8)
         .padding(.bottom, isSoftwareKeyboardVisible ? 6 : (bottomNavigation.map { _ in 4 } ?? 8))
         .background(.clear)
-        .animation(.easeOut(duration: 0.2), value: replacementCoordinator.pending)
-        .animation(.easeOut(duration: 0.2), value: replacementCoordinator.pendingProposal)
-        .animation(.easeOut(duration: 0.2), value: isSoftwareKeyboardVisible)
-        .animation(.easeOut(duration: 0.16), value: scrollState.hasUnseenContent)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: replacementCoordinator.pending)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: replacementCoordinator.pendingProposal)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: isSoftwareKeyboardVisible)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: scrollState.hasUnseenContent)
     }
 
     private var continueAnswerButton: some View {
@@ -1173,6 +1169,16 @@ struct ChatView: View {
 
     private var todayReadinessTint: Color {
         todayReadiness?.verdict.torColor ?? Theme.dim
+    }
+
+    private var todayVerdictSymbol: String {
+        switch todayReadiness?.verdict {
+        case .train: return "figure.run"
+        case .goEasy: return "tortoise"
+        case .rest: return "moon.zzz"
+        case .insufficientData: return "chart.line.uptrend.xyaxis"
+        case .none: return "ellipsis"
+        }
     }
 
     private var todayReadinessTitle: String {
@@ -1779,7 +1785,7 @@ struct ChatView: View {
 
     private var contextualTitle: String {
         if let workout = contextualWorkout { return workout.kind?.displayName ?? "Run" }
-        if let activity = contextualActivity {
+        if contextualActivity != nil {
             return language.completedRunTitle
         }
         return language.workoutUnavailableTitle
@@ -2113,7 +2119,7 @@ private struct ChatHistorySheet: View {
                                 } label: {
                                     Label(language.archiveLabel, systemImage: "archivebox")
                                 }
-                                .tint(Theme.warn)
+                                .tint(Theme.bad)
                             }
                             .contextMenu {
                                 Button {
@@ -2447,7 +2453,7 @@ private struct PlanTransactionCard: View {
                 case .failure(let userMessage, let technicalDetails, _):
                     Label(failureTitle(for: technicalDetails), systemImage: "exclamationmark.triangle.fill")
                         .font(.torHeading(15, .bold))
-                        .foregroundStyle(Theme.warn)
+                        .foregroundStyle(Theme.bad)
                     Text(userMessage)
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Theme.text)

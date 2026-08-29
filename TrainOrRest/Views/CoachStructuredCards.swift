@@ -11,7 +11,7 @@ struct CoachRationaleCard: View {
                     if let score = rationale.score {
                         Text("readiness \(score)")
                             .font(.torMono(11, .medium))
-                            .foregroundStyle(Theme.faint)
+                            .foregroundStyle(Theme.dim)
                     }
                 }
 
@@ -72,9 +72,9 @@ struct CoachWorkoutCard: View {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: workout.symbolName)
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Theme.accent)
+                        .foregroundStyle(Theme.data)
                         .frame(width: 28, height: 28)
-                        .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .background(Theme.data.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .accessibilityHidden(true)
 
                     VStack(alignment: .leading, spacing: 3) {

@@ -936,4 +936,72 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
     var editTitlePrefix: String { self == .vi ? "Chỉnh" : self == .ja ? "編集" : "Edit" }
     func reviewRunThreadTitle(distance: String, date: String) -> String { self == .vi ? "Xem lại buổi chạy \(distance) · \(date)" : self == .ja ? "\(distance) のランを振り返る · \(date)" : "Review \(distance) run · \(date)" }
     var previousChatTitle: String { self == .vi ? "Cuộc trò chuyện trước" : self == .ja ? "以前のチャット" : "Previous chat" }
+
+    // MARK: - Plan proposal cards (shared trust ledger)
+
+    var planProposalEyebrow: String { self == .vi ? "ĐỀ XUẤT CẬP NHẬT KẾ HOẠCH" : self == .ja ? "計画更新の提案" : "PROPOSED PLAN UPDATE" }
+    var ledgerProposedLabel: String { self == .vi ? "Đề xuất" : self == .ja ? "提案" : "Proposed" }
+    var ledgerValidatedLabel: String { self == .vi ? "Đã kiểm tra" : self == .ja ? "検証済み" : "Validated" }
+    var ledgerAwaitsLabel: String { self == .vi ? "Chờ xác nhận" : self == .ja ? "確認待ち" : "Awaits you" }
+    var showValidationReceiptLabel: String { self == .vi ? "Xem biên nhận kiểm tra" : self == .ja ? "検証レシートを表示" : "Show validation receipt" }
+    var validationReceiptTitle: String { self == .vi ? "Đã kiểm tra kế hoạch" : self == .ja ? "計画チェック合格" : "Plan checks passed" }
+    var validationReceiptSubtitle: String { self == .vi ? "Đã kiểm tra bằng quy tắc tập luyện trên máy trước khi thay đổi kế hoạch." : self == .ja ? "変更前にデバイス内のトレーニングルールで検証済みです。" : "Checked against on-device training rules before any change." }
+    func applyToWeekLabel(_ week: Int) -> String { self == .vi ? "Áp dụng cho tuần \(week)" : self == .ja ? "第\(week)週に適用" : "Apply to week \(week)" }
+    var planChangedBannerText: String { self == .vi ? "Kế hoạch đã thay đổi sau đề xuất này, anh xem lại thay đổi mới nhé." : self == .ja ? "この提案の後に計画が変わりました。最新の変更を確認してください。" : "The plan changed after this was proposed — review the latest change." }
+    var proposalNoChangeYetText: String { self == .vi ? "Chưa thay đổi kế hoạch. TrainOrRest chỉ cập nhật sau khi anh xác nhận." : self == .ja ? "計画はまだ変わりません。確認後にのみ更新されます。" : "Nothing changes yet. TrainOrRest updates only after you confirm." }
+    func planChangeActionLabel(_ action: PlanAdjustmentProposal.Change.Action) -> String {
+        switch action {
+        case .swap: return self == .vi ? "Đổi" : self == .ja ? "入替" : "Swap"
+        case .downgrade: return self == .vi ? "Giảm" : self == .ja ? "軽減" : "Ease"
+        case .rest: return self == .vi ? "Nghỉ" : self == .ja ? "休養" : "Rest"
+        case .move: return self == .vi ? "Dời" : self == .ja ? "移動" : "Move"
+        case .create: return self == .vi ? "Thêm" : self == .ja ? "追加" : "Add"
+        case .replace: return self == .vi ? "Thay" : self == .ja ? "置換" : "Replace"
+        }
+    }
+    var planValidationChecks: [(title: String, detail: String)] {
+        switch self {
+        case .en: return [
+            ("Workout uses available days", "No workout on an unavailable day."),
+            ("Long-run length within limit", "Long runs stay within absolute and weekly-share caps."),
+            ("Ramp rate safe", "Weekly volume does not grow faster than the plan allows."),
+            ("Taper stays monotonic", "Taper volume does not climb toward race day."),
+            ("Quality sessions spaced", "Hard sessions keep the required recovery gap."),
+            ("Race day present", "The plan still includes exactly one race workout."),
+            ("Weekly volume within cap", "Week volume remains under the athlete's peak cap."),
+            ("No duplicate workout day", "Each date has at most one workout."),
+            ("Workout stays inside plan week", "The workout date matches its plan week."),
+            ("Distances valid", "Workout distances are finite and above zero."),
+            ("Structure matches distance", "Structured steps add up to the workout distance.")
+        ]
+        case .ja: return [
+            ("利用可能日を使用", "利用不可の日に練習を入れません。"),
+            ("ロング走が上限内", "ロング走は絶対値と週比率の上限内に収まります。"),
+            ("増加率が安全", "週間距離は計画の許容を超えて増えません。"),
+            ("テーパーは単調", "テーパー量はレース日に向けて増えません。"),
+            ("質練習の間隔", "高強度練習は必要な回復間隔を保ちます。"),
+            ("レース日あり", "計画にレース練習がちょうど1つ残ります。"),
+            ("週間距離が上限内", "週間距離は選手のピーク上限内に収まります。"),
+            ("練習日の重複なし", "各日付の練習は最大1つです。"),
+            ("計画週の内側", "練習の日付は計画週と一致します。"),
+            ("距離が有効", "練習距離は有限かつ0より大きい値です。"),
+            ("構成が距離と一致", "構成ステップの合計が練習距離と一致します。")
+        ]
+        case .vi: return [
+            ("Dùng ngày khả dụng", "Không đặt bài vào ngày không khả dụng."),
+            ("Long run trong giới hạn", "Long run nằm trong mức tuyệt đối và tỷ lệ tuần."),
+            ("Tốc độ tăng an toàn", "Khối lượng tuần không tăng nhanh hơn kế hoạch cho phép."),
+            ("Taper giảm đều", "Khối lượng taper không tăng dần về ngày đua."),
+            ("Buổi chất lượng cách nhau", "Buổi nặng giữ đủ khoảng hồi phục."),
+            ("Còn ngày đua", "Kế hoạch vẫn có đúng một buổi đua."),
+            ("Khối lượng tuần trong mức", "Khối lượng tuần dưới mức đỉnh của vận động viên."),
+            ("Không trùng ngày tập", "Mỗi ngày có tối đa một buổi tập."),
+            ("Bài nằm trong tuần kế hoạch", "Ngày của buổi tập khớp với tuần kế hoạch."),
+            ("Cự ly hợp lệ", "Cự ly buổi tập hữu hạn và lớn hơn 0."),
+            ("Cấu trúc khớp cự ly", "Các bước cấu trúc cộng lại đúng bằng cự ly buổi tập.")
+        ]
+        }
+    }
+
+    var coachRoleLine: String { self == .vi ? "Giải thích & đề xuất · không tự sửa kế hoạch của bạn." : self == .ja ? "説明と提案のみ · あなたの計画は編集しません。" : "Explains & proposes · never edits your plan." }
 }

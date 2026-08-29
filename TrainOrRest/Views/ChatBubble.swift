@@ -1,27 +1,21 @@
 import SwiftUI
 import UIKit
 
-/// Small purple-gradient sparkle avatar for the coach, reused in the chat
-/// header and beside assistant bubbles.
+/// Neutral provenance mark for the coach, reused in the chat header and beside
+/// assistant bubbles.
 struct CoachAvatar: View {
     var size: CGFloat = 26
 
     var body: some View {
         Circle()
-            .fill(
-                LinearGradient(
-                    colors: [Theme.accent, Theme.accent2],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+            .fill(Theme.card)
             .frame(width: size, height: size)
+            .overlay(Circle().strokeBorder(Theme.border, lineWidth: 1))
             .overlay {
-                Image(systemName: "sparkle")
-                    .font(.system(size: size * 0.48, weight: .bold))
-                    .foregroundStyle(.white)
+                Image(systemName: "figure.run")
+                    .font(.system(size: size * 0.46, weight: .semibold))
+                    .foregroundStyle(Theme.dim)
             }
-            .shadow(color: Theme.accentSoft, radius: size * 0.35)
     }
 }
 
