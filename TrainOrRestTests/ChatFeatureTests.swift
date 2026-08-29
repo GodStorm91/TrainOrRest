@@ -1304,6 +1304,24 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(snapshots.first?.messageText, "Create workout tomorrow.")
     }
 
+    func testTruncatedPlanEditReplyReportsCutOffNotConnectionDrop() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [.text("Adjusting the week")], stopReason: "max_tokens")
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(text: "Create workout tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
+
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        let failed = try XCTUnwrap(messages.last)
+        XCTAssertEqual(failed.assistantStatus, .failed)
+        XCTAssertEqual(failed.errorCategory, .responseTruncated)
+        XCTAssertEqual(failed.errorMessage, CoachLanguage.en.responseTruncatedMessage)
+    }
+
     func testDismissingInlineFailurePersistsDismissedTurn() async throws {
         let container = try makeContainer()
         let context = container.mainContext

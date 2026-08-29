@@ -815,6 +815,7 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
     var openSavedQuestionsLabel: String { self == .vi ? "Mở câu hỏi đã lưu" : self == .ja ? "保存した質問を開く" : "Open saved questions" }
     var removeImageLabel: String { self == .vi ? "Xóa ảnh" : self == .ja ? "画像を削除" : "Remove image" }
     var addContentLabel: String { self == .vi ? "Thêm nội dung" : self == .ja ? "コンテンツを追加" : "Add content" }
+    var attachEvidenceLabel: String { self == .vi ? "Đính kèm dữ liệu" : self == .ja ? "根拠を添付" : "Attach evidence" }
     var hideKeyboardLabel: String { self == .vi ? "Ẩn bàn phím" : self == .ja ? "キーボードを閉じる" : "Hide keyboard" }
     var sendMessageLabel: String { self == .vi ? "Gửi tin nhắn" : self == .ja ? "メッセージを送信" : "Send message" }
 
@@ -824,9 +825,9 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
 
     var openingPrompts: [String] {
         switch self {
-        case .en: return ["Analyze my latest workout", "How is my training load this week?", "What should I train today?"]
-        case .ja: return ["最近のワークアウトを分析して", "今週のトレーニング負荷はどう？", "今日は何を練習すべき？"]
-        case .vi: return ["Phân tích buổi tập gần nhất", "Tải tập tuần này của tôi thế nào?", "Hôm nay tôi nên tập gì?"]
+        case .en: return ["Why train or rest today?", "Review my latest workout", "Adjust this week's plan"]
+        case .ja: return ["今日は練習すべき？休むべき？", "最近のワークアウトを振り返って", "今週の計画を調整したい"]
+        case .vi: return ["Hôm nay nên tập hay nghỉ?", "Xem lại buổi tập gần nhất", "Điều chỉnh kế hoạch tuần này"]
         }
     }
     var savedPrompts: [String] {
@@ -1004,4 +1005,6 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
     }
 
     var coachRoleLine: String { self == .vi ? "Giải thích & đề xuất · không tự sửa kế hoạch của bạn." : self == .ja ? "説明と提案のみ · あなたの計画は編集しません。" : "Explains & proposes · never edits your plan." }
+    var responseTruncatedTitle: String { self == .vi ? "Phản hồi bị cắt ngắn" : self == .ja ? "返信が途中で切れました" : "Reply was cut off" }
+    var responseTruncatedMessage: String { self == .vi ? "Phản hồi của Coach bị cắt ngắn. Nhấn thử lại, hoặc yêu cầu từng thay đổi một." : self == .ja ? "Coach の返信が途中で切れました。再試行するか、変更を1つずつ依頼してください。" : "The coach's reply was cut off. Tap retry, or ask for one change at a time." }
 }

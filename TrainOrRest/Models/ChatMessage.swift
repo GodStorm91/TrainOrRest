@@ -42,6 +42,7 @@ enum CoachGenerationState: Equatable {
 
 enum CoachErrorCategory: String, Codable {
     case retryableResponse
+    case responseTruncated
     case offline
     case missingAttachment
     case authentication

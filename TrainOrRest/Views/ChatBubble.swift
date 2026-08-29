@@ -815,6 +815,7 @@ private struct CoachInlineFailureCard: View {
         if message.assistantStatus == .retrying { return language.retryingInlineTitle }
         if message.assistantStatus == .reconciling { return language.mutationReconciliationTitle }
         if category == .missingAttachment { return language.missingAttachmentFailureTitle }
+        if category == .responseTruncated { return language.responseTruncatedTitle }
         return language.interruptedFailureTitle
     }
 

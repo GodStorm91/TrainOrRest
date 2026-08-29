@@ -44,9 +44,10 @@ enum CoachChatConfig {
     static let anthropicVersion = "2023-06-01"
     static let historyLimit = 20
     static let maxToolRounds = 5
-    /// Headroom for adaptive thinking plus a structured tool call. Too low and
-    /// the model stops mid-`tool_use`, leaving an input we must never execute.
-    static let maxOutputTokens = 4_096
+    /// Headroom for adaptive thinking plus a structured plan-edit tool call.
+    /// Too low and the model stops mid-`tool_use`, truncating the reply and
+    /// surfacing a spurious failure on plan-adjustment turns.
+    static let maxOutputTokens = 16_384
 }
 
 enum ClaudeClientError: LocalizedError, Equatable {

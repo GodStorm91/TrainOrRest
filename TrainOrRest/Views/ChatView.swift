@@ -961,7 +961,7 @@ struct ChatView: View {
 
     private var visibleOpeningPromptSuggestions: [CoachPromptSuggestion] {
         guard let conversationId = chatSession.activeThreadID else { return [] }
-        let ids = ["latest-run", "weekly-load", "today-workout"]
+        let ids = ["explain-today", "review-workout", "propose-edit"]
         let candidates = zip(ids, language.openingPrompts).map { id, prompt in
             CoachPromptSuggestion(
                 id: "opening-\(id)",
@@ -976,9 +976,9 @@ struct ChatView: View {
     }
 
     private func openingPromptIcon(for id: String) -> String {
-        if id.contains("latest-run") { return "waveform.path.ecg" }
-        if id.contains("weekly-load") { return "chart.line.uptrend.xyaxis" }
-        return "sun.max"
+        if id.contains("review-workout") { return "waveform.path.ecg" }
+        if id.contains("propose-edit") { return "calendar.badge.clock" }
+        return "questionmark.circle"
     }
 
     @ViewBuilder
@@ -1053,7 +1053,7 @@ struct ChatView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(language.addContentLabel)
+            .accessibilityLabel(language.attachEvidenceLabel)
 
             TextField(composerPlaceholder, text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)

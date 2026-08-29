@@ -603,9 +603,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             let response = assembled.response
 
             if response.stopReason == "max_tokens" {
-                throw CoachTools.ValidationError(
-                    "Claude's reply was cut off before the plan edit was complete. Ask again."
-                )
+                throw CoachResponseError.truncated
             }
             if response.stopReason == "refusal" {
                 assistantTurn.text = response.content.textContent.isEmpty ? "Claude declined to answer that." : response.content.textContent
@@ -729,6 +727,8 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         try context.save()
     }
 
+    private enum CoachResponseError: Error { case truncated }
+
     private func markFailure(
         _ error: Error,
         on assistantTurn: ChatMessage,
@@ -777,6 +777,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         if error is CoachRetryUnavailableError {
             return .missingAttachment
         }
+        if error is CoachResponseError { return .responseTruncated }
         guard let clientError = error as? ClaudeClientError else { return .retryableResponse }
         switch clientError {
         case .offline:
@@ -798,6 +799,8 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             return CoachLanguage.current.authenticationFailureMessage
         case .mutationUnknown:
             return CoachLanguage.current.mutationReconciliationMessage
+        case .responseTruncated:
+            return CoachLanguage.current.responseTruncatedMessage
         case .nonRetryable:
             return raw
         }
