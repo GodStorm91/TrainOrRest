@@ -772,4 +772,168 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         case (_, .noAttention): return self == .vi ? "Không có điểm cần xử lý ngay." : self == .ja ? "今すぐ対応が必要な項目はありません。" : "Nothing needs action right now."
         }
     }
+
+    // MARK: - Chat screen chrome
+
+    var backToCalendarLabel: String { self == .vi ? "Quay lại Lịch" : self == .ja ? "カレンダーに戻る" : "Back to Calendar" }
+    var openMenuLabel: String { self == .vi ? "Mở menu" : self == .ja ? "メニューを開く" : "Open menu" }
+    var coachOptionsLabel: String { self == .vi ? "Tùy chọn Coach" : self == .ja ? "Coach のオプション" : "Coach options" }
+    var newConversationLabel: String { self == .vi ? "Cuộc trò chuyện mới" : self == .ja ? "新しい会話" : "New conversation" }
+    var chatHistoryLabel: String { self == .vi ? "Lịch sử trò chuyện" : self == .ja ? "会話履歴" : "Chat history" }
+    var settingsLabel: String { self == .vi ? "Cài đặt" : self == .ja ? "設定" : "Settings" }
+
+    var editingWorkoutStatus: String { self == .vi ? "Đang chỉnh buổi tập" : self == .ja ? "ワークアウトを編集中" : "Editing workout" }
+    var reviewWithCoachStatus: String { self == .vi ? "Xem lại cùng Coach" : self == .ja ? "Coach と振り返り" : "Reviewing with Coach" }
+    func dataUpdatedAt(_ time: String) -> String { self == .vi ? "Dữ liệu cập nhật lúc \(time)" : self == .ja ? "データ更新 \(time)" : "Data updated at \(time)" }
+
+    var viewWorkoutDetailsLabel: String { self == .vi ? "Xem chi tiết buổi tập" : self == .ja ? "ワークアウトの詳細を見る" : "View workout details" }
+    var openWorkoutDetailsLabel: String { self == .vi ? "Mở chi tiết buổi tập" : self == .ja ? "ワークアウトの詳細を開く" : "Open workout details" }
+
+    var viewTodayPlanLabel: String { self == .vi ? "Xem kế hoạch hôm nay" : self == .ja ? "今日のプランを見る" : "View today's plan" }
+
+    func todayReadinessTitle(_ verdict: ReadinessVerdict?) -> String {
+        switch verdict {
+        case .train: return self == .vi ? "Hôm nay: Sẵn sàng tập luyện" : self == .ja ? "今日: トレーニング可能" : "Today: Ready to train"
+        case .goEasy: return self == .vi ? "Hôm nay: Nên tập nhẹ" : self == .ja ? "今日: 軽めに" : "Today: Take it easy"
+        case .rest: return self == .vi ? "Hôm nay: Ưu tiên phục hồi" : self == .ja ? "今日: 回復を優先" : "Today: Prioritize recovery"
+        case .insufficientData: return self == .vi ? "Hôm nay: Đang xây baseline" : self == .ja ? "今日: ベースライン構築中" : "Today: Building baseline"
+        case .none: return self == .vi ? "Hôm nay: Đang cập nhật" : self == .ja ? "今日: 更新中" : "Today: Updating"
+        }
+    }
+    var noReadinessSubtitle: String { self == .vi ? "Chưa có verdict mới nhất từ dữ liệu sức khỏe." : self == .ja ? "健康データからの最新判定はまだありません。" : "No latest verdict from health data yet." }
+    var goodRecoverySubtitle: String { self == .vi ? "Phục hồi tốt · Chưa có dấu hiệu quá tải" : self == .ja ? "回復良好 · 過負荷の兆候なし" : "Good recovery · No overload signs" }
+    var noPlannedWorkoutTodayText: String { self == .vi ? "Không có bài dự kiến hôm nay" : self == .ja ? "今日の予定練習はありません" : "No planned workout today" }
+    var plannedWorkoutPrefix: String { self == .vi ? "Bài dự kiến: " : self == .ja ? "予定: " : "Planned: " }
+
+    var healthDataChipLabel: String { self == .vi ? "Dữ liệu sức khỏe" : self == .ja ? "ヘルスデータ" : "Health data" }
+    var latestWorkoutChipLabel: String { self == .vi ? "Buổi tập gần nhất" : self == .ja ? "最新のワークアウト" : "Latest workout" }
+    var imageChipLabel: String { self == .vi ? "Ảnh" : self == .ja ? "画像" : "Image" }
+    func removeAttachmentLabel(_ title: String) -> String { self == .vi ? "Xóa \(title)" : self == .ja ? "\(title)を削除" : "Remove \(title)" }
+    var attachImageLabel: String { self == .vi ? "Đính kèm hình ảnh" : self == .ja ? "画像を添付" : "Attach image" }
+    var workoutMenuLabel: String { self == .vi ? "Buổi tập" : self == .ja ? "ワークアウト" : "Workout" }
+    var savedQuestionsLabel: String { self == .vi ? "Câu hỏi đã lưu" : self == .ja ? "保存した質問" : "Saved questions" }
+    var openSavedQuestionsLabel: String { self == .vi ? "Mở câu hỏi đã lưu" : self == .ja ? "保存した質問を開く" : "Open saved questions" }
+    var removeImageLabel: String { self == .vi ? "Xóa ảnh" : self == .ja ? "画像を削除" : "Remove image" }
+    var addContentLabel: String { self == .vi ? "Thêm nội dung" : self == .ja ? "コンテンツを追加" : "Add content" }
+    var hideKeyboardLabel: String { self == .vi ? "Ẩn bàn phím" : self == .ja ? "キーボードを閉じる" : "Hide keyboard" }
+    var sendMessageLabel: String { self == .vi ? "Gửi tin nhắn" : self == .ja ? "メッセージを送信" : "Send message" }
+
+    var apiKeyNeededTitle: String { self == .vi ? "Cần API key" : self == .ja ? "APIキーが必要です" : "API key needed" }
+    func apiKeyNeededMessage(provider: String) -> String { self == .vi ? "Thêm API key \(provider) trước khi trò chuyện." : self == .ja ? "チャットの前に\(provider) APIキーを追加してください。" : "Add a \(provider) API key before chatting." }
+    var addApiKeyLabel: String { self == .vi ? "Thêm API key" : self == .ja ? "APIキーを追加" : "Add API key" }
+
+    var openingPrompts: [String] {
+        switch self {
+        case .en: return ["Analyze my latest workout", "How is my training load this week?", "What should I train today?"]
+        case .ja: return ["最近のワークアウトを分析して", "今週のトレーニング負荷はどう？", "今日は何を練習すべき？"]
+        case .vi: return ["Phân tích buổi tập gần nhất", "Tải tập tuần này của tôi thế nào?", "Hôm nay tôi nên tập gì?"]
+        }
+    }
+    var savedPrompts: [String] {
+        switch self {
+        case .en: return ["What should I train today?", "How is my training load this week?", "How can I recover faster?", "Should I add intensity next session?"]
+        case .ja: return ["今日は何を練習すべき？", "今週のトレーニング負荷はどう？", "もっと早く回復するには？", "次回は強度を上げるべき？"]
+        case .vi: return ["Hôm nay tôi nên tập gì?", "Tải tập tuần này của tôi thế nào?", "Làm sao để phục hồi nhanh hơn?", "Buổi sau có nên tăng cường độ không?"]
+        }
+    }
+    var chooseRecentWorkoutPrompt: String { self == .vi ? "Chọn buổi tập gần nhất để Coach phân tích" : self == .ja ? "Coach に分析してもらう最近のワークアウトを選ぶ" : "Choose a recent workout for Coach to analyze" }
+
+    var matchedWorkoutLabel: String { self == .vi ? "BÀI TẬP KHỚP" : self == .ja ? "一致するワークアウト" : "MATCHED WORKOUT" }
+    var noTomorrowWorkoutSuggestion: String { self == .vi ? "Ngày mai chưa có bài trong lịch. Tạo một buổi tập mới cho ngày mai?" : self == .ja ? "明日の予定はまだありません。明日のワークアウトを作成しますか？" : "Nothing scheduled for tomorrow yet. Create a new workout for tomorrow?" }
+    func changeTomorrowDistanceSuggestion(workout: String, distance: String) -> String { self == .vi ? "Đổi buổi training ngày mai (\(workout)) thành \(distance), giữ cùng loại bài nếu an toàn." : self == .ja ? "明日のワークアウト（\(workout)）を\(distance)に変更し、安全なら同じ種類を維持して。" : "Change tomorrow's workout (\(workout)) to \(distance), keeping the same type if safe." }
+    func findTimeTomorrowSuggestion(workout: String) -> String { self == .vi ? "Tìm giờ tốt cho buổi training ngày mai (\(workout))." : self == .ja ? "明日のワークアウト（\(workout)）に良い時間を見つけて。" : "Find a good time for tomorrow's workout (\(workout))." }
+    func moveTomorrowSuggestion(workout: String) -> String { self == .vi ? "Cập nhật lịch cho buổi training ngày mai (\(workout))." : self == .ja ? "明日のワークアウト（\(workout)）の予定を更新して。" : "Update the schedule for tomorrow's workout (\(workout))." }
+    func updateTomorrowSuggestion(workout: String) -> String { self == .vi ? "Ngày mai có \(workout). Anh muốn cập nhật buổi này thế nào?" : self == .ja ? "明日は\(workout)です。どのように更新しますか？" : "Tomorrow has \(workout). How would you like to update it?" }
+
+    func workoutContextLabel(title: String, date: String) -> String { self == .vi ? "Bối cảnh buổi tập: \(title), \(date)" : self == .ja ? "ワークアウトの文脈: \(title)、\(date)" : "Workout context: \(title), \(date)" }
+    func fixedWorkoutContextLabel(title: String) -> String { self == .vi ? "Bối cảnh buổi tập cố định: \(title)" : self == .ja ? "固定のワークアウト文脈: \(title)" : "Fixed workout context: \(title)" }
+
+    var dataSourcesUsedTitle: String { self == .vi ? "Nguồn dữ liệu đã sử dụng" : self == .ja ? "使用したデータソース" : "Data sources used" }
+    var verifiedPlanUpdateLabel: String { self == .vi ? "Đã kiểm tra và cập nhật kế hoạch" : self == .ja ? "計画を確認して更新しました" : "Plan checked and updated" }
+    var viewSourcesLabel: String { self == .vi ? "Xem nguồn dữ liệu" : self == .ja ? "データソースを見る" : "View data sources" }
+    func sourceLineWithTime(_ time: String) -> String { self == .vi ? "Dựa trên dữ liệu lúc \(time) · Xem nguồn" : self == .ja ? "\(time) のデータに基づく · ソースを見る" : "Based on data from \(time) · View sources" }
+    func sourceLineWithCount(_ count: Int) -> String { self == .vi ? "Dựa trên \(count) nguồn dữ liệu · Xem nguồn" : self == .ja ? "\(count) 件のデータソースに基づく · ソースを見る" : "Based on \(count) data sources · View sources" }
+    var checkedDataRowTitle: String { self == .vi ? "Đã kiểm tra dữ liệu" : self == .ja ? "確認済みデータ" : "Checked data" }
+    var noAdditionalSourceDetail: String { self == .vi ? "Không có chi tiết nguồn bổ sung." : self == .ja ? "追加のソース詳細はありません。" : "No additional source details." }
+    var readinessSourceTitle: String { self == .vi ? "Thể trạng hiện tại" : self == .ja ? "現在のコンディション" : "Current readiness" }
+    var planSourceTitle: String { self == .vi ? "Kế hoạch tuần này" : self == .ja ? "今週の計画" : "This week's plan" }
+    var photoSourceTitle: String { self == .vi ? "Ảnh đính kèm" : self == .ja ? "添付写真" : "Attached photo" }
+    var genericSourceTitle: String { self == .vi ? "Nguồn dữ liệu" : self == .ja ? "データソース" : "Data source" }
+    var coachResponseInterruptedLabel: String { self == .vi ? "Phản hồi của Coach bị gián đoạn" : self == .ja ? "Coach の返信が中断されました" : "Coach's response was interrupted" }
+    var cancelRetryAccessibilityLabel: String { self == .vi ? "Hủy thử lại" : self == .ja ? "再試行をキャンセル" : "Cancel retry" }
+    var checkUpdateStatusAccessibilityLabel: String { self == .vi ? "Kiểm tra trạng thái cập nhật" : self == .ja ? "更新状態を確認" : "Check update status" }
+    var dismissResponseErrorAccessibilityLabel: String { self == .vi ? "Bỏ qua lỗi phản hồi" : self == .ja ? "応答エラーを閉じる" : "Dismiss response error" }
+    var retryResponseAccessibilityLabel: String { self == .vi ? "Thử lại phản hồi" : self == .ja ? "応答を再試行" : "Retry response" }
+
+    // MARK: - Chat contextual session, sheets, plan transactions
+
+    var composerTypingPlaceholder: String { self == .vi ? "Nội dung đang nhập…" : self == .ja ? "入力中…" : "Typing…" }
+    var askCoachChangeWorkoutPlaceholder: String { self == .vi ? "Nhờ Coach chỉnh buổi tập này…" : self == .ja ? "この練習の変更を Coach に頼む…" : "Ask Coach to change this workout…" }
+    var askCoachAnythingPlaceholder: String { self == .vi ? "Hỏi Coach bất cứ điều gì…" : self == .ja ? "Coach に何でも質問…" : "Ask Coach anything…" }
+
+    var reviewWorkoutStripLabel: String { self == .vi ? "XEM LẠI BÀI TẬP" : self == .ja ? "練習を振り返る" : "REVIEW WORKOUT" }
+    var editWorkoutStripLabel: String { self == .vi ? "CHỈNH BÀI TẬP" : self == .ja ? "練習を編集" : "EDIT WORKOUT" }
+
+    var reviewRunAgainstTargetPrompt: String { self == .vi ? "Xem lại buổi chạy này so với mục tiêu đã lên kế hoạch." : self == .ja ? "このランを計画目標と比較して振り返って。" : "Review this run against the planned target." }
+    var adjustNextAfterRunPrompt: String { self == .vi ? "Sau buổi chạy này tôi nên điều chỉnh gì tiếp theo?" : self == .ja ? "このラン後、次に何を調整すべき？" : "What should I adjust next after this run?" }
+    var reviewCompletedWorkoutPrompt: String { self == .vi ? "Xem lại buổi tập đã hoàn thành này." : self == .ja ? "この完了した練習を振り返って。" : "Review this completed workout." }
+    var reviewWhyFixedPrompt: String { self == .vi ? "Xem vì sao buổi tập này bị cố định." : self == .ja ? "この練習が固定されている理由を見る。" : "Review why this workout is fixed." }
+    var askSafeAlternativesPrompt: String { self == .vi ? "Hỏi Coach về các lựa chọn an toàn." : self == .ja ? "安全な代替案を Coach に聞く。" : "Ask Coach for safe alternatives." }
+    var changeDistanceOrDurationPrompt: String { self == .vi ? "Đổi cự ly hoặc thời lượng" : self == .ja ? "距離または時間を変更" : "Change distance or duration" }
+    var moveThisWorkoutPrompt: String { self == .vi ? "Dời buổi tập này" : self == .ja ? "この練習を移動" : "Move this workout" }
+
+    var completedRunTitle: String { self == .vi ? "Buổi chạy đã hoàn thành" : self == .ja ? "完了したラン" : "Completed run" }
+    var workoutUnavailableTitle: String { self == .vi ? "Không có buổi tập" : self == .ja ? "ワークアウトを表示できません" : "Workout unavailable" }
+    var distanceLabel: String { self == .vi ? "Cự ly" : self == .ja ? "距離" : "Distance" }
+    var durationLabel: String { self == .vi ? "Thời lượng" : self == .ja ? "時間" : "Duration" }
+    var paceLabel: String { self == .vi ? "Pace" : self == .ja ? "ペース" : "Pace" }
+    var statusLabel: String { self == .vi ? "Trạng thái" : self == .ja ? "状態" : "Status" }
+    var unavailableLabel: String { self == .vi ? "Không có" : self == .ja ? "利用不可" : "Unavailable" }
+
+    var updatingPlanTitle: String { self == .vi ? "Đang cập nhật kế hoạch…" : self == .ja ? "計画を更新中…" : "Updating plan…" }
+    var planErrorMissingTargets: String { self == .vi ? "Kế hoạch còn thiếu thời lượng hoặc pace mục tiêu. Anh có thể để Coach tự đề xuất hoặc nhập thủ công." : self == .ja ? "計画に時間または目標ペースがありません。Coach に提案させるか手動で入力してください。" : "The plan is missing a duration or target pace. Let Coach suggest one, or enter it manually." }
+    var planErrorLoadTooHigh: String { self == .vi ? "Buổi tập mới có thể khiến tải tập tuần này tăng quá nhanh." : self == .ja ? "新しい練習は今週の負荷を急に増やす可能性があります。" : "The new workout could ramp this week's training load too fast." }
+    var planUnchangedMessage: String { self == .vi ? "Kế hoạch hiện tại chưa bị thay đổi." : self == .ja ? "現在の計画は変更されていません。" : "Your current plan is unchanged." }
+    var reviewRunNotFoundError: String { self == .vi ? "Không tìm thấy buổi chạy để review. Thử đồng bộ lại Health rồi mở lại Calendar." : self == .ja ? "レビュー対象のランが見つかりません。Health を再同期してからカレンダーを開き直してください。" : "Couldn't find the run to review. Re-sync Health, then reopen Calendar." }
+
+    var savedPromptsSubtitle: String { self == .vi ? "Chọn một câu, rồi sửa trước khi gửi." : self == .ja ? "1つ選んで、送信前に編集できます。" : "Pick one, then edit before sending." }
+    var closeLabel: String { self == .vi ? "Đóng" : self == .ja ? "閉じる" : "Close" }
+    func insertSavedPromptLabel(_ prompt: String) -> String { self == .vi ? "Chèn câu hỏi đã lưu: \(prompt)" : self == .ja ? "保存した質問を挿入: \(prompt)" : "Insert saved question: \(prompt)" }
+    var noChatsTitle: String { self == .vi ? "Chưa có chat" : self == .ja ? "まだチャットがありません" : "No chats yet" }
+    var noChatsDescription: String { self == .vi ? "Các cuộc trò chuyện với Coach sẽ hiện ở đây." : self == .ja ? "Coach との会話がここに表示されます。" : "Your conversations with Coach will appear here." }
+    var archiveLabel: String { self == .vi ? "Lưu trữ" : self == .ja ? "アーカイブ" : "Archive" }
+    var pinChatLabel: String { self == .vi ? "Ghim chat" : self == .ja ? "チャットをピン留め" : "Pin chat" }
+    var unpinChatLabel: String { self == .vi ? "Bỏ ghim" : self == .ja ? "ピン留めを解除" : "Unpin" }
+    var renameLabel: String { self == .vi ? "Đổi tên" : self == .ja ? "名前を変更" : "Rename" }
+    var pinnedLabel: String { self == .vi ? "Đã ghim" : self == .ja ? "ピン留め済み" : "Pinned" }
+    var chatOptionsLabel: String { self == .vi ? "Tùy chọn chat" : self == .ja ? "チャットのオプション" : "Chat options" }
+    var chatsNavTitle: String { self == .vi ? "Chat" : self == .ja ? "チャット" : "Chats" }
+    var doneLabel: String { self == .vi ? "Xong" : self == .ja ? "完了" : "Done" }
+    var renameChatTitle: String { self == .vi ? "Đổi tên chat" : self == .ja ? "チャットの名前を変更" : "Rename chat" }
+    var chatNamePlaceholder: String { self == .vi ? "Tên chat" : self == .ja ? "チャット名" : "Chat name" }
+    var cancelLabel: String { self == .vi ? "Hủy" : self == .ja ? "キャンセル" : "Cancel" }
+    var saveLabel: String { self == .vi ? "Lưu" : self == .ja ? "保存" : "Save" }
+    var renameChatMessage: String { self == .vi ? "Đặt tên để nhận ra cuộc trò chuyện này sau." : self == .ja ? "後で見分けられるように名前を付けます。" : "Name it so you can recognize this conversation later." }
+    var newChatFallbackTitle: String { self == .vi ? "Chat mới" : self == .ja ? "新しいチャット" : "New chat" }
+
+    var uiLocale: Locale { locale }
+
+    // MARK: - Plan transaction card, review sheet, thread titles
+
+    var planCardUpdatedTitle: String { self == .vi ? "Đã cập nhật kế hoạch" : self == .ja ? "計画を更新しました" : "Plan updated" }
+    var viewInCalendarLabel: String { self == .vi ? "Xem trong lịch" : self == .ja ? "カレンダーで見る" : "View in calendar" }
+    var undoLabel: String { self == .vi ? "Hoàn tác" : self == .ja ? "元に戻す" : "Undo" }
+    var keepOldPlanLabel: String { self == .vi ? "Giữ kế hoạch cũ" : self == .ja ? "元の計画を保持" : "Keep old plan" }
+    var viewTechnicalDetailsLabel: String { self == .vi ? "Xem chi tiết kỹ thuật" : self == .ja ? "技術的な詳細を見る" : "View technical details" }
+    var planFailureCantCreate: String { self == .vi ? "Chưa thể tạo buổi chạy" : self == .ja ? "ランを作成できませんでした" : "Couldn't create the run" }
+    var planFailureNotSuitable: String { self == .vi ? "Thay đổi này chưa phù hợp với kế hoạch hiện tại" : self == .ja ? "この変更は現在の計画にまだ合いません" : "This change doesn't fit the current plan yet" }
+    var planFailureGeneric: String { self == .vi ? "Chưa thể cập nhật kế hoạch lúc này" : self == .ja ? "今は計画を更新できませんでした" : "Couldn't update the plan right now" }
+
+    var useEvidenceAndSendLabel: String { self == .vi ? "Dùng nguồn dữ liệu và gửi" : self == .ja ? "このデータを使って送信" : "Use this data and send" }
+
+    var workoutNoLongerAvailableError: String { self == .vi ? "Buổi tập này không còn khả dụng." : self == .ja ? "このワークアウトは利用できなくなりました。" : "This workout is no longer available." }
+    var reviewTitlePrefix: String { self == .vi ? "Xem lại" : self == .ja ? "振り返り" : "Review" }
+    var editTitlePrefix: String { self == .vi ? "Chỉnh" : self == .ja ? "編集" : "Edit" }
+    func reviewRunThreadTitle(distance: String, date: String) -> String { self == .vi ? "Xem lại buổi chạy \(distance) · \(date)" : self == .ja ? "\(distance) のランを振り返る · \(date)" : "Review \(distance) run · \(date)" }
+    var previousChatTitle: String { self == .vi ? "Cuộc trò chuyện trước" : self == .ja ? "以前のチャット" : "Previous chat" }
 }

@@ -73,6 +73,17 @@ struct CoachChoiceOption: Codable, Equatable, Identifiable {
     var label: String
     var description: String?
     var value: String
+
+    var visibleSelectionText: String {
+        let trimmedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedLabel.isEmpty ? submissionText : trimmedLabel
+    }
+
+    var submissionText: String {
+        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedValue.isEmpty else { return label.trimmingCharacters(in: .whitespacesAndNewlines) }
+        return trimmedValue.isMachineReadableChoiceToken ? label.trimmingCharacters(in: .whitespacesAndNewlines) : trimmedValue
+    }
 }
 
 struct CoachResponseInteraction: Codable, Equatable, Identifiable {
@@ -141,5 +152,17 @@ enum CoachInteractionCodec {
     static func decode(_ json: String?) -> CoachResponseInteraction? {
         guard let json, let data = json.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(CoachResponseInteraction.self, from: data)
+    }
+}
+
+private extension String {
+    var isMachineReadableChoiceToken: Bool {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        guard trimmed.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else { return false }
+        guard trimmed.contains("_") || trimmed.contains("-") else { return false }
+        return trimmed.allSatisfy { character in
+            character.isLowercase || character.isNumber || character == "_" || character == "-"
+        }
     }
 }

@@ -35,6 +35,9 @@ struct ChatBubble: View {
     var onRetry: (ChatMessage) -> Void = { _ in }
     var onDismissFailure: (ChatMessage) -> Void = { _ in }
     var onCancelRetry: (ChatMessage) -> Void = { _ in }
+    var onCheckStatus: () -> Void = {}
+    var onChooseDataAgain: (ChatMessage) -> Void = { _ in }
+    var onCheckConnection: () -> Void = {}
     var actionableInteractionID: String?
     var isSubmittingInteraction = false
     var processingStage: CoachProcessingStage?
@@ -104,7 +107,10 @@ struct ChatBubble: View {
                         language: language,
                         onRetry: { onRetry(message) },
                         onDismiss: { onDismissFailure(message) },
-                        onCancel: { onCancelRetry(message) }
+                        onCancel: { onCancelRetry(message) },
+                        onCheckStatus: onCheckStatus,
+                        onChooseDataAgain: { onChooseDataAgain(message) },
+                        onCheckConnection: onCheckConnection
                     )
                     .padding(.top, hasVisibleAssistantText ? 6 : 0)
                 }
@@ -143,22 +149,14 @@ struct ChatBubble: View {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 UIPasteboard.general.string = displayText
             } label: {
-                Label("Sao chép", systemImage: "doc.on.doc")
+                Label(language.copyLabel, systemImage: "doc.on.doc")
             }
-            .accessibilityLabel("Sao chép")
+            .accessibilityLabel(language.copyLabel)
 
-            if !isUser {
-                Button {} label: { Label("Hữu ích", systemImage: "hand.thumbsup") }
-                    .accessibilityLabel("Hữu ích")
-                Button {} label: { Label("Không hữu ích", systemImage: "hand.thumbsdown") }
-                    .accessibilityLabel("Không hữu ích")
-                Button(role: .destructive) {} label: { Label("Báo lỗi", systemImage: "exclamationmark.bubble") }
-                    .accessibilityLabel("Báo lỗi")
-            }
         }
         .sheet(isPresented: $showsGroundingSummary) {
             ReceiptSheet(
-                title: "Nguồn dữ liệu đã sử dụng",
+                title: language.dataSourcesUsedTitle,
                 subtitle: sourceLine(for: message.groundingFootnote),
                 rows: sourceRows(summary: message.groundingSummary ?? "")
             )
@@ -196,7 +194,7 @@ struct ChatBubble: View {
 
     private func appliedBadge(_ applied: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Label("Đã kiểm tra và cập nhật kế hoạch", systemImage: "checkmark.shield.fill")
+            Label(language.verifiedPlanUpdateLabel, systemImage: "checkmark.shield.fill")
                 .font(.caption.weight(.semibold))
             Text(applied)
                 .font(.caption)
@@ -223,16 +221,16 @@ struct ChatBubble: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Xem nguồn dữ liệu")
+        .accessibilityLabel(language.viewSourcesLabel)
     }
 
     private func sourceLine(for footnote: String?) -> String {
         let footnote = footnote ?? ""
         let sourceCount = max(1, footnote.components(separatedBy: " · ").dropFirst().filter { !$0.isEmpty && $0 != "No evidence" }.count)
         if let time = footnote.components(separatedBy: " · ").first?.replacingOccurrences(of: "Based on ", with: ""), !time.isEmpty {
-            return "Dựa trên dữ liệu lúc \(time) · Xem nguồn"
+            return language.sourceLineWithTime(time)
         }
-        return "Dựa trên \(sourceCount) nguồn dữ liệu · Xem nguồn"
+        return language.sourceLineWithCount(sourceCount)
     }
 
     private func sourceRows(summary: String) -> [ReceiptSheet.Row] {
@@ -241,7 +239,7 @@ struct ChatBubble: View {
             .map(String.init)
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         if lines.isEmpty {
-            return [.check("Đã kiểm tra dữ liệu", value: "Không có chi tiết nguồn bổ sung.")]
+            return [.check(language.checkedDataRowTitle, value: language.noAdditionalSourceDetail)]
         }
         return lines.prefix(6).map { line in
             .check(sourceTitle(for: line), value: line)
@@ -249,11 +247,11 @@ struct ChatBubble: View {
     }
 
     private func sourceTitle(for line: String) -> String {
-        if line.localizedCaseInsensitiveContains("readiness") { return "Thể trạng hiện tại" }
-        if line.localizedCaseInsensitiveContains("plan") { return "Kế hoạch tuần này" }
-        if line.localizedCaseInsensitiveContains("workout") { return "Buổi tập gần nhất" }
-        if line.localizedCaseInsensitiveContains("photo") { return "Ảnh đính kèm" }
-        return "Nguồn dữ liệu"
+        if line.localizedCaseInsensitiveContains("readiness") { return language.readinessSourceTitle }
+        if line.localizedCaseInsensitiveContains("plan") { return language.planSourceTitle }
+        if line.localizedCaseInsensitiveContains("workout") { return language.latestWorkoutChipLabel }
+        if line.localizedCaseInsensitiveContains("photo") { return language.photoSourceTitle }
+        return language.genericSourceTitle
     }
 
     private func announceInlineFailureIfNeeded() {
@@ -811,6 +809,9 @@ private struct CoachInlineFailureCard: View {
     let onRetry: () -> Void
     let onDismiss: () -> Void
     let onCancel: () -> Void
+    let onCheckStatus: () -> Void
+    let onChooseDataAgain: () -> Void
+    let onCheckConnection: () -> Void
 
     private var category: CoachErrorCategory {
         message.errorCategory ?? .retryableResponse
@@ -857,25 +858,25 @@ private struct CoachInlineFailureCard: View {
                         .accessibilityHidden(true)
                     Spacer(minLength: 0)
                     inlineButton(language.cancelRetryLabel, role: .secondary, action: onCancel)
-                        .accessibilityLabel("Hủy thử lại")
+                        .accessibilityLabel(language.cancelRetryAccessibilityLabel)
                 } else if message.assistantStatus == .reconciling || category == .mutationUnknown {
                     Spacer(minLength: 0)
-                    inlineButton(language.checkStatusLabel, role: .primary, action: {})
-                        .accessibilityLabel("Kiểm tra trạng thái cập nhật")
+                    inlineButton(language.checkStatusLabel, role: .primary, action: onCheckStatus)
+                        .accessibilityLabel(language.checkUpdateStatusAccessibilityLabel)
                 } else if category == .missingAttachment {
                     inlineButton(language.dismissInlineErrorLabel, role: .secondary, action: onDismiss)
                     Spacer(minLength: 0)
-                    inlineButton(language.chooseDataAgainLabel, role: .primary, action: {})
+                    inlineButton(language.chooseDataAgainLabel, role: .primary, action: onChooseDataAgain)
                 } else if category == .authentication {
                     inlineButton(language.dismissInlineErrorLabel, role: .secondary, action: onDismiss)
                     Spacer(minLength: 0)
-                    inlineButton(language.checkConnectionLabel, role: .primary, action: {})
+                    inlineButton(language.checkConnectionLabel, role: .primary, action: onCheckConnection)
                 } else {
                     inlineButton(language.dismissInlineErrorLabel, role: .secondary, action: onDismiss)
-                        .accessibilityLabel("Bỏ qua lỗi phản hồi")
+                        .accessibilityLabel(language.dismissResponseErrorAccessibilityLabel)
                     Spacer(minLength: 0)
                     inlineButton(language.retryLabel, role: .primary, action: onRetry)
-                        .accessibilityLabel("Thử lại phản hồi")
+                        .accessibilityLabel(language.retryResponseAccessibilityLabel)
                 }
             }
             .frame(minHeight: 44)
@@ -888,7 +889,7 @@ private struct CoachInlineFailureCard: View {
                 .strokeBorder(accent.opacity(0.28), lineWidth: 1)
         )
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Phản hồi của Coach bị gián đoạn")
+        .accessibilityLabel(language.coachResponseInterruptedLabel)
     }
 
     private func inlineButton(_ title: String, role: ButtonRole, action: @escaping () -> Void) -> some View {

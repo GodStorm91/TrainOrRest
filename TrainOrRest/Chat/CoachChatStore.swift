@@ -368,6 +368,10 @@ final class CoachChatStore: ObservableObject {
         assistantTurn.errorCategory = nil
         assistantTurn.errorMessage = nil
         assistantTurn.activeAttemptID = nil
+        if generationState.messageId == assistantTurn.turnID {
+            generationState = .idle
+        }
+        lastError = nil
         try? context.save()
     }
 

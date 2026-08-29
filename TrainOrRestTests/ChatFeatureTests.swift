@@ -1316,7 +1316,7 @@ final class ChatFeatureTests: XCTestCase {
         let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         store.dismissFailedResponse(failed.turnID, in: context)
 
-        XCTAssertEqual(store.lastError, ClaudeClientError.connectionLost.errorDescription)
+        XCTAssertNil(store.lastError)
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertEqual(messages.map(\.role), [.user, .assistant])
         XCTAssertEqual(messages.first?.text, "Create workout tomorrow.")

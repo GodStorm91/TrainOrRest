@@ -34,6 +34,7 @@ struct ChatView: View {
     @State private var evidenceReview: EvidenceReviewPresentation?
     @State private var isChatListPresented = false
     @State private var isSavedPromptsPresented = false
+    @State private var isProviderSettingsPresented = false
     @State private var isHeaderCollapsed = false
     @State private var softwareKeyboardHeight: CGFloat = 0
     @State private var planTransaction: ChatPlanTransaction?
@@ -127,30 +128,9 @@ struct ChatView: View {
                 .padding(.top, 8)
         }
         .toolbar(.hidden, for: .navigationBar)
-        .task {
-            refreshKeyState()
-            chatStore.resetError()
-            migrateLegacyMessagesIfNeeded()
-            removePersistedTransientErrorMessages()
-            if isContextualSession {
-                createOrResumeContextualThread()
-            } else if reviewRequest == nil {
-                createNewThreadForOpeningIfNeeded()
-            }
-            consumeReviewRequestIfNeeded()
-        }
         .onAppear {
             NotificationCenter.default.post(name: .torSetBottomDockHidden, object: true)
-            refreshKeyState()
-            chatStore.resetError()
-            migrateLegacyMessagesIfNeeded()
-            removePersistedTransientErrorMessages()
-            if isContextualSession {
-                createOrResumeContextualThread()
-            } else if reviewRequest == nil {
-                createNewThreadForOpeningIfNeeded()
-            }
-            consumeReviewRequestIfNeeded()
+            runAppearSetup()
         }
         .onDisappear {
             NotificationCenter.default.post(name: .torSetBottomDockHidden, object: false)
@@ -178,6 +158,7 @@ struct ChatView: View {
         .sheet(item: $evidenceReview) { review in
             GroundingReviewSheet(
                 snapshot: review.snapshot,
+                language: language,
                 requiresConfirmation: review.pendingSend != nil,
                 onCancel: { evidenceReview = nil },
                 onConfirm: {
@@ -191,20 +172,75 @@ struct ChatView: View {
             )
         }
         .sheet(isPresented: $isChatListPresented) {
-            ChatHistorySheet(threads: chatThreads, activeThreadID: chatSession.activeThreadID) { threadID in
+            ChatHistorySheet(threads: chatThreads, activeThreadID: chatSession.activeThreadID, language: language) { threadID in
                 chatSession.activeThreadID = threadID
                 isChatListPresented = false
             }
             .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $isSavedPromptsPresented) {
-            SavedPromptsSheet(prompts: savedPrompts) { prompt in
+            SavedPromptsSheet(prompts: savedPrompts, language: language) { prompt in
                 draft = prompt
                 composerFocused = true
                 isSavedPromptsPresented = false
             }
             .presentationDetents([.height(310), .medium])
         }
+        .sheet(isPresented: $isProviderSettingsPresented) {
+            NavigationStack {
+                CoachProviderSettingsView()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button(language.doneLabel) { isProviderSettingsPresented = false }
+                        }
+                    }
+            }
+        }
+    }
+
+    private func runAppearSetup() {
+        refreshKeyState()
+        chatStore.resetError()
+        migrateLegacyMessagesIfNeeded()
+        removePersistedTransientErrorMessages()
+        if isContextualSession {
+            createOrResumeContextualThread()
+        } else if reviewRequest == nil {
+            createNewThreadForOpeningIfNeeded()
+        }
+        consumeReviewRequestIfNeeded()
+    }
+
+    private func checkMutationStatus() {
+        if isContextualSession {
+            dismiss()
+        } else {
+            onOpenCalendar(nil)
+        }
+    }
+
+    private func chooseDataAgain(_ failedTurn: ChatMessage) {
+        let restoredPrompt = precedingUserPrompt(for: failedTurn)
+        chatStore.dismissFailedResponse(failedTurn.turnID, in: modelContext)
+        evidence = EvidenceSelection()
+        clearImageAttachment()
+        if let restoredPrompt { draft = restoredPrompt }
+        composerFocused = true
+    }
+
+    private func precedingUserPrompt(for assistant: ChatMessage) -> String? {
+        let candidate: ChatMessage?
+        if let parentID = assistant.parentUserTurnID {
+            candidate = allMessages.first { $0.turnID == parentID && $0.role == .user }
+        } else {
+            let ordered = allMessages
+                .filter { $0.threadID == assistant.threadID }
+                .sorted { $0.date < $1.date }
+            candidate = ordered.prefix(while: { $0.turnID != assistant.turnID })
+                .last { $0.role == .user }
+        }
+        let text = candidate?.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (text?.isEmpty ?? true) ? nil : text
     }
 
     private var chatBackground: some View {
@@ -247,7 +283,7 @@ struct ChatView: View {
                     .torTopControlIcon()
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(isContextualSession ? "Quay lại Lịch" : "Mở menu")
+            .accessibilityLabel(isContextualSession ? language.backToCalendarLabel : language.openMenuLabel)
 
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 7) {
@@ -268,21 +304,21 @@ struct ChatView: View {
             Menu {
                 if !isContextualSession {
                     Button { createNewThread() } label: {
-                        Label("Cuộc trò chuyện mới", systemImage: "square.and.pencil")
+                        Label(language.newConversationLabel, systemImage: "square.and.pencil")
                     }
                     Button { isChatListPresented = true } label: {
-                        Label("Lịch sử trò chuyện", systemImage: "clock.arrow.circlepath")
+                        Label(language.chatHistoryLabel, systemImage: "clock.arrow.circlepath")
                     }
                 }
                 NavigationLink { SettingsView() } label: {
-                    Label("Cài đặt", systemImage: "gearshape")
+                    Label(language.settingsLabel, systemImage: "gearshape")
                 }
             } label: {
                 Image(systemName: isHeaderCollapsed ? "ellipsis" : "square.and.pencil")
                     .torTopControlIcon()
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(isContextualSession ? "Tùy chọn Coach" : "Cuộc trò chuyện mới")
+            .accessibilityLabel(isContextualSession ? language.coachOptionsLabel : language.newConversationLabel)
         }
         .frame(height: isHeaderCollapsed ? 44 : 52)
         .padding(.horizontal, 8)
@@ -293,15 +329,15 @@ struct ChatView: View {
 
     private var headerSubtitle: String? {
         if let workout = contextualWorkout {
-            let verb = workout.status == .planned && !workout.isScheduleLocked && workout.kind != .race ? "Đang chỉnh buổi tập" : "Xem lại cùng Coach"
-            return "\(verb) · \(workout.kind?.displayName ?? "Run") · \(workout.date.formatted(.dateTime.month(.abbreviated).day()))"
+            let verb = workout.status == .planned && !workout.isScheduleLocked && workout.kind != .race ? language.editingWorkoutStatus : language.reviewWithCoachStatus
+            return "\(verb) · \(workout.kind?.displayName ?? "Run") · \(workout.date.formatted(.dateTime.month(.abbreviated).day().locale(language.uiLocale)))"
         }
         if let activity = contextualActivity {
             let distance = Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " ", with: "")
-            return "Xem lại cùng Coach · \(distance) · \(activity.date.formatted(.dateTime.month(.abbreviated).day()))"
+            return "\(language.reviewWithCoachStatus) · \(distance) · \(activity.date.formatted(.dateTime.month(.abbreviated).day().locale(language.uiLocale)))"
         }
         if let updated = latestGroundingTimeText {
-            return "Dữ liệu cập nhật lúc \(updated)"
+            return language.dataUpdatedAt(updated)
         }
         return nil
     }
@@ -378,13 +414,13 @@ struct ChatView: View {
                     NavigationLink {
                         WorkoutDetailView(workout: workout)
                     } label: {
-                        Label("View workout details", systemImage: "doc.text.magnifyingglass")
+                        Label(language.viewWorkoutDetailsLabel, systemImage: "doc.text.magnifyingglass")
                             .font(.callout.weight(.semibold))
                             .foregroundStyle(Theme.accent)
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Open workout details")
+                    .accessibilityLabel(language.openWorkoutDetailsLabel)
                 }
             }
         }
@@ -395,7 +431,7 @@ struct ChatView: View {
     private var contextualPromptRows: some View {
         VStack(spacing: 9) {
             ForEach(visibleContextualPromptSuggestions.prefix(2)) { suggestion in
-                ChatPromptButton(suggestion.prompt, systemImage: suggestion.prompt.contains("Move") || suggestion.prompt.contains("lịch") ? "calendar.badge.clock" : "sparkles") {
+                ChatPromptButton(suggestion.prompt, systemImage: suggestion.prompt == language.moveThisWorkoutPrompt ? "calendar.badge.clock" : "sparkles") {
                     submitPromptSuggestion(suggestion)
                 }
             }
@@ -438,9 +474,9 @@ struct ChatView: View {
                 Spacer()
             }
 
-            Button { draft = "Xem kế hoạch hôm nay" } label: {
+            Button { draft = language.viewTodayPlanLabel } label: {
                 HStack(spacing: 8) {
-                    Text("Xem kế hoạch hôm nay")
+                    Text(language.viewTodayPlanLabel)
                         .font(.callout.weight(.semibold))
                     Image(systemName: "chevron.right")
                         .font(.system(size: 12, weight: .bold))
@@ -504,6 +540,9 @@ struct ChatView: View {
                             onCancelRetry: { failedTurn in
                                 chatStore.cancelRetry(failedTurn.turnID, in: modelContext)
                             },
+                            onCheckStatus: { checkMutationStatus() },
+                            onChooseDataAgain: { failed in chooseDataAgain(failed) },
+                            onCheckConnection: { isProviderSettingsPresented = true },
                             actionableInteractionID: newestPendingInteractionID,
                             isSubmittingInteraction: submittingInteractionID == message.interaction?.id,
                             processingStage: processingStage(for: message),
@@ -690,11 +729,11 @@ struct ChatView: View {
 
     private var missingKeyView: some View {
         ContentUnavailableView {
-            Label("API Key Needed", systemImage: "key")
+            Label(language.apiKeyNeededTitle, systemImage: "key")
         } description: {
-            Text("Add a \(CoachModelProvider.displayName(for: model)) API key before chatting.")
+            Text(language.apiKeyNeededMessage(provider: CoachModelProvider.displayName(for: model)))
         } actions: {
-            NavigationLink("Add API key") {
+            NavigationLink(language.addApiKeyLabel) {
                 CoachProviderSettingsView()
             }
             .buttonStyle(.borderedProminent)
@@ -711,6 +750,7 @@ struct ChatView: View {
             if let transaction = planTransaction {
                 PlanTransactionCard(
                     transaction: transaction,
+                    language: language,
                     onViewCalendar: {
                         if isContextualSession {
                             dismiss()
@@ -758,7 +798,7 @@ struct ChatView: View {
             } else if shouldShowDraftRelativeDateSuggestions {
                 CoachAskNextStrip(
                     prompts: draftRelativeDateSuggestions,
-                    label: "MATCHED WORKOUT"
+                    label: language.matchedWorkoutLabel
                 ) { prompt in
                     draft = prompt
                     composerFocused = true
@@ -810,12 +850,19 @@ struct ChatView: View {
     }
 
     private var shouldShowSuggestions: Bool {
-        !hasPendingInteraction && !isContextualSession && !isSoftwareKeyboardVisible && !messages.isEmpty && !chatStore.isSending && !visiblePromptSuggestions.isEmpty
+        !hasPendingInteraction
+            && !hasActiveInlineFailure
+            && !isContextualSession
+            && !isSoftwareKeyboardVisible
+            && !messages.isEmpty
+            && !chatStore.isSending
+            && !visiblePromptSuggestions.isEmpty
     }
 
     private var shouldShowContextualSuggestions: Bool {
         isContextualSession
             && !hasPendingInteraction
+            && !hasActiveInlineFailure
             && !isSoftwareKeyboardVisible
             && !chatStore.isSending
             && !replacementCoordinator.hasPendingDecision
@@ -826,6 +873,7 @@ struct ChatView: View {
 
     private var shouldShowDraftRelativeDateSuggestions: Bool {
         !draftRelativeDateSuggestions.isEmpty
+            && !hasActiveInlineFailure
             && !chatStore.isSending
             && !replacementCoordinator.hasPendingDecision
             && !replacementCoordinator.isConfirming
@@ -836,23 +884,23 @@ struct ChatView: View {
         guard clean.count >= 3, clean.containsTomorrowReference else { return [] }
 
         guard let workout = tomorrowWorkout else {
-            return ["Ngày mai chưa có bài trong lịch. Tạo một buổi tập mới cho ngày mai?"]
+            return [language.noTomorrowWorkoutSuggestion]
         }
 
         let workoutText = "\(workout.kind?.displayName ?? "Workout") · \(kmText(workout.distanceKm))"
         if let requestedKm = clean.requestedDistanceKmText {
-            return ["Đổi buổi training ngày mai (\(workoutText)) thành \(requestedKm), giữ cùng loại bài nếu an toàn."]
+            return [language.changeTomorrowDistanceSuggestion(workout: workoutText, distance: requestedKm)]
         }
 
         if clean.requestsTimeSuggestion {
-            return ["Tìm giờ tốt cho buổi training ngày mai (\(workoutText))."]
+            return [language.findTimeTomorrowSuggestion(workout: workoutText)]
         }
 
         if clean.requestsScheduleMove {
-            return ["Cập nhật lịch cho buổi training ngày mai (\(workoutText))."]
+            return [language.moveTomorrowSuggestion(workout: workoutText)]
         }
 
-        return ["Ngày mai có \(workoutText). Anh muốn cập nhật buổi này thế nào?"]
+        return [language.updateTomorrowSuggestion(workout: workoutText)]
     }
 
     private var newestPendingInteractionID: String? {
@@ -866,6 +914,13 @@ struct ChatView: View {
 
     private var hasPendingInteraction: Bool {
         newestPendingInteractionID != nil
+    }
+
+    private var hasActiveInlineFailure: Bool {
+        messages.contains { message in
+            message.role == .assistant
+                && [.failed, .retrying, .reconciling].contains(message.assistantStatus)
+        }
     }
 
     private func processingStage(for message: ChatMessage) -> CoachProcessingStage? {
@@ -896,7 +951,7 @@ struct ChatView: View {
         let workoutId = contextualWorkoutID ?? contextualCompletedActivityID
         let candidates = contextualSuggestionPrompts.enumerated().map { index, prompt in
             CoachPromptSuggestion(
-                id: "context-\(index)-\(prompt.stableSuggestionID)",
+                id: "context-\(index)",
                 workoutId: workoutId,
                 conversationId: conversationId,
                 title: prompt,
@@ -910,12 +965,8 @@ struct ChatView: View {
 
     private var visibleOpeningPromptSuggestions: [CoachPromptSuggestion] {
         guard let conversationId = chatSession.activeThreadID else { return [] }
-        let prompts = [
-            ("latest-run", "Phân tích buổi tập gần nhất"),
-            ("weekly-load", "Tải tập tuần này của tôi thế nào?"),
-            ("today-workout", "Hôm nay tôi nên tập gì?")
-        ]
-        let candidates = prompts.map { id, prompt in
+        let ids = ["latest-run", "weekly-load", "today-workout"]
+        let candidates = zip(ids, language.openingPrompts).map { id, prompt in
             CoachPromptSuggestion(
                 id: "opening-\(id)",
                 conversationId: conversationId,
@@ -942,13 +993,13 @@ struct ChatView: View {
                     fixedContextChip
                 }
                 if evidence.readinessSnapshot {
-                    removableChip("Dữ liệu sức khỏe", symbol: "heart.fill") { evidence.readinessSnapshot = false }
+                    removableChip(language.healthDataChipLabel, symbol: "heart.fill") { evidence.readinessSnapshot = false }
                 }
                 if evidence.workout != nil {
-                    removableChip("Buổi tập gần nhất", symbol: "figure.run") { evidence.workout = nil }
+                    removableChip(language.latestWorkoutChipLabel, symbol: "figure.run") { evidence.workout = nil }
                 }
                 if selectedImageAttachment != nil {
-                    removableChip("Ảnh", symbol: "photo") { clearImageAttachment() }
+                    removableChip(language.imageChipLabel, symbol: "photo") { clearImageAttachment() }
                 }
             }
             .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -967,7 +1018,7 @@ struct ChatView: View {
                     .frame(width: 22, height: 22)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Xóa \(title)")
+            .accessibilityLabel(language.removeAttachmentLabel(title))
         }
         .foregroundStyle(Theme.text)
         .padding(.leading, 10)
@@ -981,21 +1032,21 @@ struct ChatView: View {
         HStack(alignment: .bottom, spacing: 6) {
             Menu {
                 PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                    Label("Đính kèm hình ảnh", systemImage: "photo")
+                    Label(language.attachImageLabel, systemImage: "photo")
                 }
                 Button { evidence.readinessSnapshot = true } label: {
-                    Label("Dữ liệu sức khỏe", systemImage: "heart")
+                    Label(language.healthDataChipLabel, systemImage: "heart")
                 }
                 Button { attachLatestWorkout() } label: {
-                    Label("Buổi tập", systemImage: "figure.run")
+                    Label(language.workoutMenuLabel, systemImage: "figure.run")
                 }
                 Button { isSavedPromptsPresented = true } label: {
-                    Label("Câu hỏi đã lưu", systemImage: "bookmark")
+                    Label(language.savedQuestionsLabel, systemImage: "bookmark")
                 }
-                .accessibilityLabel("Mở câu hỏi đã lưu")
+                .accessibilityLabel(language.openSavedQuestionsLabel)
                 if selectedImageAttachment != nil {
                     Button(role: .destructive) { clearImageAttachment() } label: {
-                        Label("Xóa ảnh", systemImage: "xmark.circle")
+                        Label(language.removeImageLabel, systemImage: "xmark.circle")
                     }
                 }
             } label: {
@@ -1006,7 +1057,7 @@ struct ChatView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Thêm nội dung")
+            .accessibilityLabel(language.addContentLabel)
 
             TextField(composerPlaceholder, text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -1029,7 +1080,7 @@ struct ChatView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Ẩn bàn phím")
+                .accessibilityLabel(language.hideKeyboardLabel)
             }
 
             Button {
@@ -1050,7 +1101,7 @@ struct ChatView: View {
                 .opacity(isSendDisabled ? 0.45 : 1)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Gửi tin nhắn")
+            .accessibilityLabel(language.sendMessageLabel)
             .disabled(isSendDisabled)
         }
         .padding(.leading, 2)
@@ -1060,14 +1111,7 @@ struct ChatView: View {
     }
 
 
-    private var savedPrompts: [String] {
-        [
-            "Hôm nay tôi nên tập gì?",
-            "Tải tập tuần này của tôi thế nào?",
-            "Làm sao để phục hồi nhanh hơn?",
-            "Buổi sau có nên tăng cường độ không?"
-        ]
-    }
+    private var savedPrompts: [String] { language.savedPrompts }
 
     private func attachLatestWorkout() {
         if let activity = completedActivities.first {
@@ -1075,7 +1119,7 @@ struct ChatView: View {
         } else if let workout = plannedWorkouts.first(where: { $0.date >= calendar.startOfDay(for: .now) }) {
             evidence.workout = .planned(workout.uuid)
         } else {
-            draft = "Chọn buổi tập gần nhất để Coach phân tích"
+            draft = language.chooseRecentWorkoutPrompt
             composerFocused = true
         }
     }
@@ -1132,32 +1176,26 @@ struct ChatView: View {
     }
 
     private var todayReadinessTitle: String {
-        guard let verdict = todayReadiness?.verdict else { return "Hôm nay: Đang cập nhật" }
-        switch verdict {
-        case .train: return "Hôm nay: Sẵn sàng tập luyện"
-        case .goEasy: return "Hôm nay: Nên tập nhẹ"
-        case .rest: return "Hôm nay: Ưu tiên phục hồi"
-        case .insufficientData: return "Hôm nay: Đang xây baseline"
-        }
+        language.todayReadinessTitle(todayReadiness?.verdict)
     }
 
     private var todayReadinessSubtitle: String {
-        guard let readiness = todayReadiness else { return "Chưa có verdict mới nhất từ dữ liệu sức khỏe." }
+        guard let readiness = todayReadiness else { return language.noReadinessSubtitle }
         if readiness.reasons.isEmpty {
-            return readiness.verdict == .train ? "Phục hồi tốt · Chưa có dấu hiệu quá tải" : readiness.verdict.torSubtitle
+            return readiness.verdict == .train ? language.goodRecoverySubtitle : readiness.verdict.torSubtitle
         }
         return Array(readiness.reasons.prefix(2)).joined(separator: " · ")
     }
 
     private var todayPlannedWorkoutText: String {
-        guard let workout = todayWorkout else { return "Không có bài dự kiến hôm nay" }
+        guard let workout = todayWorkout else { return language.noPlannedWorkoutTodayText }
         var parts: [String] = []
         parts.append(workout.kind?.displayName ?? "Run")
         parts.append(kmText(workout.distanceKm))
         if let band = workout.paceBand {
             parts.append(Formatters.paceBand(band).replacingOccurrences(of: " /km", with: "/km"))
         }
-        return "Bài dự kiến: " + parts.joined(separator: " · ")
+        return language.plannedWorkoutPrefix + parts.joined(separator: " · ")
     }
 
     private func kmText(_ km: Double) -> String {
@@ -1304,12 +1342,13 @@ struct ChatView: View {
             in: modelContext
         )
         let pending = PendingCoachSend(
-            text: option.value,
+            text: option.submissionText,
             attachments: currentAttachments,
             evidence: evidence,
             interactionId: interaction.id,
             selectedOptionId: option.id,
-            interactionMessageID: message.turnID
+            interactionMessageID: message.turnID,
+            displayText: option.visibleSelectionText
         )
         Task {
             let didSend = await sendAlreadyReviewed(pending)
@@ -1333,7 +1372,7 @@ struct ChatView: View {
     }
 
     private func applyReplacement(_ pending: PendingWorkoutReplacement) {
-        planTransaction = .applying(title: "Đang cập nhật kế hoạch…")
+        planTransaction = .applying(title: language.updatingPlanTitle)
         replacementCoordinator.confirm(pending.id)
         if let error = replacementCoordinator.lastError {
             planTransaction = .failure(userMessage: userFacingPlanError(error), technicalDetails: error, retry: .replacement(pending))
@@ -1345,7 +1384,7 @@ struct ChatView: View {
     }
 
     private func applyProposal(_ pending: PendingPlanProposal) {
-        planTransaction = .applying(title: "Đang cập nhật kế hoạch…")
+        planTransaction = .applying(title: language.updatingPlanTitle)
         replacementCoordinator.confirmProposal(pending.id)
         if let error = replacementCoordinator.lastError {
             planTransaction = .failure(userMessage: userFacingPlanError(error), technicalDetails: error, retry: .proposal(pending))
@@ -1371,12 +1410,12 @@ struct ChatView: View {
     private func userFacingPlanError(_ error: String) -> String {
         let lower = error.lowercased()
         if lower.contains("missing") || lower.contains("couldn't be read") || lower.contains("duration") || lower.contains("pace") {
-            return "Kế hoạch còn thiếu thời lượng hoặc pace mục tiêu. Anh có thể để Coach tự đề xuất hoặc nhập thủ công."
+            return language.planErrorMissingTargets
         }
         if lower.contains("load") || lower.contains("volume") || lower.contains("ramp") || lower.contains("safe") {
-            return "Buổi tập mới có thể khiến tải tập tuần này tăng quá nhanh."
+            return language.planErrorLoadTooHigh
         }
-        return "Kế hoạch hiện tại chưa bị thay đổi."
+        return language.planUnchangedMessage
     }
 
     private func presentEvidenceReview(confirming pending: PendingCoachSend?) {
@@ -1414,7 +1453,7 @@ struct ChatView: View {
 
     private func createOrResumeContextualThread() {
         guard let snapshot = currentWorkoutCoachContext else {
-            chatStore.presentError("This workout is no longer available.")
+            chatStore.presentError(language.workoutNoLongerAvailableError)
             return
         }
 
@@ -1460,8 +1499,8 @@ struct ChatView: View {
     }
 
     private func contextualThreadTitle(for snapshot: WorkoutCoachContext) -> String {
-        let date = snapshot.calendarDate.formatted(.dateTime.month(.abbreviated).day())
-        let prefix = snapshot.workoutStatus == .completed ? "Review" : "Edit"
+        let date = snapshot.calendarDate.formatted(.dateTime.month(.abbreviated).day().locale(language.uiLocale))
+        let prefix = snapshot.workoutStatus == .completed ? language.reviewTitlePrefix : language.editTitlePrefix
         return "\(prefix) \(snapshot.workoutTitle) · \(date)"
     }
 
@@ -1498,7 +1537,7 @@ struct ChatView: View {
             return
         }
         guard let activity = completedActivities.first(where: { $0.hkUUID == activityUUID }) else {
-            chatStore.presentError("Không tìm thấy buổi chạy để review. Thử đồng bộ lại Health rồi mở lại Calendar.")
+            chatStore.presentError(language.reviewRunNotFoundError)
             onReviewRequestConsumed(request)
             return
         }
@@ -1525,8 +1564,8 @@ struct ChatView: View {
 
     private func reviewThreadTitle(for activity: CompletedActivity) -> String {
         let distance = Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " ", with: "")
-        let date = activity.date.formatted(.dateTime.month(.abbreviated).day())
-        return "Review \(distance) run · \(date)"
+        let date = activity.date.formatted(.dateTime.month(.abbreviated).day().locale(language.uiLocale))
+        return language.reviewRunThreadTitle(distance: distance, date: date)
     }
 
     private func existingReviewThread(for activity: CompletedActivity) -> ChatThread? {
@@ -1545,8 +1584,8 @@ struct ChatView: View {
     }
 
     @discardableResult
-    private func createNewThread(title: String = "New chat", reviewActivityUUID: UUID? = nil) -> UUID {
-        let thread = ChatThread(title: title, reviewActivityUUID: reviewActivityUUID)
+    private func createNewThread(title: String? = nil, reviewActivityUUID: UUID? = nil) -> UUID {
+        let thread = ChatThread(title: title ?? language.newChatFallbackTitle, reviewActivityUUID: reviewActivityUUID)
         modelContext.insert(thread)
         chatSession.activeThreadID = thread.uuid
         draft = ""
@@ -1572,7 +1611,7 @@ struct ChatView: View {
         let legacyMessages = allMessages.filter { $0.threadID == nil }
         guard !legacyMessages.isEmpty else { return }
         let thread = ChatThread(
-            title: "Previous chat",
+            title: language.previousChatTitle,
             createdAt: legacyMessages.first?.date ?? .now,
             updatedAt: legacyMessages.last?.date ?? .now
         )
@@ -1697,63 +1736,63 @@ struct ChatView: View {
             return pendingOtherResponse.placeholder
         }
         if isContextualSession {
-            return isSoftwareKeyboardVisible ? "Nội dung đang nhập…" : "Ask Coach to change this workout…"
+            return isSoftwareKeyboardVisible ? language.composerTypingPlaceholder : language.askCoachChangeWorkoutPlaceholder
         }
-        return isSoftwareKeyboardVisible ? "Nội dung đang nhập…" : "Hỏi Coach bất cứ điều gì…"
+        return isSoftwareKeyboardVisible ? language.composerTypingPlaceholder : language.askCoachAnythingPlaceholder
     }
 
     private var contextualSuggestionLabel: String {
-        contextualWorkout?.status == .done || contextualActivity != nil ? "REVIEW WORKOUT" : "EDIT WORKOUT"
+        contextualWorkout?.status == .done || contextualActivity != nil ? language.reviewWorkoutStripLabel : language.editWorkoutStripLabel
     }
 
     private var contextualSuggestionPrompts: [String] {
         if contextualActivity != nil {
             return [
-                "Review this run against the planned target.",
-                "What should I adjust next after this run?"
+                language.reviewRunAgainstTargetPrompt,
+                language.adjustNextAfterRunPrompt
             ]
         }
         guard let workout = contextualWorkout else { return [] }
         if workout.status == .done {
             return [
-                "Review this completed workout.",
-                "What should I adjust next after this run?"
+                language.reviewCompletedWorkoutPrompt,
+                language.adjustNextAfterRunPrompt
             ]
         }
         if workout.isScheduleLocked || workout.kind == .race {
             return [
-                "Review why this workout is fixed.",
-                "Ask Coach for safe alternatives."
+                language.reviewWhyFixedPrompt,
+                language.askSafeAlternativesPrompt
             ]
         }
         return [
-            "Change distance or duration",
-            "Move this workout"
+            language.changeDistanceOrDurationPrompt,
+            language.moveThisWorkoutPrompt
         ]
     }
 
     private var contextualEyebrow: String {
-        if contextualActivity != nil { return "Review with Coach" }
-        if contextualWorkout?.status == .done || contextualWorkout?.isScheduleLocked == true || contextualWorkout?.kind == .race { return "Review with Coach" }
-        return "Editing workout"
+        if contextualActivity != nil { return language.reviewWithCoachStatus }
+        if contextualWorkout?.status == .done || contextualWorkout?.isScheduleLocked == true || contextualWorkout?.kind == .race { return language.reviewWithCoachStatus }
+        return language.editingWorkoutStatus
     }
 
     private var contextualTitle: String {
         if let workout = contextualWorkout { return workout.kind?.displayName ?? "Run" }
         if let activity = contextualActivity {
-            return Formatters.kilometers(activity.distanceMeters).isEmpty ? "Completed run" : "Completed run"
+            return language.completedRunTitle
         }
-        return "Workout unavailable"
+        return language.workoutUnavailableTitle
     }
 
     private var contextualDateText: String {
         if let workout = contextualWorkout {
-            return workout.date.formatted(.dateTime.weekday(.wide).month(.wide).day())
+            return workout.date.formatted(.dateTime.weekday(.wide).month(.wide).day().locale(language.uiLocale))
         }
         if let activity = contextualActivity {
-            return activity.date.formatted(.dateTime.weekday(.wide).month(.wide).day())
+            return activity.date.formatted(.dateTime.weekday(.wide).month(.wide).day().locale(language.uiLocale))
         }
-        return "Return to Calendar"
+        return language.backToCalendarLabel
     }
 
     private var contextualSymbolName: String {
@@ -1762,23 +1801,23 @@ struct ChatView: View {
 
     private var contextualMetricPairs: [(String, String)] {
         if let workout = contextualWorkout {
-            var pairs = [("Distance", Formatters.kilometers(workout.distanceKm * 1000))]
+            var pairs = [(language.distanceLabel, Formatters.kilometers(workout.distanceKm * 1000))]
             if let duration = workout.expectedDurationSeconds {
-                pairs.append(("Duration", Formatters.duration(duration)))
+                pairs.append((language.durationLabel, Formatters.duration(duration)))
             }
             if let pace = workout.paceBand {
-                pairs.append(("Pace", Formatters.paceBand(pace)))
+                pairs.append((language.paceLabel, Formatters.paceBand(pace)))
             }
             return pairs
         }
         if let activity = contextualActivity {
             return [
-                ("Distance", Formatters.kilometers(activity.distanceMeters)),
-                ("Duration", Formatters.duration(activity.durationSeconds)),
-                ("Pace", Formatters.pace(activity.avgPaceSecondsPerKm))
+                (language.distanceLabel, Formatters.kilometers(activity.distanceMeters)),
+                (language.durationLabel, Formatters.duration(activity.durationSeconds)),
+                (language.paceLabel, Formatters.pace(activity.avgPaceSecondsPerKm))
             ]
         }
-        return [("Status", "Unavailable")]
+        return [(language.statusLabel, language.unavailableLabel)]
     }
 
     private var contextualAccessibilityLabel: String {
@@ -1799,7 +1838,7 @@ struct ChatView: View {
         .padding(.horizontal, 10)
         .frame(minHeight: 34)
         .background(Theme.accentSoft, in: Capsule())
-        .accessibilityLabel("Workout context: \(contextualTitle), \(contextualDateText)")
+        .accessibilityLabel(language.workoutContextLabel(title: contextualTitle, date: contextualDateText))
     }
 
     private var fixedContextChip: some View {
@@ -1818,7 +1857,7 @@ struct ChatView: View {
         .frame(minHeight: 34)
         .background(Theme.chip, in: Capsule())
         .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
-        .accessibilityLabel("Fixed workout context: \(contextualTitle)")
+        .accessibilityLabel(language.fixedWorkoutContextLabel(title: contextualTitle))
     }
 
     private var currentAttachments: [CoachContextAttachment] {
@@ -1956,6 +1995,7 @@ private extension Notification.Name {
 
 private struct SavedPromptsSheet: View {
     let prompts: [String]
+    let language: CoachLanguage
     let onSelect: (String) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -1968,10 +2008,10 @@ private struct SavedPromptsSheet: View {
                     .frame(width: 30, height: 30)
                     .background(Theme.accentSoft, in: Circle())
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Câu hỏi đã lưu")
+                    Text(language.savedQuestionsLabel)
                         .font(.torHeading(20, .bold))
                         .foregroundStyle(Theme.text)
-                    Text("Chọn một câu, rồi sửa trước khi gửi.")
+                    Text(language.savedPromptsSubtitle)
                         .font(.caption)
                         .foregroundStyle(Theme.dim)
                 }
@@ -1984,7 +2024,7 @@ private struct SavedPromptsSheet: View {
                         .background(Theme.chip, in: Circle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Đóng")
+                .accessibilityLabel(language.closeLabel)
             }
 
             VStack(spacing: 8) {
@@ -2014,7 +2054,7 @@ private struct SavedPromptsSheet: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Chèn câu hỏi đã lưu: \(prompt)")
+                    .accessibilityLabel(language.insertSavedPromptLabel(prompt))
                 }
             }
             Spacer(minLength: 0)
@@ -2028,6 +2068,7 @@ private struct SavedPromptsSheet: View {
 private struct ChatHistorySheet: View {
     let threads: [ChatThread]
     let activeThreadID: UUID?
+    let language: CoachLanguage
     let onSelect: (UUID) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -2052,9 +2093,9 @@ private struct ChatHistorySheet: View {
             List {
                 if visibleThreads.isEmpty {
                     ContentUnavailableView(
-                        "Chưa có chat",
+                        language.noChatsTitle,
                         systemImage: "message",
-                        description: Text("Các cuộc trò chuyện với Coach sẽ hiện ở đây.")
+                        description: Text(language.noChatsDescription)
                     )
                     .foregroundStyle(Theme.text, Theme.dim)
                     .frame(maxWidth: .infinity, minHeight: 220)
@@ -2070,7 +2111,7 @@ private struct ChatHistorySheet: View {
                                 Button(role: .destructive) {
                                     archive(thread)
                                 } label: {
-                                    Label("Archive", systemImage: "archivebox")
+                                    Label(language.archiveLabel, systemImage: "archivebox")
                                 }
                                 .tint(Theme.warn)
                             }
@@ -2078,17 +2119,17 @@ private struct ChatHistorySheet: View {
                                 Button {
                                     togglePin(thread)
                                 } label: {
-                                    Label(thread.pinnedAt == nil ? "Ghim chat" : "Bỏ ghim", systemImage: thread.pinnedAt == nil ? "pin" : "pin.slash")
+                                    Label(thread.pinnedAt == nil ? language.pinChatLabel : language.unpinChatLabel, systemImage: thread.pinnedAt == nil ? "pin" : "pin.slash")
                                 }
                                 Button {
                                     beginRename(thread)
                                 } label: {
-                                    Label("Đổi tên", systemImage: "pencil")
+                                    Label(language.renameLabel, systemImage: "pencil")
                                 }
                                 Button(role: .destructive) {
                                     archive(thread)
                                 } label: {
-                                    Label("Lưu trữ", systemImage: "archivebox")
+                                    Label(language.archiveLabel, systemImage: "archivebox")
                                 }
                             }
                     }
@@ -2097,19 +2138,19 @@ private struct ChatHistorySheet: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle("Chats")
+            .navigationTitle(language.chatsNavTitle)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                    Button(language.doneLabel) { dismiss() }
                         .font(.body.weight(.semibold))
                 }
             }
-            .alert("Đổi tên chat", isPresented: renameAlertBinding) {
-                TextField("Tên chat", text: $renameDraft)
-                Button("Hủy", role: .cancel) { clearRenameDraft() }
-                Button("Lưu") { saveRename() }
+            .alert(language.renameChatTitle, isPresented: renameAlertBinding) {
+                TextField(language.chatNamePlaceholder, text: $renameDraft)
+                Button(language.cancelLabel, role: .cancel) { clearRenameDraft() }
+                Button(language.saveLabel) { saveRename() }
             } message: {
-                Text("Đặt tên để nhận ra cuộc trò chuyện này sau.")
+                Text(language.renameChatMessage)
             }
         }
         .presentationBackground(Theme.bg)
@@ -2135,7 +2176,7 @@ private struct ChatHistorySheet: View {
                                 Image(systemName: "pin.fill")
                                     .font(.caption2.weight(.bold))
                                     .foregroundStyle(Theme.accent)
-                                    .accessibilityLabel("Đã ghim")
+                                    .accessibilityLabel(language.pinnedLabel)
                             }
                             Text(title(for: thread))
                                 .font(.body.weight(.semibold))
@@ -2166,17 +2207,17 @@ private struct ChatHistorySheet: View {
                 Button {
                     togglePin(thread)
                 } label: {
-                    Label(thread.pinnedAt == nil ? "Ghim chat" : "Bỏ ghim", systemImage: thread.pinnedAt == nil ? "pin" : "pin.slash")
+                    Label(thread.pinnedAt == nil ? language.pinChatLabel : language.unpinChatLabel, systemImage: thread.pinnedAt == nil ? "pin" : "pin.slash")
                 }
                 Button {
                     beginRename(thread)
                 } label: {
-                    Label("Đổi tên", systemImage: "pencil")
+                    Label(language.renameLabel, systemImage: "pencil")
                 }
                 Button(role: .destructive) {
                     archive(thread)
                 } label: {
-                    Label("Lưu trữ", systemImage: "archivebox")
+                    Label(language.archiveLabel, systemImage: "archivebox")
                 }
             } label: {
                 Image(systemName: "ellipsis")
@@ -2185,7 +2226,7 @@ private struct ChatHistorySheet: View {
                     .frame(width: 36, height: 36)
                     .background(Theme.chip, in: Circle())
             }
-            .accessibilityLabel("Tùy chọn chat")
+            .accessibilityLabel(language.chatOptionsLabel)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2228,7 +2269,7 @@ private struct ChatHistorySheet: View {
     private func saveRename() {
         guard let thread = threadBeingRenamed else { return }
         let clean = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        thread.title = clean.isEmpty ? "New chat" : clean
+        thread.title = clean.isEmpty ? language.newChatFallbackTitle : clean
         thread.updatedAt = .now
         try? modelContext.save()
         clearRenameDraft()
@@ -2241,12 +2282,13 @@ private struct ChatHistorySheet: View {
 
     private func title(for thread: ChatThread) -> String {
         let clean = thread.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return clean.isEmpty ? "New chat" : clean
+        return clean.isEmpty ? language.newChatFallbackTitle : clean
     }
 
     private func relativeDate(for date: Date) -> String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
+        formatter.locale = language.uiLocale
         return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
@@ -2364,6 +2406,7 @@ private extension String {
 
 private struct PlanTransactionCard: View {
     let transaction: ChatPlanTransaction
+    let language: CoachLanguage
     let onViewCalendar: () -> Void
     let onUndo: () -> Void
     let onRetry: () -> Void
@@ -2384,25 +2427,25 @@ private struct PlanTransactionCard: View {
                     }
                     .frame(maxWidth: .infinity, minHeight: 86, alignment: .leading)
                 case .success(let summary, let date, let undo):
-                    Label("Đã cập nhật kế hoạch", systemImage: "checkmark.circle.fill")
+                    Label(language.planCardUpdatedTitle, systemImage: "checkmark.circle.fill")
                         .font(.torHeading(15, .bold))
                         .foregroundStyle(Theme.good)
                     Text(summary.replacingOccurrences(of: "Applied: ", with: ""))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.text)
                     if let date {
-                        Text(date.formatted(.dateTime.weekday(.wide).day().month(.wide)))
+                        Text(date.formatted(.dateTime.weekday(.wide).day().month(.wide).locale(language.uiLocale)))
                             .font(.footnote.weight(.medium))
                             .foregroundStyle(Theme.dim)
                     }
                     HStack(spacing: 8) {
-                        transactionButton("Xem trong lịch", systemImage: "calendar", prominent: true, action: onViewCalendar)
+                        transactionButton(language.viewInCalendarLabel, systemImage: "calendar", prominent: true, action: onViewCalendar)
                         if undo == .safe {
-                            transactionButton("Hoàn tác", systemImage: "arrow.uturn.backward", prominent: false, action: onUndo)
+                            transactionButton(language.undoLabel, systemImage: "arrow.uturn.backward", prominent: false, action: onUndo)
                         }
                     }
                 case .failure(let userMessage, let technicalDetails, _):
-                    Label(failureTitle(for: userMessage), systemImage: "exclamationmark.triangle.fill")
+                    Label(failureTitle(for: technicalDetails), systemImage: "exclamationmark.triangle.fill")
                         .font(.torHeading(15, .bold))
                         .foregroundStyle(Theme.warn)
                     Text(userMessage)
@@ -2410,10 +2453,10 @@ private struct PlanTransactionCard: View {
                         .foregroundStyle(Theme.text)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 8) {
-                        transactionButton("Thử lại", systemImage: "arrow.clockwise", prominent: true, action: onRetry)
-                        transactionButton("Giữ kế hoạch cũ", systemImage: "xmark", prominent: false, action: onDismiss)
+                        transactionButton(language.retryLabel, systemImage: "arrow.clockwise", prominent: true, action: onRetry)
+                        transactionButton(language.keepOldPlanLabel, systemImage: "xmark", prominent: false, action: onDismiss)
                     }
-                    DisclosureGroup("Xem chi tiết kỹ thuật", isExpanded: $showsTechnicalDetails) {
+                    DisclosureGroup(language.viewTechnicalDetailsLabel, isExpanded: $showsTechnicalDetails) {
                         Text(technicalDetails)
                             .font(.caption.monospaced())
                             .foregroundStyle(Theme.faint)
@@ -2430,10 +2473,11 @@ private struct PlanTransactionCard: View {
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.accent.opacity(0.35), lineWidth: 1))
     }
 
-    private func failureTitle(for message: String) -> String {
-        if message.contains("thiếu") { return "Chưa thể tạo buổi chạy" }
-        if message.contains("tải tập") { return "Thay đổi này chưa phù hợp với kế hoạch hiện tại" }
-        return "Chưa thể cập nhật kế hoạch lúc này"
+    private func failureTitle(for technical: String) -> String {
+        let lower = technical.lowercased()
+        if lower.contains("missing") || lower.contains("couldn't be read") || lower.contains("duration") || lower.contains("pace") { return language.planFailureCantCreate }
+        if lower.contains("load") || lower.contains("volume") || lower.contains("ramp") || lower.contains("safe") { return language.planFailureNotSuitable }
+        return language.planFailureGeneric
     }
 
     private func transactionButton(_ title: String, systemImage: String, prominent: Bool, action: @escaping () -> Void) -> some View {
@@ -2488,6 +2532,7 @@ private extension ChatThread {
 
 private struct GroundingReviewSheet: View {
     let snapshot: GroundingSnapshot
+    let language: CoachLanguage
     let requiresConfirmation: Bool
     let onCancel: () -> Void
     let onConfirm: () -> Void
@@ -2497,7 +2542,7 @@ private struct GroundingReviewSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Nguồn dữ liệu đã sử dụng")
+                        Text(language.dataSourcesUsedTitle)
                             .font(.system(.title2, design: .rounded).weight(.semibold))
                             .foregroundStyle(Theme.text)
                         Text(snapshot.footnoteLine)
@@ -2516,7 +2561,7 @@ private struct GroundingReviewSheet: View {
 
                     if requiresConfirmation {
                         Button(action: onConfirm) {
-                            Label("Dùng nguồn dữ liệu và gửi", systemImage: "paperplane.fill")
+                            Label(language.useEvidenceAndSendLabel, systemImage: "paperplane.fill")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
@@ -2530,12 +2575,12 @@ private struct GroundingReviewSheet: View {
             .toolbar {
                 if requiresConfirmation {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Hủy", action: onCancel)
+                        Button(language.cancelLabel, action: onCancel)
                     }
                 }
                 if !requiresConfirmation {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Xong", action: onConfirm)
+                        Button(language.doneLabel, action: onConfirm)
                     }
                 }
             }

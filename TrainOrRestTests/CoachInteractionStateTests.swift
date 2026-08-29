@@ -242,6 +242,30 @@ final class CoachInteractionStateTests: XCTestCase {
         XCTAssertTrue(client.requests.last?.messages.last?.content.textContent.contains("optionId=adjust_plan") == true)
     }
 
+    func testMachineReadableOptionValueUsesHumanLabelForSubmissionFallback() {
+        let option = CoachChoiceOption(
+            id: "reschedule_key_workouts",
+            label: "Yêu cầu điều chỉnh lịch tập trọng điểm",
+            description: "Coach lên kế hoạch lại các buổi quan trọng",
+            value: "reschedule_key_workouts"
+        )
+
+        XCTAssertEqual(option.visibleSelectionText, "Yêu cầu điều chỉnh lịch tập trọng điểm")
+        XCTAssertEqual(option.submissionText, "Yêu cầu điều chỉnh lịch tập trọng điểm")
+    }
+
+    func testNaturalLanguageOptionValueIsPreservedForCoachSubmission() {
+        let option = CoachChoiceOption(
+            id: "adjust_plan",
+            label: "Xem đề xuất điều chỉnh",
+            description: nil,
+            value: "Hãy đề xuất cách điều chỉnh các buổi tập tiếp theo."
+        )
+
+        XCTAssertEqual(option.visibleSelectionText, "Xem đề xuất điều chỉnh")
+        XCTAssertEqual(option.submissionText, "Hãy đề xuất cách điều chỉnh các buổi tập tiếp theo.")
+    }
+
     func testSelectingOptionCollapsesInteraction() throws {
         let container = try makeContainer()
         let context = container.mainContext
