@@ -597,13 +597,12 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
                 }
             )
             let assembled = try await assembler.assemble(events)
+            let response = assembled.response
+            if assembled.truncated || response.stopReason == "max_tokens" {
+                throw CoachResponseError.truncated
+            }
             if let error = assembled.error {
                 throw CoachTools.ValidationError(error)
-            }
-            let response = assembled.response
-
-            if response.stopReason == "max_tokens" {
-                throw CoachResponseError.truncated
             }
             if response.stopReason == "refusal" {
                 assistantTurn.text = response.content.textContent.isEmpty ? "Claude declined to answer that." : response.content.textContent

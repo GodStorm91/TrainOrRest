@@ -101,6 +101,19 @@ final class CoachStreamAssemblerTests: XCTestCase {
         XCTAssertEqual(assembled.response.stopReason, "max_tokens")
     }
 
+    func testUnclosedToolBlockAtStreamEndReportsTruncationNotError() async throws {
+        let assembled = try await CoachStreamAssembler().assemble(stream([
+            .messageStart,
+            .contentBlockStart(index: 0, kind: .toolUse(id: "toolu_1", name: "propose_plan_adjustment")),
+            .inputJSONDelta(index: 0, #"{"changes":[{"date":"2026-07-11","#),
+            .messageDelta(stopReason: "max_tokens"),
+            .messageStop
+        ]))
+
+        XCTAssertTrue(assembled.truncated)
+        XCTAssertNil(assembled.error)
+    }
+
     private func stream(_ events: [AnthropicStreamEvent]) -> AsyncThrowingStream<AnthropicStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             for event in events {

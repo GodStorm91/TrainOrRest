@@ -3,6 +3,7 @@ import Foundation
 struct AssembledResponse {
     var response: ClaudeResponse
     var error: String?
+    var truncated: Bool = false
 }
 
 struct CoachStreamAssembler {
@@ -28,6 +29,7 @@ struct CoachStreamAssembler {
         var openBlocks: [Int: OpenBlock] = [:]
         var stopReason: String?
         var streamError: String?
+        var truncated = false
 
         for try await event in events {
             switch event {
@@ -106,7 +108,7 @@ struct CoachStreamAssembler {
                         blocks[index] = .text(textBlock.text)
                     }
                 case .tool:
-                    streamError = "Claude's reply was cut off before the tool result finished. Ask again."
+                    truncated = true
                 }
             }
         }
@@ -115,6 +117,6 @@ struct CoachStreamAssembler {
             content: blocks.keys.sorted().compactMap { blocks[$0] },
             stopReason: stopReason
         )
-        return AssembledResponse(response: response, error: streamError)
+        return AssembledResponse(response: response, error: streamError, truncated: truncated)
     }
 }
