@@ -142,6 +142,22 @@ struct CoachStructuredResponsePayload: Codable, Equatable {
     var interaction: CoachResponseInteraction?
 }
 
+extension CoachStructuredResponsePayload {
+    // The model authors this tool payload, so treat it as untrusted at the
+    // decode boundary. A coach_response can legitimately carry only an
+    // interaction with no prose, and a partially-formed interaction should
+    // degrade to the snapshot fallback rather than fail the whole turn.
+    init(from decoder: Decoder) throws {
+        if let container = try? decoder.container(keyedBy: CodingKeys.self) {
+            content = ((try? container.decodeIfPresent(String.self, forKey: .content)) ?? nil) ?? ""
+            interaction = ((try? container.decodeIfPresent(CoachResponseInteraction.self, forKey: .interaction)) ?? nil)
+        } else {
+            content = ""
+            interaction = nil
+        }
+    }
+}
+
 enum CoachInteractionCodec {
     static func encode(_ interaction: CoachResponseInteraction?) -> String? {
         guard let interaction,

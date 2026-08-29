@@ -2,6 +2,10 @@ import SwiftData
 import XCTest
 @testable import TrainOrRest
 
+private struct RequiresField: Decodable {
+    let name: String
+}
+
 @MainActor
 final class ChatFeatureTests: XCTestCase {
     private let calendar = PlanEngineTestSupport.calendar
@@ -1337,6 +1341,65 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(failed.assistantStatus, .failed)
         XCTAssertEqual(failed.errorCategory, .responseTruncated)
         XCTAssertEqual(failed.errorMessage, CoachLanguage.en.responseTruncatedMessage)
+    }
+
+    func testCoachResponsePayloadDecodesWithoutContent() throws {
+        let json = Data("""
+        {"interaction":{"id":"next_step","type":"single_choice","options":[{"id":"a","label":"A","value":"A"},{"id":"b","label":"B","value":"B"}],"allowOther":false,"status":"pending"}}
+        """.utf8)
+        let payload = try JSONDecoder().decode(CoachStructuredResponsePayload.self, from: json)
+        XCTAssertEqual(payload.content, "")
+        XCTAssertEqual(payload.interaction?.options.map(\.id), ["a", "b"])
+    }
+
+    func testCoachResponsePayloadDefaultsWhenNotAnObject() throws {
+        let payload = try JSONDecoder().decode(CoachStructuredResponsePayload.self, from: Data("\"oops\"".utf8))
+        XCTAssertEqual(payload.content, "")
+        XCTAssertNil(payload.interaction)
+    }
+
+    func testDecodingErrorCoachDetailNamesMissingKey() {
+        let json = Data("{}".utf8)
+        do {
+            _ = try JSONDecoder().decode(RequiresField.self, from: json)
+            XCTFail("Expected decode to throw")
+        } catch let error as DecodingError {
+            XCTAssertTrue(error.coachDetail.contains("field"))
+            XCTAssertTrue(error.coachDetail.contains("name"))
+        } catch {
+            XCTFail("Expected DecodingError, got \(error)")
+        }
+    }
+
+    func testCoachResponseWithoutContentRendersInsteadOfFailing() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [
+                .toolUse(id: "toolu_resp", name: CoachToolCatalog.coachResponseName, input: .object([
+                    "interaction": .object([
+                        "id": .string("next_step"),
+                        "type": .string("single_choice"),
+                        "options": .array([
+                            .object(["id": .string("a"), "label": .string("A"), "value": .string("A")]),
+                            .object(["id": .string("b"), "label": .string("B"), "value": .string("B")])
+                        ]),
+                        "allowOther": .bool(false),
+                        "status": .string("pending")
+                    ])
+                ]))
+            ], stopReason: "tool_use")
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(text: "Review this run.", model: "claude-test", apiKey: "test-key", in: context)
+
+        let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertNotEqual(assistant.assistantStatus, .failed)
+        XCTAssertNil(assistant.errorCategory)
+        XCTAssertNil(assistant.errorDetail)
+        XCTAssertEqual(assistant.interaction?.options.map(\.id), ["a", "b"])
     }
 
     func testDismissingInlineFailurePersistsDismissedTurn() async throws {

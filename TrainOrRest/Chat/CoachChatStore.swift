@@ -1228,7 +1228,10 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
     }
 
     private func technicalErrorMessage(_ error: Error) -> String {
-        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        if let decodingError = error as? DecodingError {
+            return decodingError.coachDetail
+        }
+        return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 
     private func messageHistory(threadID: UUID?, boundaryMessageID: UUID, in context: ModelContext) throws -> [ClaudeMessageParam] {
@@ -1332,6 +1335,30 @@ private extension CoachAttachmentReference {
             self.init(kind: .completedActivity, uuid: uuid, filename: nil, mediaType: nil, imageData: nil)
         case .image(let image):
             self.init(kind: .image, uuid: nil, filename: image.filename, mediaType: image.mediaType, imageData: image.data)
+        }
+    }
+}
+
+extension DecodingError {
+    // Foundation's localizedDescription for a DecodingError is the generic
+    // "The data couldn't be read because it is missing." which hides the field.
+    // Name the exact key/type and path so a surfaced failure is diagnosable.
+    var coachDetail: String {
+        func path(_ context: Context) -> String {
+            let joined = context.codingPath.map(\.stringValue).joined(separator: ".")
+            return joined.isEmpty ? "root" : joined
+        }
+        switch self {
+        case let .keyNotFound(key, context):
+            return "Missing field '\(key.stringValue)' at \(path(context))"
+        case let .valueNotFound(type, context):
+            return "Missing value for \(type) at \(path(context))"
+        case let .typeMismatch(type, context):
+            return "Type mismatch for \(type) at \(path(context)): \(context.debugDescription)"
+        case let .dataCorrupted(context):
+            return "Corrupted data at \(path(context)): \(context.debugDescription)"
+        @unknown default:
+            return localizedDescription
         }
     }
 }
