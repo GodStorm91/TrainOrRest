@@ -37,6 +37,7 @@ struct ChatBubble: View {
     var processingStage: CoachProcessingStage?
     var onSelectInteractionOption: (ChatMessage, CoachChoiceOption) -> Void = { _, _ in }
     var onSelectInteractionOther: (ChatMessage, CoachResponseInteraction) -> Void = { _, _ in }
+    var onSelectFollowUp: (ChatMessage, CoachChoiceOption) -> Void = { _, _ in }
 
     @State private var showsGroundingSummary = false
 
@@ -64,7 +65,13 @@ struct ChatBubble: View {
 
             VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
                 if !isUser, message.assistantStatus == .completed, let structured = message.structuredResponse {
-                    CoachResponseCard(response: structured, language: language)
+                    CoachResponseCard(
+                        response: structured,
+                        language: language,
+                        timestamp: message.date,
+                        followUpsConsumed: message.followUpsConsumed,
+                        onSelectFollowUp: { option in onSelectFollowUp(message, option) }
+                    )
                 } else if isUser || hasVisibleAssistantText {
                     messageBody
                         .padding(.horizontal, 14)

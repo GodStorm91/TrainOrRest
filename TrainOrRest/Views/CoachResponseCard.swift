@@ -3,6 +3,12 @@ import SwiftUI
 struct CoachResponseCard: View {
     let response: CoachStructuredResponse
     let language: CoachLanguage
+    var timestamp: Date? = nil
+    var followUpsConsumed: Bool = false
+    var onSelectFollowUp: (CoachChoiceOption) -> Void = { _ in }
+
+    @State private var showsDetail = false
+    @State private var showsSources = false
 
     var body: some View {
         TorCard(padding: 16, cornerRadius: 18) {
@@ -16,6 +22,7 @@ struct CoachResponseCard: View {
                         .font(.torHeading(22, .bold))
                         .foregroundStyle(Theme.text)
                         .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
                 }
 
                 if !response.summary.isEmpty {
@@ -23,6 +30,28 @@ struct CoachResponseCard: View {
                         .font(.subheadline)
                         .foregroundStyle(Theme.dim)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if let note = response.safetyNote, !note.isEmpty {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(Theme.warn)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(language.coachSafetyLabel)
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(Theme.warn)
+
+                            Text(note)
+                                .font(.subheadline)
+                                .foregroundStyle(Theme.text)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.soft(Theme.warn), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .accessibilityElement(children: .combine)
                 }
 
                 if !response.metrics.isEmpty {
@@ -41,13 +70,84 @@ struct CoachResponseCard: View {
                     }
                 }
 
+                if response.details != nil {
+                    Button {
+                        showsDetail = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(language.coachViewDetailLabel)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.bold))
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                        .frame(minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(language.coachViewDetailLabel)
+                    .accessibilityAddTraits(.isButton)
+                }
+
+                if !response.followUps.isEmpty && !followUpsConsumed {
+                    FlowLayout(spacing: 8, lineSpacing: 8) {
+                        ForEach(response.followUps) { option in
+                            Button {
+                                onSelectFollowUp(option)
+                            } label: {
+                                Text(option.label)
+                                    .font(.subheadline)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 10)
+                                    .background(Theme.chip, in: Capsule())
+                                    .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
+                                    .foregroundStyle(Theme.text)
+                            }
+                            .buttonStyle(.plain)
+                            .frame(minHeight: 44)
+                            .contentShape(Capsule())
+                            .accessibilityLabel(option.visibleSelectionText)
+                            .accessibilityAddTraits(.isButton)
+                        }
+                    }
+                }
+
                 if !response.sources.isEmpty {
-                    Text(language.coachBasedOnSourcesLabel(count: response.sources.count))
-                        .font(.caption)
-                        .foregroundStyle(Theme.faint)
+                    Button {
+                        showsSources = true
+                    } label: {
+                        Text(sourceAttributionText)
+                            .font(.caption)
+                            .foregroundStyle(Theme.faint)
+                            .frame(minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(sourceAttributionText)
+                    .accessibilityHint(language.coachViewSourcesHint)
+                    .accessibilityAddTraits(.isButton)
                 }
             }
+            .sheet(isPresented: $showsDetail) {
+                if let details = response.details {
+                    CoachDetailSheet(details: details, language: language)
+                }
+            }
+            .sheet(isPresented: $showsSources) {
+                CoachSourcesSheet(sources: response.sources, language: language)
+            }
         }
+    }
+
+    private var sourceAttributionText: String {
+        var text = language.coachBasedOnSourcesLabel(count: response.sources.count)
+        if let timestamp {
+            text += " · \(Self.updatedTimeText(timestamp, language: language))"
+        }
+        return text
+    }
+
+    static func updatedTimeText(_ date: Date, language: CoachLanguage) -> String {
+        language.coachUpdatedAtLabel(date.formatted(.dateTime.hour().minute().locale(language.uiLocale)))
     }
 
     private func metricRow(_ metric: CoachMetric) -> some View {
@@ -128,7 +228,10 @@ struct CoachResponseCard: View {
                 .init(id: "fuel", title: "Refuel well", description: "Include carbohydrates and protein after training.", priority: 3)
             ],
             details: nil,
-            followUps: [],
+            followUps: [
+                .init(id: "increase-load", label: "Should I increase my training load next week?", description: nil, value: "Should I increase my training load next week?"),
+                .init(id: "recovery-nutrition", label: "What should I eat to recover?", description: nil, value: "What should I eat to recover?")
+            ],
             status: .recoveryRecommended,
             metrics: [
                 .init(id: "load", label: "ACWR", value: "1.2", interpretation: "Stable", status: .neutral),

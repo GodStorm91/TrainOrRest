@@ -32,14 +32,17 @@ struct ChatView: View {
     @State private var selectedImageAttachment: CoachImageAttachment?
     @State private var selectedImage: UIImage?
     @State private var evidenceReview: EvidenceReviewPresentation?
+    @State private var showsContextSheet = false
     @State private var isChatListPresented = false
     @State private var isSavedPromptsPresented = false
     @State private var isProviderSettingsPresented = false
     @State private var isHeaderCollapsed = false
+    @State private var headerHeight: CGFloat = CoachHeaderMetrics.fallbackHeaderHeight
     @State private var softwareKeyboardHeight: CGFloat = 0
     @State private var planTransaction: ChatPlanTransaction?
     @State private var lastConsumedReviewRequestID: String?
     @State private var submittingPromptSuggestionKeys = Set<String>()
+    @State private var submittingFollowUpMessageID: UUID?
     @State private var submittingInteractionID: String?
     @State private var pendingOtherResponse: PendingOtherCoachResponse?
     @State private var draftActionTypeOverride: CoachRequestActionType?
@@ -86,6 +89,19 @@ struct ChatView: View {
 
     private var isSoftwareKeyboardVisible: Bool { softwareKeyboardHeight > 80 }
     private var isContextualSession: Bool { contextualWorkoutID != nil || contextualCompletedActivityID != nil }
+    private var messageTopInset: CGFloat {
+        CoachHeaderMetrics.messageTopInset(headerHeight: headerHeight)
+    }
+
+    private var contextSourceCount: Int {
+        var n = 0
+        if isContextualSession { n += 1 }
+        if evidence.readinessSnapshot { n += 1 }
+        if evidence.workout != nil { n += 1 }
+        if selectedImageAttachment != nil { n += 1 }
+        return n
+    }
+
 
     private var activeThread: ChatThread? {
         guard let activeThreadID = chatSession.activeThreadID else { return nil }
@@ -110,13 +126,13 @@ struct ChatView: View {
             VStack(spacing: 0) {
                 if !hasAPIKey {
                     missingKeyView
-                        .padding(.top, 72)
+                        .padding(.top, messageTopInset)
                 } else if messages.isEmpty {
                     emptyState
-                        .padding(.top, 74)
+                        .padding(.top, messageTopInset)
                 } else {
                     messageFeed
-                        .padding(.top, 70)
+                        .padding(.top, messageTopInset)
                 }
                 if hasAPIKey {
                     chatFooter
@@ -124,8 +140,16 @@ struct ChatView: View {
             }
 
             topControlDeck
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(key: CoachHeaderHeightKey.self, value: proxy.size.height)
+                    }
+                )
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
+        }
+        .onPreferenceChange(CoachHeaderHeightKey.self) {
+            headerHeight = $0
         }
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
@@ -543,7 +567,8 @@ struct ChatView: View {
                             isSubmittingInteraction: submittingInteractionID == message.interaction?.id,
                             processingStage: processingStage(for: message),
                             onSelectInteractionOption: selectInteractionOption,
-                            onSelectInteractionOther: selectInteractionOther
+                            onSelectInteractionOther: selectInteractionOther,
+                            onSelectFollowUp: selectFollowUp
                         )
                         .id(message.turnID)
                     }
@@ -800,15 +825,8 @@ struct ChatView: View {
                     composerFocused = true
                 }
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
-            } else if shouldShowSuggestions {
-                CoachAskNextStrip(prompts: Array(visiblePromptSuggestions.prefix(2).map(\.prompt)), label: language.askNextLabel) { prompt in
-                    if let suggestion = visiblePromptSuggestions.first(where: { $0.prompt == prompt }) {
-                        submitPromptSuggestion(suggestion)
-                    }
-                }
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-            attachmentChips
+
             composer
             if let bottomNavigation, !isSoftwareKeyboardVisible {
                 bottomNavigation
@@ -843,16 +861,6 @@ struct ChatView: View {
         .buttonStyle(.plain)
         .accessibilityLabel(language.continueAnswerLabel)
         .accessibilityAddTraits(.isButton)
-    }
-
-    private var shouldShowSuggestions: Bool {
-        !hasPendingInteraction
-            && !hasActiveInlineFailure
-            && !isContextualSession
-            && !isSoftwareKeyboardVisible
-            && !messages.isEmpty
-            && !chatStore.isSending
-            && !visiblePromptSuggestions.isEmpty
     }
 
     private var shouldShowContextualSuggestions: Bool {
@@ -927,21 +935,6 @@ struct ChatView: View {
         return nil
     }
 
-    private var visiblePromptSuggestions: [CoachPromptSuggestion] {
-        guard let conversationId = chatSession.activeThreadID else { return [] }
-        let candidates = suggestionPrompts.enumerated().map { index, prompt in
-            CoachPromptSuggestion(
-                id: "general-\(index)-\(prompt.stableSuggestionID)",
-                conversationId: conversationId,
-                title: prompt,
-                prompt: prompt,
-                status: .available
-            )
-        }
-        return chatStore.promptSuggestions(from: candidates, in: modelContext)
-            .filter { !submittingPromptSuggestionKeys.contains($0.scopeKey) }
-    }
-
     private var visibleContextualPromptSuggestions: [CoachPromptSuggestion] {
         guard let conversationId = chatSession.activeThreadID else { return [] }
         let workoutId = contextualWorkoutID ?? contextualCompletedActivityID
@@ -981,49 +974,6 @@ struct ChatView: View {
         return "questionmark.circle"
     }
 
-    @ViewBuilder
-    private var attachmentChips: some View {
-        if isContextualSession || evidence.readinessSnapshot || evidence.workout != nil || selectedImageAttachment != nil {
-            FlowLayout(spacing: 8, lineSpacing: 8) {
-                if isContextualSession {
-                    fixedContextChip
-                }
-                if evidence.readinessSnapshot {
-                    removableChip(language.healthDataChipLabel, symbol: "heart.fill") { evidence.readinessSnapshot = false }
-                }
-                if evidence.workout != nil {
-                    removableChip(language.latestWorkoutChipLabel, symbol: "figure.run") { evidence.workout = nil }
-                }
-                if selectedImageAttachment != nil {
-                    removableChip(language.imageChipLabel, symbol: "photo") { clearImageAttachment() }
-                }
-            }
-            .transition(.opacity.combined(with: .move(edge: .bottom)))
-        }
-    }
-
-    private func removableChip(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: symbol)
-                .font(.caption.weight(.semibold))
-            Text(title)
-                .font(.caption.weight(.semibold))
-            Button(action: action) {
-                Image(systemName: "xmark")
-                    .font(.caption2.weight(.bold))
-                    .frame(width: 22, height: 22)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(language.removeAttachmentLabel(title))
-        }
-        .foregroundStyle(Theme.text)
-        .padding(.leading, 10)
-        .padding(.trailing, 5)
-        .padding(.vertical, 6)
-        .background(Theme.chip, in: Capsule())
-        .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
-    }
-
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 6) {
             Menu {
@@ -1054,6 +1004,12 @@ struct ChatView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(language.attachEvidenceLabel)
+            if contextSourceCount > 0 {
+                CoachSourceIndicator(count: contextSourceCount, language: language) {
+                    showsContextSheet = true
+                }
+            }
+
 
             TextField(composerPlaceholder, text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -1104,8 +1060,34 @@ struct ChatView: View {
         .padding(.trailing, 4)
         .padding(.vertical, 4)
         .torGlass(cornerRadius: 26, tint: .graphite)
+        .sheet(isPresented: $showsContextSheet) {
+            NavigationStack {
+                ScrollView {
+                    ChatContextTrayView(
+                        evidence: $evidence,
+                        selectedPhotoItem: $selectedPhotoItem,
+                        selectedImageAttachment: $selectedImageAttachment,
+                        selectedImage: $selectedImage,
+                        plannedWorkouts: plannedWorkouts,
+                        completedActivities: completedActivities,
+                        onReviewEvidence: { showsContextSheet = false }
+                    )
+                    .padding(16)
+                }
+                .navigationTitle(language.contextSourcesSheetTitle)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(language.coachDetailDoneLabel) {
+                            showsContextSheet = false
+                        }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
     }
-
 
     private var savedPrompts: [String] { language.savedPrompts }
 
@@ -1125,25 +1107,6 @@ struct ChatView: View {
             || chatStore.isSending
             || (replacementCoordinator.hasPendingDecision && pendingOtherResponse == nil)
             || replacementCoordinator.isConfirming
-    }
-
-    // MARK: - Ask Next suggestions
-
-    private var suggestionPrompts: [String] {
-        CoachSuggestions.prompts(for: suggestionContext, language: language)
-    }
-
-    private var suggestionContext: CoachSuggestions.Context {
-        let recent = completedActivities.first
-        let recentIsRecent = recent.map { isWithinRecentWindow($0.date) } ?? false
-        let recentIsHard = recent.map(isHardEffort) ?? false
-        return CoachSuggestions.Context(
-            hasMessages: !messages.isEmpty,
-            lastMessageIsAssistant: messages.last?.role == .assistant,
-            hasRecentRun: recentIsRecent,
-            recentRunWasHard: recentIsHard,
-            todayWorkoutKind: plannedWorkouts.first { calendar.isDateInToday($0.date) }?.kind
-        )
     }
 
     private var todayReadiness: DailyReadiness? {
@@ -1206,19 +1169,6 @@ struct ChatView: View {
 
     private func kmText(_ km: Double) -> String {
         abs(km.rounded() - km) < 0.05 ? "\(Int(km.rounded())) km" : String(format: "%.1f km", km)
-    }
-
-    /// A run counts as "recent" when it finished within the last two days.
-    private func isWithinRecentWindow(_ date: Date) -> Bool {
-        guard date <= .now else { return false }
-        let days = calendar.dateComponents([.day], from: date, to: .now).day ?? .max
-        return days <= 2
-    }
-
-    private func isHardEffort(_ activity: CompletedActivity) -> Bool {
-        if let hr = activity.avgHeartRate, hr >= 160 { return true }
-        if let pace = activity.avgPaceSecondsPerKm, pace < 300 { return true }
-        return false
     }
 
     private func send() {
@@ -1362,6 +1312,29 @@ struct ChatView: View {
                 submittingInteractionID = nil
                 if !didSend {
                     chatStore.restoreInteraction(messageID: message.turnID, interaction: previousInteraction, in: modelContext)
+                }
+            }
+        }
+    }
+
+    private func selectFollowUp(_ message: ChatMessage, option: CoachChoiceOption) {
+        guard submittingFollowUpMessageID == nil, !message.followUpsConsumed else { return }
+        submittingFollowUpMessageID = message.turnID
+        message.followUpsConsumed = true
+        try? modelContext.save()
+        let pending = PendingCoachSend(
+            text: option.submissionText,
+            attachments: currentAttachments,
+            evidence: evidence,
+            displayText: option.visibleSelectionText
+        )
+        Task {
+            let didSend = await sendAlreadyReviewed(pending)
+            await MainActor.run {
+                submittingFollowUpMessageID = nil
+                if !didSend {
+                    message.followUpsConsumed = false
+                    try? modelContext.save()
                 }
             }
         }
@@ -1847,24 +1820,6 @@ struct ChatView: View {
         .accessibilityLabel(language.workoutContextLabel(title: contextualTitle, date: contextualDateText))
     }
 
-    private var fixedContextChip: some View {
-        HStack(spacing: 6) {
-            Image(systemName: contextualSymbolName)
-                .font(.caption.weight(.semibold))
-            Text(contextualTitle)
-                .font(.caption.weight(.semibold))
-                .lineLimit(1)
-            Image(systemName: "lock.fill")
-                .font(.caption2.weight(.bold))
-                .accessibilityHidden(true)
-        }
-        .foregroundStyle(Theme.text)
-        .padding(.horizontal, 10)
-        .frame(minHeight: 34)
-        .background(Theme.chip, in: Capsule())
-        .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
-        .accessibilityLabel(language.fixedWorkoutContextLabel(title: contextualTitle))
-    }
 
     private var currentAttachments: [CoachContextAttachment] {
         var attachments: [CoachContextAttachment] = []
@@ -2351,17 +2306,6 @@ private enum ChatPlanTransaction: Equatable {
 }
 
 private extension String {
-    var stableSuggestionID: String {
-        let folded = folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "en_US_POSIX"))
-            .lowercased()
-        let characters = folded.unicodeScalars.map { scalar -> Character in
-            CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : "-"
-        }
-        let collapsed = String(characters)
-            .split(separator: "-", omittingEmptySubsequences: true)
-            .joined(separator: "-")
-        return collapsed.isEmpty ? "suggestion" : collapsed
-    }
 
     var containsTomorrowReference: Bool {
         let lower = lowercased()

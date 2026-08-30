@@ -78,6 +78,7 @@ final class ChatMessage {
     var activeAttemptID: UUID?
     var operationID: UUID?
     var isIncompleteStorage: Bool?
+    var followUpsConsumedStorage: Bool? = nil
     var announcedFailureStorage: Bool?
     var interactionJSON: String?
     var contextItemsJSON: String?
@@ -161,6 +162,11 @@ final class ChatMessage {
     var isIncomplete: Bool {
         get { isIncompleteStorage ?? false }
         set { isIncompleteStorage = newValue }
+    }
+
+    var followUpsConsumed: Bool {
+        get { followUpsConsumedStorage ?? false }
+        set { followUpsConsumedStorage = newValue }
     }
 
     var announcedFailure: Bool {

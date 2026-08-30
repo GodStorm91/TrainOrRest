@@ -37,6 +37,10 @@ enum CoachToolCatalog {
                         "type": .string("string"),
                         "description": .string("Two or three short sentences explaining why. Do not put all analysis here.")
                     ]),
+                    "safetyNote": .object([
+                        "type": .string("string"),
+                        "description": .string("Urgent safety-critical advice; shown before actions and never hidden. Omit if none.")
+                    ]),
                     "recommendations": .object([
                         "type": .string("array"),
                         "maxItems": .number(6),

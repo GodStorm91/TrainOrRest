@@ -1393,6 +1393,33 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(payload.followUps?.count, 2)
     }
 
+    func testSafetyNotePreservedAndNotFoldedIntoDetails() throws {
+        let note = "Neu dau nguc hay chong mat, dung tap va di kham."
+        let jsonString = """
+        {
+          "content": "Take an easy day.",
+          "title": "Prioritize recovery",
+          "summary": "Your recent effort was high.",
+          "safetyNote": "\(note)",
+          "details": {
+            "title": "Why",
+            "sections": [{"id": "load", "title": "Training load", "markdown": "Training load is elevated, so reduce intensity today."}]
+          }
+        }
+        """
+        let payload = try JSONDecoder().decode(
+            CoachStructuredResponsePayload.self,
+            from: Data(jsonString.utf8)
+        )
+        let response = try XCTUnwrap(
+            payload.validatedStructuredResponse(additionalRecommendationsTitle: "More")
+        )
+        let details = try XCTUnwrap(response.details)
+
+        XCTAssertEqual(response.safetyNote, note)
+        XCTAssertFalse(details.sections.contains { $0.markdown.contains(note) })
+    }
+
     func testValidatedStructuredResponseNilWhenTitleOrSummaryMissing() throws {
         let jsonString = #"{"content":"Take an easy day."}"#
         let payload = try JSONDecoder().decode(
@@ -1458,6 +1485,94 @@ final class ChatFeatureTests: XCTestCase {
         )
 
         XCTAssertEqual(response.followUps.count, 3)
+    }
+
+    func testValidatedStructuredResponseDropsEmptyModelDetails() throws {
+        let jsonString = """
+        {
+          "content": "Take an easy day.",
+          "title": "Prioritize recovery",
+          "summary": "Your recent effort was high.",
+          "details": {"title": "Why", "sections": []}
+        }
+        """
+        let payload = try JSONDecoder().decode(
+            CoachStructuredResponsePayload.self,
+            from: Data(jsonString.utf8)
+        )
+        let response = try XCTUnwrap(
+            payload.validatedStructuredResponse(additionalRecommendationsTitle: "More")
+        )
+
+        XCTAssertNil(response.details)
+    }
+
+    func testValidatedStructuredResponseDropsBlankDetailSections() throws {
+        let jsonString = """
+        {
+          "content": "Take an easy day.",
+          "title": "Prioritize recovery",
+          "summary": "Your recent effort was high.",
+          "details": {"title": "Why", "sections": [{"id": "x", "title": " ", "markdown": "  "}]}
+        }
+        """
+        let payload = try JSONDecoder().decode(
+            CoachStructuredResponsePayload.self,
+            from: Data(jsonString.utf8)
+        )
+        let response = try XCTUnwrap(
+            payload.validatedStructuredResponse(additionalRecommendationsTitle: "More")
+        )
+
+        XCTAssertNil(response.details)
+    }
+
+    func testValidatedStructuredResponseDedupsAndDropsBlankFollowUps() throws {
+        let jsonString = """
+        {
+          "content": "Take an easy day.",
+          "title": "Prioritize recovery",
+          "summary": "Your recent effort was high.",
+          "followUps": [
+            {"id": "a", "label": "First", "value": "First prompt"},
+            {"id": "a", "label": "Duplicate", "value": "Duplicate prompt"},
+            {"id": "b", "label": " ", "value": "  "}
+          ]
+        }
+        """
+        let payload = try JSONDecoder().decode(
+            CoachStructuredResponsePayload.self,
+            from: Data(jsonString.utf8)
+        )
+        let response = try XCTUnwrap(
+            payload.validatedStructuredResponse(additionalRecommendationsTitle: "More")
+        )
+
+        XCTAssertEqual(response.followUps.map(\.id), ["a"])
+    }
+
+    func testValidatedStructuredResponseDedupsAndDropsBlankRecommendations() throws {
+        let jsonString = """
+        {
+          "content": "Take an easy day.",
+          "title": "Prioritize recovery",
+          "summary": "Your recent effort was high.",
+          "recommendations": [
+            {"id": "r1", "title": "First", "priority": 1},
+            {"id": "r1", "title": "Duplicate", "priority": 2},
+            {"id": "r2", "title": "  ", "priority": 3}
+          ]
+        }
+        """
+        let payload = try JSONDecoder().decode(
+            CoachStructuredResponsePayload.self,
+            from: Data(jsonString.utf8)
+        )
+        let response = try XCTUnwrap(
+            payload.validatedStructuredResponse(additionalRecommendationsTitle: "More")
+        )
+
+        XCTAssertEqual(response.recommendations.map(\.id), ["r1"])
     }
 
     func testValidatedStructuredResponseLeavesHydratedFieldsEmpty() throws {
@@ -1540,6 +1655,113 @@ final class ChatFeatureTests: XCTestCase {
         )
     }
 
+    func testCoachUpdatedAtLabelLocalized() {
+        XCTAssertEqual(CoachLanguage.vi.coachUpdatedAtLabel("1:58 PM"), "Cập nhật 1:58 PM")
+        XCTAssertEqual(CoachLanguage.en.coachUpdatedAtLabel("1:58 PM"), "Updated 1:58 PM")
+    }
+
+    func testCoachCardUpdatedTimeUsesSelectedLocale() throws {
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 1
+        components.day = 2
+        components.hour = 13
+        components.minute = 58
+        let date = try XCTUnwrap(Calendar(identifier: .gregorian).date(from: components))
+
+        let en = CoachResponseCard.updatedTimeText(date, language: .en)
+        let vi = CoachResponseCard.updatedTimeText(date, language: .vi)
+
+        XCTAssertTrue(en.contains("PM"), "en_US formats 13:58 as 12-hour with PM, got \(en)")
+        XCTAssertTrue(vi.contains("13:58"), "vi_VN formats as 24-hour, got \(vi)")
+    }
+
+    func testSourcesSheetSymbolsCoverAllKinds() {
+        let kinds: [CoachDataSource.Kind] = [
+            .healthData,
+            .completedWorkout,
+            .trainingPlan,
+            .upcomingWorkouts,
+            .raceGoal
+        ]
+
+        for kind in kinds {
+            XCTAssertFalse(CoachSourcesSheet.symbol(for: kind).isEmpty)
+        }
+    }
+
+    func testDetailSheetLocalizedStrings() {
+        XCTAssertEqual(CoachLanguage.vi.coachDetailSheetTitle, "Phân tích chi tiết")
+        XCTAssertEqual(CoachLanguage.vi.coachViewDetailLabel, "Xem phân tích chi tiết")
+        XCTAssertEqual(CoachLanguage.vi.coachDetailDoneLabel, "Xong")
+    }
+    func testContextSourceCountLabelLocalized() {
+        XCTAssertEqual(CoachLanguage.vi.contextSourceCountLabel(count: 2), "2 nguồn")
+        XCTAssertEqual(CoachLanguage.en.contextSourceCountLabel(count: 1), "1 source")
+        XCTAssertEqual(CoachLanguage.en.contextSourceCountLabel(count: 2), "2 sources")
+        XCTAssertEqual(CoachLanguage.vi.contextSourcesSheetTitle, "Nguồn dữ liệu")
+    }
+
+    @MainActor
+    func testSourceIndicatorRasterizes() throws {
+        guard #available(iOS 16.0, *) else { return }
+
+        let output = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: ".verify-artifacts", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+
+        let view = CoachSourceIndicator(count: 2, language: .vi, onTap: {})
+            .padding(16)
+            .background(Theme.bg)
+        let renderer = ImageRenderer(content: view)
+        let image = try XCTUnwrap(renderer.uiImage)
+        let data = try XCTUnwrap(image.pngData())
+        try data.write(to: output.appending(path: "coach-source-indicator.png"))
+    }
+
+    @MainActor
+    func testAttributionCardRasterizes() throws {
+        guard #available(iOS 16.0, *) else { return }
+
+        let output = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: ".verify-artifacts", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+
+        let sample = CoachStructuredResponse(
+            title: "Ưu tiên phục hồi hôm nay",
+            summary: "Khối lượng tập gần đây đang cao, nên giữ buổi tiếp theo nhẹ nhàng.",
+            recommendations: [],
+            details: nil,
+            followUps: [],
+            status: .recoveryRecommended,
+            metrics: [],
+            primaryAction: nil,
+            secondaryAction: nil,
+            sources: [
+                .init(id: "health", type: .healthData, label: "Dữ liệu sức khỏe", updatedAt: nil),
+                .init(id: "plan", type: .trainingPlan, label: "Kế hoạch hiện tại", updatedAt: nil)
+            ]
+        )
+        let view = CoachResponseCard(
+            response: sample,
+            language: .vi,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        .frame(width: 390)
+        .padding(16)
+        .background(Theme.bg)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 3
+
+        let image = try XCTUnwrap(renderer.uiImage)
+        let data = try XCTUnwrap(image.pngData())
+        try data.write(to: output.appending(path: "coach-card-attribution.png"))
+    }
+
     @MainActor
     func testCoachResponseCardRasterizesLightAndDark() throws {
         guard #available(iOS 16.0, *) else { return }
@@ -1609,6 +1831,116 @@ final class ChatFeatureTests: XCTestCase {
         let minimalImage = try XCTUnwrap(minimalRenderer.uiImage)
         let minimalData = try XCTUnwrap(minimalImage.pngData())
         try minimalData.write(to: output.appending(path: "coach-card-minimal.png"))
+    }
+
+    @MainActor
+    func testFollowUpChipsRasterizeVisibleAndCollapsed() throws {
+        guard #available(iOS 16.0, *) else { return }
+
+        let output = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: ".verify-artifacts", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+
+        let sample = CoachStructuredResponse(
+            title: "Ưu tiên phục hồi hôm nay",
+            summary: "Khối lượng tập gần đây đang cao, nên giữ buổi tiếp theo nhẹ nhàng.",
+            recommendations: [
+                .init(id: "easy", title: "Chạy nhẹ", description: "Giữ nhịp nói chuyện thoải mái.", priority: 1)
+            ],
+            details: nil,
+            followUps: [
+                .init(id: "a", label: "Lần tới có nên tăng tải?", description: nil, value: "Lần tới có nên tăng tải?"),
+                .init(id: "b", label: "Ăn gì để hồi phục?", description: nil, value: "Ăn gì để hồi phục?")
+            ],
+            status: .recoveryRecommended,
+            metrics: [
+                .init(id: "load", label: "ACWR", value: "1.2", interpretation: "Cần chú ý", status: .attention)
+            ],
+            primaryAction: nil,
+            secondaryAction: nil,
+            sources: []
+        )
+
+        let visibleRenderer = ImageRenderer(
+            content: CoachResponseCard(response: sample, language: .vi, followUpsConsumed: false)
+                .frame(width: 390)
+                .padding(16)
+                .background(Theme.bg)
+        )
+        visibleRenderer.scale = 3
+        let visibleImage = try XCTUnwrap(visibleRenderer.uiImage)
+        let visibleData = try XCTUnwrap(visibleImage.pngData())
+        try visibleData.write(to: output.appending(path: "coach-card-followups.png"))
+
+        let collapsedRenderer = ImageRenderer(
+            content: CoachResponseCard(response: sample, language: .vi, followUpsConsumed: true)
+                .frame(width: 390)
+                .padding(16)
+                .background(Theme.bg)
+        )
+        collapsedRenderer.scale = 3
+        let collapsedImage = try XCTUnwrap(collapsedRenderer.uiImage)
+        let collapsedData = try XCTUnwrap(collapsedImage.pngData())
+        try collapsedData.write(to: output.appending(path: "coach-card-followups-consumed.png"))
+    }
+
+    @MainActor
+    func testDetailSheetAndSafetyCardRasterize() throws {
+        guard #available(iOS 16.0, *) else { return }
+
+        let output = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: ".verify-artifacts", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+
+        let sample = CoachStructuredResponse(
+            title: "Ưu tiên phục hồi hôm nay",
+            summary: "Khối lượng tập gần đây đang cao, nên giữ buổi tiếp theo nhẹ nhàng.",
+            safetyNote: "Nếu đau ngực hoặc chóng mặt, dừng tập và đi khám.",
+            recommendations: [
+                .init(id: "easy", title: "Chạy nhẹ", description: "Giữ nhịp nói chuyện thoải mái.", priority: 1),
+                .init(id: "sleep", title: "Ngủ đủ", description: "Ưu tiên giấc ngủ tối nay.", priority: 2)
+            ],
+            details: .init(
+                title: "Phân tích chi tiết",
+                sections: [
+                    .init(id: "load", title: "Khối lượng tập", markdown: "Khối lượng gần đây cao hơn mức nền."),
+                    .init(id: "recovery", title: "Phục hồi", markdown: "Ưu tiên nghỉ ngơi và bổ sung năng lượng.")
+                ]
+            ),
+            followUps: [],
+            status: .recoveryRecommended,
+            metrics: [
+                .init(id: "load", label: "ACWR", value: "1.2", interpretation: "Cần chú ý", status: .attention),
+                .init(id: "sleep", label: "Giấc ngủ", value: "7 giờ", interpretation: "Ổn định", status: .neutral)
+            ],
+            primaryAction: nil,
+            secondaryAction: nil,
+            sources: []
+        )
+
+        let cardRenderer = ImageRenderer(
+            content: CoachResponseCard(response: sample, language: .vi)
+                .frame(width: 390)
+                .padding(16)
+                .background(Theme.bg)
+        )
+        cardRenderer.scale = 3
+        let cardImage = try XCTUnwrap(cardRenderer.uiImage)
+        let cardData = try XCTUnwrap(cardImage.pngData())
+        try cardData.write(to: output.appending(path: "coach-card-safety.png"))
+
+        let detailRenderer = ImageRenderer(
+            content: CoachDetailSheet(details: try XCTUnwrap(sample.details), language: .vi)
+                .frame(width: 390, height: 700)
+        )
+        detailRenderer.scale = 3
+        let detailImage = try XCTUnwrap(detailRenderer.uiImage)
+        let detailData = try XCTUnwrap(detailImage.pngData())
+        try detailData.write(to: output.appending(path: "coach-detail-sheet.png"))
     }
 
     func testComposePreservesModelAuthoredAndFillsHydrated() {
@@ -1685,6 +2017,39 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertNil(message.structuredResponse)
     }
 
+    func testFollowUpsConsumedFlagRoundTrips() {
+        let message = ChatMessage(role: .assistant, text: "x", date: Date())
+        XCTAssertFalse(message.followUpsConsumed)
+
+        message.followUpsConsumed = true
+        XCTAssertEqual(message.followUpsConsumedStorage, true)
+        XCTAssertTrue(message.followUpsConsumed)
+
+        message.followUpsConsumed = false
+        XCTAssertEqual(message.followUpsConsumedStorage, false)
+        XCTAssertFalse(message.followUpsConsumed)
+    }
+
+    func testSystemPromptDescribesStructuredContract() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+
+        let prompt = try CoachContextBuilder.build(in: context, today: today, calendar: calendar)
+
+        XCTAssertTrue(prompt.contains("coach_response"))
+        XCTAssertTrue(prompt.contains("at most three recommendations"))
+        XCTAssertTrue(prompt.contains("at most three short sentences"))
+        XCTAssertTrue(prompt.contains("公里"))
+        XCTAssertTrue(prompt.contains("do not fabricate"))
+        XCTAssertTrue(prompt.contains("up to three follow-up suggestions"))
+        XCTAssertTrue(prompt.contains("concise title"))
+        XCTAssertTrue(prompt.contains("optional details object"))
+        XCTAssertTrue(prompt.contains("optional safetyNote"))
+        XCTAssertTrue(prompt.contains("user's app language"))
+        XCTAssertTrue(prompt.contains("data-source attribution"))
+    }
+
     func testCoachResponseWithTitleSummaryPersistsComposedStructuredResponse() async throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -1747,6 +2112,130 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(structured.status, .recoveryRecommended)
         XCTAssertFalse(structured.metrics.isEmpty)
         XCTAssertEqual(structured.sources.count, 2)
+    }
+
+    func testFullStructuredCoachResponseCapsAndPersistsAllModelFields() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        context.insert(DailyReadiness(
+            date: today.addingTimeInterval(1),
+            assessment: ReadinessAssessment(
+                verdict: .rest,
+                score: 60,
+                reasons: [],
+                ruleIDs: [.loadRamp],
+                baselineDayCount: 28,
+                snapshot: .init(
+                    hrvMean7: 45,
+                    hrvMean28: nil,
+                    rhrMean7: nil,
+                    rhrMean28: nil,
+                    sleepLastNight: 7,
+                    sleepMean14: nil,
+                    acuteChronicRatio: 1.2
+                )
+            ),
+            computedAt: today
+        ))
+        try context.save()
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [
+                .toolUse(id: "t", name: CoachToolCatalog.coachResponseName, input: .object([
+                    "content": .string("Take it easy."),
+                    "title": .string("Prioritize recovery"),
+                    "summary": .string("Your recent effort was high."),
+                    "recommendations": .array([
+                        .object([
+                            "id": .string("r1"),
+                            "title": .string("First"),
+                            "priority": .number(1)
+                        ]),
+                        .object([
+                            "id": .string("r2"),
+                            "title": .string("Second"),
+                            "priority": .number(2)
+                        ]),
+                        .object([
+                            "id": .string("r3"),
+                            "title": .string("Third"),
+                            "priority": .number(3)
+                        ]),
+                        .object([
+                            "id": .string("r4"),
+                            "title": .string("Fourth"),
+                            "priority": .number(4)
+                        ])
+                    ]),
+                    "details": .object([
+                        "title": .string("Why"),
+                        "sections": .array([
+                            .object([
+                                "id": .string("load"),
+                                "title": .string("Training load"),
+                                "markdown": .string("Load is elevated.")
+                            ])
+                        ])
+                    ]),
+                    "followUps": .array([
+                        .object([
+                            "id": .string("f1"),
+                            "label": .string("First follow-up"),
+                            "value": .string("First follow-up prompt")
+                        ]),
+                        .object([
+                            "id": .string("f2"),
+                            "label": .string("Second follow-up"),
+                            "value": .string("Second follow-up prompt")
+                        ]),
+                        .object([
+                            "id": .string("f3"),
+                            "label": .string("Third follow-up"),
+                            "value": .string("Third follow-up prompt")
+                        ]),
+                        .object([
+                            "id": .string("f4"),
+                            "label": .string("Fourth follow-up"),
+                            "value": .string("Fourth follow-up prompt")
+                        ])
+                    ]),
+                    "safetyNote": .string("Stop and seek care for chest pain or dizziness.")
+                ]))
+            ], stopReason: "tool_use")
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(
+            text: "How am I?",
+            model: "claude-test",
+            apiKey: "test-key",
+            contextItems: [
+                CoachContextItem(type: .healthData, label: "Health"),
+                CoachContextItem(type: .completedRun, label: "Completed run")
+            ],
+            in: context
+        )
+
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        let assistant = try XCTUnwrap(messages.last { $0.role == .assistant })
+        let structured = try XCTUnwrap(assistant.structuredResponse)
+        let details = try XCTUnwrap(structured.details)
+
+        XCTAssertEqual(structured.title, "Prioritize recovery")
+        XCTAssertEqual(structured.summary, "Your recent effort was high.")
+        XCTAssertEqual(structured.recommendations.count, 3)
+        XCTAssertTrue(details.sections.contains { $0.id == "additional-recommendations" && $0.markdown.contains("Fourth") })
+        XCTAssertEqual(structured.recommendations.map(\.id), ["r1", "r2", "r3"])
+        XCTAssertEqual(structured.recommendations.map(\.title), ["First", "Second", "Third"])
+        XCTAssertEqual(details.title, "Why")
+        XCTAssertTrue(details.sections.contains { $0.id == "load" && $0.title == "Training load" })
+        XCTAssertEqual(structured.followUps.map(\.id), ["f1", "f2", "f3"])
+        XCTAssertEqual(structured.followUps.map(\.value), ["First follow-up prompt", "Second follow-up prompt", "Third follow-up prompt"])
+        XCTAssertEqual(structured.followUps.count, 3)
+        XCTAssertEqual(structured.safetyNote, "Stop and seek care for chest pain or dizziness.")
+        XCTAssertNotNil(structured.status)
+        XCTAssertFalse(structured.metrics.isEmpty)
+        XCTAssertFalse(structured.sources.isEmpty)
     }
 
     func testLegacyCoachResponseWithoutTitleSummaryHasNoStructuredResponse() async throws {
@@ -2219,6 +2708,21 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(try context.fetch(FetchDescriptor<PlannedWorkout>()).count, before)
         XCTAssertEqual(client.requests.count, 1, "a truncated turn must not start another round")
         XCTAssertNotNil(store.lastError)
+    }
+
+    func testMessageTopInsetClearsHeaderAndAdaptsToHeight() {
+        XCTAssertEqual(
+            CoachHeaderMetrics.messageTopInset(headerHeight: 48),
+            48 + 8 + 14
+        )
+        XCTAssertGreaterThan(
+            CoachHeaderMetrics.messageTopInset(headerHeight: 80),
+            CoachHeaderMetrics.messageTopInset(headerHeight: 48)
+        )
+        XCTAssertEqual(
+            CoachHeaderMetrics.messageTopInset(headerHeight: 10),
+            CoachHeaderMetrics.fallbackHeaderHeight + 8 + 14
+        )
     }
 
     private func makeContainer() throws -> ModelContainer {

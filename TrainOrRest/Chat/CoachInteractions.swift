@@ -142,6 +142,7 @@ struct CoachStructuredResponsePayload: Codable, Equatable {
     var interaction: CoachResponseInteraction?
     var title: String? = nil
     var summary: String? = nil
+    var safetyNote: String? = nil
     var recommendations: [CoachRecommendation]? = nil
     var details: CoachResponseDetails? = nil
     var followUps: [CoachChoiceOption]? = nil
@@ -158,6 +159,7 @@ extension CoachStructuredResponsePayload {
             interaction = ((try? container.decodeIfPresent(CoachResponseInteraction.self, forKey: .interaction)) ?? nil)
             title = ((try? container.decodeIfPresent(String.self, forKey: .title)) ?? nil)
             summary = ((try? container.decodeIfPresent(String.self, forKey: .summary)) ?? nil)
+            safetyNote = ((try? container.decodeIfPresent(String.self, forKey: .safetyNote)) ?? nil)
             recommendations = ((try? container.decodeIfPresent([CoachRecommendation].self, forKey: .recommendations)) ?? nil)
             details = ((try? container.decodeIfPresent(CoachResponseDetails.self, forKey: .details)) ?? nil)
             followUps = ((try? container.decodeIfPresent([CoachChoiceOption].self, forKey: .followUps)) ?? nil)
@@ -166,6 +168,7 @@ extension CoachStructuredResponsePayload {
             interaction = nil
             title = nil
             summary = nil
+            safetyNote = nil
             recommendations = nil
             details = nil
             followUps = nil

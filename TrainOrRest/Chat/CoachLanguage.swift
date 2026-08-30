@@ -849,12 +849,23 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
     func workoutContextLabel(title: String, date: String) -> String { self == .vi ? "Bối cảnh buổi tập: \(title), \(date)" : self == .ja ? "ワークアウトの文脈: \(title)、\(date)" : "Workout context: \(title), \(date)" }
     func fixedWorkoutContextLabel(title: String) -> String { self == .vi ? "Bối cảnh buổi tập cố định: \(title)" : self == .ja ? "固定のワークアウト文脈: \(title)" : "Fixed workout context: \(title)" }
 
+    func contextSourceCountLabel(count: Int) -> String {
+        self == .vi ? "\(count) nguồn" : self == .ja ? "\(count) 件のデータ" : count == 1 ? "1 source" : "\(count) sources"
+    }
+    var contextSourcesSheetTitle: String {
+        self == .vi ? "Nguồn dữ liệu" : self == .ja ? "データソース" : "Data sources"
+    }
+
     var dataSourcesUsedTitle: String { self == .vi ? "Nguồn dữ liệu đã sử dụng" : self == .ja ? "使用したデータソース" : "Data sources used" }
     var additionalRecommendationsTitle: String { self == .vi ? "Khuyến nghị bổ sung" : self == .ja ? "追加の推奨事項" : "Additional recommendations" }
     var verifiedPlanUpdateLabel: String { self == .vi ? "Đã kiểm tra và cập nhật kế hoạch" : self == .ja ? "計画を確認して更新しました" : "Plan checked and updated" }
     var viewSourcesLabel: String { self == .vi ? "Xem nguồn dữ liệu" : self == .ja ? "データソースを見る" : "View data sources" }
     func sourceLineWithTime(_ time: String) -> String { self == .vi ? "Dựa trên dữ liệu lúc \(time) · Xem nguồn" : self == .ja ? "\(time) のデータに基づく · ソースを見る" : "Based on data from \(time) · View sources" }
     func sourceLineWithCount(_ count: Int) -> String { self == .vi ? "Dựa trên \(count) nguồn dữ liệu · Xem nguồn" : self == .ja ? "\(count) 件のデータソースに基づく · ソースを見る" : "Based on \(count) data sources · View sources" }
+    var coachDetailSheetTitle: String { self == .vi ? "Phân tích chi tiết" : self == .ja ? "詳細分析" : "Detailed analysis" }
+    var coachViewDetailLabel: String { self == .vi ? "Xem phân tích chi tiết" : self == .ja ? "詳細分析を見る" : "View detailed analysis" }
+    var coachDetailDoneLabel: String { self == .vi ? "Xong" : self == .ja ? "完了" : "Done" }
+    var coachSafetyLabel: String { self == .vi ? "Lưu ý an toàn" : self == .ja ? "安全の注意" : "Safety note" }
 
     func coachStatusLabel(for status: CoachResponseStatus) -> String {
         switch status {
@@ -868,6 +879,12 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
 
     func coachBasedOnSourcesLabel(count: Int) -> String {
         self == .vi ? "Dựa trên \(count) nguồn" : self == .ja ? "\(count) 件のデータに基づく" : "Based on \(count) sources"
+    }
+    func coachUpdatedAtLabel(_ time: String) -> String {
+        self == .vi ? "Cập nhật \(time)" : self == .ja ? "\(time) 更新" : "Updated \(time)"
+    }
+    var coachViewSourcesHint: String {
+        self == .vi ? "Xem chi tiết nguồn dữ liệu" : self == .ja ? "データソースの詳細を見る" : "View data source details"
     }
     var checkedDataRowTitle: String { self == .vi ? "Đã kiểm tra dữ liệu" : self == .ja ? "確認済みデータ" : "Checked data" }
     var noAdditionalSourceDetail: String { self == .vi ? "Không có chi tiết nguồn bổ sung." : self == .ja ? "追加のソース詳細はありません。" : "No additional source details." }

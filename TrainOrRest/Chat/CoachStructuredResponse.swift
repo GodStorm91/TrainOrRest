@@ -74,6 +74,7 @@ struct CoachDataSource: Codable, Equatable, Identifiable {
 struct CoachStructuredResponse: Codable, Equatable {
     var title: String
     var summary: String
+    var safetyNote: String? = nil
     var recommendations: [CoachRecommendation]
     var details: CoachResponseDetails?
     var followUps: [CoachChoiceOption]
@@ -97,18 +98,33 @@ extension CoachStructuredResponsePayload {
         let trimmedTitle = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedSummary = (summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty, !trimmedSummary.isEmpty else { return nil }
-        let sorted = (recommendations ?? []).sorted { $0.priority < $1.priority }
+        let trimmedSafetyNote = safetyNote?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanRecommendations = dedupedByCoachID((recommendations ?? []).filter { !$0.title.isCoachBlank })
+        let sorted = cleanRecommendations.sorted { $0.priority < $1.priority }
         let visible = Array(sorted.prefix(CoachResponseLimits.maxRecommendations))
         let overflow = Array(sorted.dropFirst(CoachResponseLimits.maxRecommendations))
-        var sections = details?.sections ?? []
+        var sections = dedupedByCoachID((details?.sections ?? []).filter { !$0.title.isCoachBlank || !$0.markdown.isCoachBlank })
         if !overflow.isEmpty {
             let markdown = overflow.enumerated().map { index, rec in rec.description.map { "\(index + 1). \(rec.title): \($0)" } ?? "\(index + 1). \(rec.title)" }.joined(separator: "\n")
+            sections.removeAll { $0.id == "additional-recommendations" }
             sections.append(CoachDetailSection(id: "additional-recommendations", title: additionalRecommendationsTitle, markdown: markdown))
         }
         let resolvedDetails: CoachResponseDetails?
-        if let existing = details { resolvedDetails = CoachResponseDetails(title: existing.title, sections: sections) }
-        else if sections.isEmpty { resolvedDetails = nil }
-        else { resolvedDetails = CoachResponseDetails(title: additionalRecommendationsTitle, sections: sections) }
-        return CoachStructuredResponse(title: trimmedTitle, summary: trimmedSummary, recommendations: visible, details: resolvedDetails, followUps: Array((followUps ?? []).prefix(CoachResponseLimits.maxFollowUps)), status: nil, metrics: [], primaryAction: nil, secondaryAction: nil, sources: [])
+        if sections.isEmpty {
+            resolvedDetails = nil
+        } else {
+            resolvedDetails = CoachResponseDetails(title: details?.title ?? additionalRecommendationsTitle, sections: sections)
+        }
+        let cleanFollowUps = dedupedByCoachID((followUps ?? []).filter { !$0.label.isCoachBlank || !$0.value.isCoachBlank })
+        return CoachStructuredResponse(title: trimmedTitle, summary: trimmedSummary, safetyNote: trimmedSafetyNote?.isEmpty == true ? nil : trimmedSafetyNote, recommendations: visible, details: resolvedDetails, followUps: Array(cleanFollowUps.prefix(CoachResponseLimits.maxFollowUps)), status: nil, metrics: [], primaryAction: nil, secondaryAction: nil, sources: [])
     }
+}
+
+private extension String {
+    var isCoachBlank: Bool { trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+}
+
+private func dedupedByCoachID<T: Identifiable>(_ items: [T]) -> [T] {
+    var seen = Set<T.ID>()
+    return items.filter { seen.insert($0.id).inserted }
 }
