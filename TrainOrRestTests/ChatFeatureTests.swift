@@ -1509,6 +1509,32 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertTrue(assistant.text.lowercased().contains("past"), "raw reason should be surfaced, got: \(assistant.text)")
     }
 
+    func testRetryDetourDoesNotClobberUnderlyingValidationReason() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let coordinator = WorkoutReplacementCoordinator(container: container)
+        let invalidPropose = ClaudeResponse(content: [
+            .toolUse(id: "toolu_bad", name: CoachTools.toolName, input: .object([
+                "changes": .array([.object([
+                    "date": .string(CoachContextBuilder.day(qualityDay, calendar: calendar)),
+                    "action": .string("replace")
+                ])])
+            ]))
+        ], stopReason: "tool_use")
+        let detour = ClaudeResponse(content: [
+            .text("Bạn có thể xác nhận lại định dạng JSON của plan_adjustment tool giúp mình không?")
+        ], stopReason: "end_turn")
+        let client = MockClaudeClient(responses: [invalidPropose] + Array(repeating: detour, count: CoachChatConfig.maxToolRounds - 1))
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
+
+        await store.send(text: "Điều chỉnh kế hoạch giúp tôi.", model: "claude-test", apiKey: "test-key", in: context)
+
+        let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertTrue(assistant.text.lowercased().contains("requires a workout"), "underlying validation reason should survive the retry nudge, got: \(assistant.text)")
+        XCTAssertFalse(assistant.text.contains("Plan edits must be submitted"), "retry nudge must not replace the real reason, got: \(assistant.text)")
+    }
+
     func testDismissingInlineFailurePersistsDismissedTurn() async throws {
         let container = try makeContainer()
         let context = container.mainContext

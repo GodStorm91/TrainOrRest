@@ -559,6 +559,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         }
         let applied: [String] = []
         var lastToolRejection: String?
+        var underlyingRejection: String?
         let shouldPublishStreamingText = snapshot.actionType != .planMutation
 
         for _ in 0..<CoachChatConfig.maxToolRounds {
@@ -670,6 +671,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             conversation.append(ClaudeMessageParam(role: "assistant", content: response.content))
             guard toolUses.count == 1 else {
                 lastToolRejection = "Submit one plan adjustment at a time."
+                underlyingRejection = "Submit one plan adjustment at a time."
                 conversation.append(ClaudeMessageParam(role: "user", content: toolUses.map {
                     .toolResult(toolUseID: $0.0, content: "Rejected: submit one plan adjustment at a time.", isError: true)
                 }))
@@ -679,6 +681,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             let toolUse = toolUses[0]
             guard toolUse.1 == CoachTools.toolName else {
                 lastToolRejection = "Unknown coach tool."
+                underlyingRejection = "Unknown coach tool."
                 conversation.append(ClaudeMessageParam(role: "user", content: [
                     .toolResult(toolUseID: toolUse.0, content: "Unknown tool.", isError: true)
                 ]))
@@ -710,6 +713,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             } catch {
                 let message = technicalErrorMessage(error)
                 lastToolRejection = message
+                underlyingRejection = message
                 conversation.append(ClaudeMessageParam(role: "user", content: [
                     .toolResult(toolUseID: toolUse.0, content: "Rejected: \(message)", isError: true)
                 ]))
@@ -719,8 +723,8 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         if !applied.isEmpty {
             assistantTurn.text = "Applied: \(applied.joined(separator: "; "))"
             assistantTurn.appliedAdjustment = applied.joined(separator: "; ")
-        } else if let lastToolRejection {
-            assistantTurn.text = Self.userFacingPlanToolRejection(lastToolRejection)
+        } else if let rejection = underlyingRejection ?? lastToolRejection {
+            assistantTurn.text = Self.userFacingPlanToolRejection(rejection)
         } else {
             assistantTurn.text = "I could not safely finish the plan adjustment. Please try one specific change at a time."
         }
