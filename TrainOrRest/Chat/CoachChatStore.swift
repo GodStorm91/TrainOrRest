@@ -648,17 +648,25 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             }
 
             if toolUses.count == 1, toolUses[0].1 == CoachToolCatalog.coachResponseName {
+                let language = CoachLanguage(rawValue: snapshot.locale) ?? .current
                 let payload = try toolUses[0].2.decoded(CoachStructuredResponsePayload.self)
                 var interaction = payload.interaction ?? fallbackInteraction(from: snapshot)
-                interaction?.normalizeForNewAssistantMessage(
-                    fallbackLanguage: CoachLanguage(rawValue: snapshot.locale) ?? .current
-                )
+                interaction?.normalizeForNewAssistantMessage(fallbackLanguage: language)
                 if interaction?.options.count ?? 0 < 2 {
                     interaction = nil
                 }
                 let content = payload.content.trimmingCharacters(in: .whitespacesAndNewlines)
                 assistantTurn.text = content.isEmpty ? response.content.textContent : content
                 assistantTurn.interaction = interaction
+                if let structured = payload.validatedStructuredResponse(additionalRecommendationsTitle: language.additionalRecommendationsTitle) {
+                    let readiness = try? context.fetch(FetchDescriptor<DailyReadiness>(sortBy: [SortDescriptor(\.date, order: .reverse)])).first
+                    assistantTurn.structuredResponse = CoachResponseComposer.compose(
+                        model: structured,
+                        readiness: readiness,
+                        contextItems: snapshot.contextItems,
+                        language: language
+                    )
+                }
                 assistantTurn.appliedAdjustment = applied.isEmpty ? nil : applied.joined(separator: "; ")
                 if let interaction, interaction.status == .pending {
                     generationState = .awaitingChoice(messageId: assistantTurn.turnID, interactionId: interaction.id)

@@ -81,6 +81,7 @@ final class ChatMessage {
     var announcedFailureStorage: Bool?
     var interactionJSON: String?
     var contextItemsJSON: String?
+    var structuredResponseJSON: String? = nil
 
     init(
         uuid: UUID = UUID(),
@@ -175,6 +176,11 @@ final class ChatMessage {
     var contextItems: [CoachContextItem] {
         get { Self.decode([CoachContextItem].self, from: contextItemsJSON ?? "") ?? [] }
         set { contextItemsJSON = Self.encode(newValue) }
+    }
+
+    var structuredResponse: CoachStructuredResponse? {
+        get { Self.decode(CoachStructuredResponse.self, from: structuredResponseJSON ?? "") }
+        set { structuredResponseJSON = newValue.map { Self.encode($0) } }
     }
 
     private static func encode<T: Encodable>(_ value: T) -> String {

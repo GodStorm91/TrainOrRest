@@ -1563,6 +1563,123 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertNil(payload.followUps)
     }
 
+    func testChatMessageStructuredResponseRoundTrips() throws {
+        let payload = try JSONDecoder().decode(
+            CoachStructuredResponsePayload.self,
+            from: Data("""
+            {
+              "content": "Take it easy.",
+              "title": "Prioritize recovery",
+              "summary": "Your body needs time to adapt.",
+              "recommendations": [
+                {"id": "r1", "title": "Rest", "priority": 1},
+                {"id": "r2", "title": "Walk", "priority": 2}
+              ]
+            }
+            """.utf8)
+        )
+        let structured = try XCTUnwrap(
+            payload.validatedStructuredResponse(additionalRecommendationsTitle: "More")
+        )
+        let message = ChatMessage(role: .assistant, text: "x", date: Date())
+
+        message.structuredResponse = structured
+
+        XCTAssertNotNil(message.structuredResponseJSON)
+        XCTAssertEqual(message.structuredResponse, structured)
+
+        message.structuredResponse = nil
+
+        XCTAssertNil(message.structuredResponseJSON)
+        XCTAssertNil(message.structuredResponse)
+    }
+
+    func testCoachResponseWithTitleSummaryPersistsComposedStructuredResponse() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        context.insert(DailyReadiness(
+            date: today.addingTimeInterval(1),
+            assessment: ReadinessAssessment(
+                verdict: .rest,
+                score: 60,
+                reasons: [],
+                ruleIDs: [.loadRamp],
+                baselineDayCount: 28,
+                snapshot: .init(
+                    hrvMean7: 45,
+                    hrvMean28: nil,
+                    rhrMean7: nil,
+                    rhrMean28: nil,
+                    sleepLastNight: 7,
+                    sleepMean14: nil,
+                    acuteChronicRatio: 1.2
+                )
+            ),
+            computedAt: today
+        ))
+        try context.save()
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [
+                .toolUse(id: "t", name: CoachToolCatalog.coachResponseName, input: .object([
+                    "content": .string("Take it easy."),
+                    "title": .string("Uu tien hoi phuc"),
+                    "summary": .string("Co the chua san sang."),
+                    "recommendations": .array([
+                        .object([
+                            "id": .string("r1"),
+                            "title": .string("Chay nhe"),
+                            "priority": .number(1)
+                        ])
+                    ])
+                ]))
+            ], stopReason: "tool_use")
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(
+            text: "Hom nay the nao?",
+            model: "claude-test",
+            apiKey: "test-key",
+            contextItems: [
+                CoachContextItem(type: .healthData, label: "Suc khoe"),
+                CoachContextItem(type: .completedRun, label: "Buoi chay")
+            ],
+            in: context
+        )
+
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        let assistant = try XCTUnwrap(messages.last { $0.role == .assistant })
+        let structured = try XCTUnwrap(assistant.structuredResponse)
+
+        XCTAssertEqual(structured.title, "Uu tien hoi phuc")
+        XCTAssertEqual(structured.status, .recoveryRecommended)
+        XCTAssertFalse(structured.metrics.isEmpty)
+        XCTAssertEqual(structured.sources.count, 2)
+    }
+
+    func testLegacyCoachResponseWithoutTitleSummaryHasNoStructuredResponse() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [
+                .toolUse(id: "t", name: CoachToolCatalog.coachResponseName, input: .object([
+                    "content": .string("Just text.")
+                ]))
+            ], stopReason: "tool_use")
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(text: "How am I?", model: "claude-test", apiKey: "test-key", in: context)
+
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        let assistant = try XCTUnwrap(messages.last { $0.role == .assistant })
+
+        XCTAssertNil(assistant.structuredResponse)
+        XCTAssertEqual(assistant.text, "Just text.")
+    }
+
 
     func testDecodingErrorCoachDetailNamesMissingKey() {
         let json = Data("{}".utf8)
