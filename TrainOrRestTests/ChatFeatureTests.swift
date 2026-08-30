@@ -1535,6 +1535,35 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertFalse(assistant.text.contains("Plan edits must be submitted"), "retry nudge must not replace the real reason, got: \(assistant.text)")
     }
 
+    func testCreateWithMalformedWorkoutSurfacesFieldNotMissingWorkout() throws {
+        // Step is missing pace_zone: the workout is present but malformed. It
+        // must surface the field, not be hidden as an absent workout.
+        let json = Data("""
+        {"changes":[{"date":"2026-01-07","action":"create","workout":{"kind":"easy","blocks":[{"repeat_count":1,"steps":[{"role":"work","target_type":"distance_km","target_value":8}]}]}}]}
+        """.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(PlanAdjustmentProposal.self, from: json)) { error in
+            let detail = (error as? DecodingError)?.coachDetail ?? "\(error)"
+            XCTAssertTrue(detail.lowercased().contains("pace_zone"), "should name the missing field, got: \(detail)")
+        }
+    }
+
+    func testCreateWithCompleteWorkoutDecodesSuccessfully() throws {
+        let json = Data("""
+        {"changes":[{"date":"2026-01-07","action":"create","workout":{"kind":"easy","blocks":[{"repeat_count":1,"steps":[{"role":"work","target_type":"distance_km","target_value":8,"pace_zone":"easy"}]}]}}]}
+        """.utf8)
+        let proposal = try JSONDecoder().decode(PlanAdjustmentProposal.self, from: json)
+        XCTAssertEqual(proposal.changes.first?.workout?.kind, "easy")
+        XCTAssertEqual(proposal.changes.first?.workout?.blocks.first?.steps.first?.paceZone, "easy")
+    }
+
+    func testBareCreateWithoutWorkoutKeyDecodesToNilWorkout() throws {
+        let json = Data("""
+        {"changes":[{"date":"2026-01-07","action":"create"}]}
+        """.utf8)
+        let proposal = try JSONDecoder().decode(PlanAdjustmentProposal.self, from: json)
+        XCTAssertNil(proposal.changes.first?.workout)
+    }
+
     func testDismissingInlineFailurePersistsDismissedTurn() async throws {
         let container = try makeContainer()
         let context = container.mainContext

@@ -30,18 +30,33 @@ struct PlanAdjustmentProposal: Codable, Equatable {
             date = try container.decode(String.self, forKey: .date)
             action = try container.decode(Action.self, forKey: .action)
             detail = try container.decodeIfPresent(String.self, forKey: .detail)
-            workout = try? container.decodeIfPresent(CreateWorkout.self, forKey: .workout)
+            var workoutDecodeError: Error?
+            do {
+                workout = try container.decodeIfPresent(CreateWorkout.self, forKey: .workout)
+            } catch {
+                workout = nil
+                workoutDecodeError = error
+            }
 
             // Model outputs sometimes flatten a create payload as
             // { action:create, workout:"Easy", blocks:[...] } or
             // { action:create, kind:"easy", blocks:[...] }. Normalize that
             // obvious shape so the user sees a real confirmation card instead
-            // of a low-level JSON "missing data" failure. Still leave truly
-            // incomplete creates nil so Swift validation blocks persistence.
+            // of a low-level JSON "missing data" failure.
             if (action == .create || action == .replace), workout == nil,
                let blocks = try? container.decodeIfPresent([CreateWorkout.Block].self, forKey: .blocks),
                let kind = Self.decodeCreateKind(from: container) {
                 workout = CreateWorkout(kind: kind, blocks: blocks)
+            }
+
+            // A workout that is present but malformed (a missing or wrong-typed
+            // field in the nested blocks/steps) must not be reported as an
+            // absent workout — that hides which field is wrong. When the flatten
+            // fallback cannot salvage it, surface the real decode error so the
+            // coach and the retry loop see the exact field.
+            if workout == nil, container.contains(.workout), let workoutDecodeError,
+               action == .create || action == .replace {
+                throw workoutDecodeError
             }
         }
 

@@ -1193,7 +1193,10 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         if lower.contains("no workout on")
             || lower.contains("requires a workout")
             || lower.contains("does not take a workout")
-            || lower.contains("missing workout") {
+            || lower.contains("missing workout")
+            || lower.contains("missing field")
+            || lower.contains("type mismatch")
+            || lower.contains("corrupted data") {
             friendly = "Coach chưa đọc được buổi chạy cần thay đổi. Anh thử nói rõ ngày, loại buổi và mục tiêu mới, hoặc để em tạo đề xuất từ kế hoạch hiện tại."
         } else if lower.contains("past") || lower.contains("after race day") {
             friendly = "Không thể chỉnh buổi tập trong quá khứ hoặc sau ngày đua. Anh chọn ngày hợp lệ rồi thử lại nhé."
