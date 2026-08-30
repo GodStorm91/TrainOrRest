@@ -63,7 +63,9 @@ struct ChatBubble: View {
             }
 
             VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
-                if isUser || hasVisibleAssistantText {
+                if !isUser, message.assistantStatus == .completed, let structured = message.structuredResponse {
+                    CoachResponseCard(response: structured, language: language)
+                } else if isUser || hasVisibleAssistantText {
                     messageBody
                         .padding(.horizontal, 14)
                         .padding(.vertical, 12)

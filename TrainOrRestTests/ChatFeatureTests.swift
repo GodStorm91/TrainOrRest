@@ -1,3 +1,5 @@
+import SwiftUI
+import UIKit
 import SwiftData
 import XCTest
 @testable import TrainOrRest
@@ -1518,6 +1520,95 @@ final class ChatFeatureTests: XCTestCase {
 
         XCTAssertEqual(sources.map(\.type), [.healthData, .completedWorkout, .trainingPlan])
         XCTAssertEqual(sources.first?.label, CoachLanguage.vi.sourceHealthDataLabel)
+    }
+
+    func testCoachStatusLabelsLocalized() {
+        XCTAssertEqual(
+            CoachLanguage.vi.coachStatusLabel(for: .recoveryRecommended),
+            "NÊN ƯU TIÊN HỒI PHỤC"
+        )
+        XCTAssertEqual(
+            CoachLanguage.vi.coachStatusLabel(for: .ready),
+            "SẴN SÀNG TẬP LUYỆN"
+        )
+    }
+
+    func testBasedOnSourcesLabel() {
+        XCTAssertEqual(
+            CoachLanguage.vi.coachBasedOnSourcesLabel(count: 3),
+            "Dựa trên 3 nguồn"
+        )
+    }
+
+    @MainActor
+    func testCoachResponseCardRasterizesLightAndDark() throws {
+        guard #available(iOS 16.0, *) else { return }
+
+        let output = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: ".verify-artifacts", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+
+        let response = CoachStructuredResponse(
+            title: "Tuần này chưa nên tăng cường độ",
+            summary: "Khối lượng tập gần đây đang ổn định, nhưng cơ thể vẫn cần thêm thời gian để hấp thụ bài tập. Ưu tiên phục hồi sẽ giúp bạn trở lại mạnh hơn cho buổi chất lượng tiếp theo.",
+            recommendations: [
+                .init(id: "easy", title: "Giữ buổi chạy nhẹ", description: "Duy trì nhịp nói chuyện thoải mái.", priority: 1),
+                .init(id: "sleep", title: "Ưu tiên giấc ngủ", description: "Đi ngủ sớm hơn trong hai tối tới.", priority: 2),
+                .init(id: "fuel", title: "Bổ sung năng lượng", description: "Ăn đủ carbohydrate và protein sau buổi tập.", priority: 3)
+            ],
+            details: nil,
+            followUps: [],
+            status: .recoveryRecommended,
+            metrics: [
+                .init(id: "load", label: "ACWR", value: "1.2", interpretation: "Ổn định", status: .neutral),
+                .init(id: "sleep", label: "Giấc ngủ", value: "7 giờ", interpretation: "Cần chú ý", status: .attention)
+            ],
+            primaryAction: nil,
+            secondaryAction: nil,
+            sources: [
+                .init(id: "health", type: .healthData, label: "Dữ liệu sức khỏe", updatedAt: nil),
+                .init(id: "plan", type: .trainingPlan, label: "Kế hoạch hiện tại", updatedAt: nil)
+            ]
+        )
+
+        for (scheme, name) in [(ColorScheme.light, "light"), (.dark, "dark")] {
+            let view = CoachResponseCard(response: response, language: .vi)
+                .frame(width: 360)
+                .padding(16)
+                .background(Theme.bg)
+                .environment(\.colorScheme, scheme)
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = 3
+
+            let image = try XCTUnwrap(renderer.uiImage)
+            let data = try XCTUnwrap(image.pngData())
+            try data.write(to: output.appending(path: "coach-card-\(name).png"))
+        }
+
+        let minimal = CoachStructuredResponse(
+            title: "Duy trì nhịp tập",
+            summary: "Bạn đang đi đúng hướng.",
+            recommendations: [],
+            details: nil,
+            followUps: [],
+            status: nil,
+            metrics: [],
+            primaryAction: nil,
+            secondaryAction: nil,
+            sources: []
+        )
+        let minimalView = CoachResponseCard(response: minimal, language: .vi)
+            .frame(width: 360)
+            .padding(16)
+            .background(Theme.bg)
+        let minimalRenderer = ImageRenderer(content: minimalView)
+        minimalRenderer.scale = 3
+
+        let minimalImage = try XCTUnwrap(minimalRenderer.uiImage)
+        let minimalData = try XCTUnwrap(minimalImage.pngData())
+        try minimalData.write(to: output.appending(path: "coach-card-minimal.png"))
     }
 
     func testComposePreservesModelAuthoredAndFillsHydrated() {
