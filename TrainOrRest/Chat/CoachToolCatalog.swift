@@ -29,6 +29,67 @@ enum CoachToolCatalog {
                         "type": .string("string"),
                         "description": .string("Natural-language assistant message shown in the chat bubble.")
                     ]),
+                    "title": .object([
+                        "type": .string("string"),
+                        "description": .string("One concise decision-relevant conclusion, at most two lines.")
+                    ]),
+                    "summary": .object([
+                        "type": .string("string"),
+                        "description": .string("Two or three short sentences explaining why. Do not put all analysis here.")
+                    ]),
+                    "recommendations": .object([
+                        "type": .string("array"),
+                        "maxItems": .number(6),
+                        "items": .object([
+                            "type": .string("object"),
+                            "additionalProperties": .bool(false),
+                            "properties": .object([
+                                "id": .object(["type": .string("string")]),
+                                "title": .object(["type": .string("string")]),
+                                "description": .object(["type": .string("string")]),
+                                "priority": .object([
+                                    "type": .string("integer"),
+                                    "minimum": .number(1)
+                                ])
+                            ]),
+                            "required": .array(["id", "title", "priority"].map(JSONValue.string))
+                        ])
+                    ]),
+                    "details": .object([
+                        "type": .string("object"),
+                        "additionalProperties": .bool(false),
+                        "properties": .object([
+                            "title": .object(["type": .string("string")]),
+                            "sections": .object([
+                                "type": .string("array"),
+                                "items": .object([
+                                    "type": .string("object"),
+                                    "additionalProperties": .bool(false),
+                                    "properties": .object([
+                                        "id": .object(["type": .string("string")]),
+                                        "title": .object(["type": .string("string")]),
+                                        "markdown": .object(["type": .string("string")])
+                                    ]),
+                                    "required": .array(["id", "title", "markdown"].map(JSONValue.string))
+                                ])
+                            ])
+                        ]),
+                        "required": .array(["title", "sections"].map(JSONValue.string))
+                    ]),
+                    "followUps": .object([
+                        "type": .string("array"),
+                        "maxItems": .number(3),
+                        "items": .object([
+                            "type": .string("object"),
+                            "additionalProperties": .bool(false),
+                            "properties": .object([
+                                "id": .object(["type": .string("string")]),
+                                "label": .object(["type": .string("string")]),
+                                "value": .object(["type": .string("string")])
+                            ]),
+                            "required": .array(["id", "label", "value"].map(JSONValue.string))
+                        ])
+                    ]),
                     "interaction": interactionSchema
                 ]),
                 "required": .array([.string("content")])

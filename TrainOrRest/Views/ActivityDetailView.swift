@@ -362,7 +362,7 @@ struct RunReviewCard: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            CoachRecommendation(text: model.recommendation, accent: accent)
+            CoachRecommendationView(text: model.recommendation, accent: accent)
         }
         .padding(16)
         .background(
@@ -604,7 +604,7 @@ struct ActivityEvidenceChip: View {
     }
 }
 
-struct CoachRecommendation: View {
+struct CoachRecommendationView: View {
     let text: String
     let accent: Color
 

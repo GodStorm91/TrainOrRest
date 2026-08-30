@@ -850,6 +850,7 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
     func fixedWorkoutContextLabel(title: String) -> String { self == .vi ? "Bối cảnh buổi tập cố định: \(title)" : self == .ja ? "固定のワークアウト文脈: \(title)" : "Fixed workout context: \(title)" }
 
     var dataSourcesUsedTitle: String { self == .vi ? "Nguồn dữ liệu đã sử dụng" : self == .ja ? "使用したデータソース" : "Data sources used" }
+    var additionalRecommendationsTitle: String { self == .vi ? "Khuyến nghị bổ sung" : self == .ja ? "追加の推奨事項" : "Additional recommendations" }
     var verifiedPlanUpdateLabel: String { self == .vi ? "Đã kiểm tra và cập nhật kế hoạch" : self == .ja ? "計画を確認して更新しました" : "Plan checked and updated" }
     var viewSourcesLabel: String { self == .vi ? "Xem nguồn dữ liệu" : self == .ja ? "データソースを見る" : "View data sources" }
     func sourceLineWithTime(_ time: String) -> String { self == .vi ? "Dựa trên dữ liệu lúc \(time) · Xem nguồn" : self == .ja ? "\(time) のデータに基づく · ソースを見る" : "Based on data from \(time) · View sources" }
@@ -1007,4 +1008,24 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
     var coachRoleLine: String { self == .vi ? "Giải thích & đề xuất · không tự sửa kế hoạch của bạn." : self == .ja ? "説明と提案のみ · あなたの計画は編集しません。" : "Explains & proposes · never edits your plan." }
     var responseTruncatedTitle: String { self == .vi ? "Phản hồi bị cắt ngắn" : self == .ja ? "返信が途中で切れました" : "Reply was cut off" }
     var responseTruncatedMessage: String { self == .vi ? "Phản hồi của Coach bị cắt ngắn. Nhấn thử lại, hoặc yêu cầu từng thay đổi một." : self == .ja ? "Coach の返信が途中で切れました。再試行するか、変更を1つずつ依頼してください。" : "The coach's reply was cut off. Tap retry, or ask for one change at a time." }
+
+    var metricReadinessLabel: String { self == .vi ? "Mức sẵn sàng tập luyện" : self == .ja ? "トレーニング準備度" : "Training readiness" }
+    var metricSleepLabel: String { self == .vi ? "Giấc ngủ" : self == .ja ? "睡眠" : "Sleep" }
+    var metricRestingHRLabel: String { self == .vi ? "Nhịp tim nghỉ (RHR)" : self == .ja ? "安静時心拍数 (RHR)" : "Resting heart rate (RHR)" }
+    var metricHRVLabel: String { self == .vi ? "Biến thiên nhịp tim (HRV)" : self == .ja ? "心拍変動 (HRV)" : "Heart-rate variability (HRV)" }
+    var metricLoadLabel: String { self == .vi ? "Tỷ lệ tải cấp tính/mạn tính (ACWR)" : self == .ja ? "急性:慢性負荷比 (ACWR)" : "Acute:chronic load (ACWR)" }
+    var metricStableNote: String { self == .vi ? "Ổn định" : self == .ja ? "安定" : "Stable" }
+    var metricAttentionNote: String { self == .vi ? "Cần chú ý" : self == .ja ? "要注意" : "Needs attention" }
+    var metricGoodNote: String { self == .vi ? "Tốt" : self == .ja ? "良好" : "Good" }
+    var sourceHealthDataLabel: String { self == .vi ? "Dữ liệu sức khỏe" : self == .ja ? "健康データ" : "Health data" }
+    var sourceCompletedWorkoutLabel: String { self == .vi ? "Buổi tập gần nhất" : self == .ja ? "直近のワークアウト" : "Latest workout" }
+    var sourceTrainingPlanLabel: String { self == .vi ? "Kế hoạch hiện tại" : self == .ja ? "現在の計画" : "Current plan" }
+    var sourceUpcomingWorkoutsLabel: String { self == .vi ? "Buổi tập sắp tới" : self == .ja ? "今後のワークアウト" : "Upcoming workouts" }
+    var sourceRaceGoalLabel: String { self == .vi ? "Mục tiêu cuộc đua" : self == .ja ? "レース目標" : "Race goal" }
+
+    func sleepHours(_ hours: Double) -> String {
+        let compact = (hours * 10).rounded() / 10
+        let number = compact.rounded() == compact ? String(Int(compact)) : String(format: "%.1f", compact)
+        return self == .vi ? "\(number) giờ" : self == .ja ? "\(number)時間" : "\(number)h"
+    }
 }

@@ -1358,6 +1358,212 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertNil(payload.interaction)
     }
 
+    func testCoachStructuredResponsePayloadDecodesModelAuthoredFields() throws {
+        let jsonString = """
+        {
+          "content": "Take an easy day.",
+          "title": "Prioritize recovery",
+          "summary": "Your recent effort was high. An easy day supports adaptation.",
+          "recommendations": [
+            {"id": "easy-run", "title": "Run easy", "description": "Keep effort low.", "priority": 1},
+            {"id": "sleep", "title": "Sleep more", "priority": 2}
+          ],
+          "details": {
+            "title": "Why",
+            "sections": [{"id": "load", "title": "Training load", "markdown": "Load is elevated."}]
+          },
+          "followUps": [
+            {"id": "plan", "label": "Show my plan", "value": "Show my plan"},
+            {"id": "recovery", "label": "Recovery ideas", "value": "Recovery ideas"}
+          ]
+        }
+        """
+
+        let payload = try JSONDecoder().decode(
+            CoachStructuredResponsePayload.self,
+            from: Data(jsonString.utf8)
+        )
+
+        XCTAssertEqual(payload.title, "Prioritize recovery")
+        XCTAssertEqual(payload.summary, "Your recent effort was high. An easy day supports adaptation.")
+        XCTAssertEqual(payload.recommendations?.count, 2)
+        XCTAssertEqual(payload.details?.sections.count, 1)
+        XCTAssertEqual(payload.followUps?.count, 2)
+    }
+
+    func testValidatedStructuredResponseNilWhenTitleOrSummaryMissing() throws {
+        let jsonString = #"{"content":"Take an easy day."}"#
+        let payload = try JSONDecoder().decode(
+            CoachStructuredResponsePayload.self,
+            from: Data(jsonString.utf8)
+        )
+
+        XCTAssertNil(payload.validatedStructuredResponse(additionalRecommendationsTitle: "More"))
+    }
+
+    func testValidatedStructuredResponseCapsRecommendationsMovingOverflowToDetails() throws {
+        let jsonString = """
+        {
+          "content": "Take an easy day.",
+          "title": "Prioritize recovery",
+          "summary": "Your recent effort was high.",
+          "recommendations": [
+            {"id": "r1", "title": "First", "priority": 1},
+            {"id": "r2", "title": "Second", "priority": 2},
+            {"id": "r3", "title": "Third", "priority": 3},
+            {"id": "r4", "title": "Fourth", "priority": 4},
+            {"id": "r5", "title": "Fifth", "priority": 5}
+          ]
+        }
+        """
+        let payload = try JSONDecoder().decode(
+            CoachStructuredResponsePayload.self,
+            from: Data(jsonString.utf8)
+        )
+        let response = try XCTUnwrap(
+            payload.validatedStructuredResponse(additionalRecommendationsTitle: "More")
+        )
+        let overflow = try XCTUnwrap(response.details?.sections.last)
+
+        XCTAssertEqual(response.recommendations.count, 3)
+        XCTAssertEqual(response.recommendations.map(\.id), ["r1", "r2", "r3"])
+        XCTAssertEqual(overflow.id, "additional-recommendations")
+        XCTAssertTrue(overflow.markdown.contains("Fourth"))
+        XCTAssertTrue(overflow.markdown.contains("Fifth"))
+    }
+
+    func testValidatedStructuredResponseCapsFollowUpsToThree() throws {
+        let jsonString = """
+        {
+          "content": "Take an easy day.",
+          "title": "Prioritize recovery",
+          "summary": "Your recent effort was high.",
+          "followUps": [
+            {"id": "one", "label": "One", "value": "One"},
+            {"id": "two", "label": "Two", "value": "Two"},
+            {"id": "three", "label": "Three", "value": "Three"},
+            {"id": "four", "label": "Four", "value": "Four"},
+            {"id": "five", "label": "Five", "value": "Five"}
+          ]
+        }
+        """
+        let payload = try JSONDecoder().decode(
+            CoachStructuredResponsePayload.self,
+            from: Data(jsonString.utf8)
+        )
+        let response = try XCTUnwrap(
+            payload.validatedStructuredResponse(additionalRecommendationsTitle: "More")
+        )
+
+        XCTAssertEqual(response.followUps.count, 3)
+    }
+
+    func testValidatedStructuredResponseLeavesHydratedFieldsEmpty() throws {
+        let jsonString = """
+        {
+          "content": "Take an easy day.",
+          "title": "Prioritize recovery",
+          "summary": "Your recent effort was high."
+        }
+        """
+        let payload = try JSONDecoder().decode(
+            CoachStructuredResponsePayload.self,
+            from: Data(jsonString.utf8)
+        )
+        let response = try XCTUnwrap(
+            payload.validatedStructuredResponse(additionalRecommendationsTitle: "More")
+        )
+
+        XCTAssertNil(response.status)
+        XCTAssertTrue(response.metrics.isEmpty)
+        XCTAssertTrue(response.sources.isEmpty)
+        XCTAssertNil(response.primaryAction)
+    }
+
+    func testReadinessVerdictMapsToStatusExhaustively() {
+        XCTAssertEqual(CoachResponseComposer.status(for: .train), .ready)
+        XCTAssertEqual(CoachResponseComposer.status(for: .goEasy), .recoveryRecommended)
+        XCTAssertEqual(CoachResponseComposer.status(for: .rest), .recoveryRecommended)
+        XCTAssertEqual(CoachResponseComposer.status(for: .insufficientData), .insufficientData)
+    }
+
+    func testMetricsUseLocalizedLabelsCompactValuesAndRuleFlaggedStatus() throws {
+        let metrics = CoachResponseComposer.metrics(from: hydrationReadiness(), language: .vi)
+        let load = try XCTUnwrap(metrics.first { $0.id == "load" })
+        let sleep = try XCTUnwrap(metrics.first { $0.id == "sleep" })
+
+        XCTAssertEqual(load.value, "1.2")
+        XCTAssertEqual(load.label, CoachLanguage.vi.metricLoadLabel)
+        XCTAssertEqual(load.status, .attention)
+        XCTAssertEqual(load.interpretation, CoachLanguage.vi.metricAttentionNote)
+        XCTAssertEqual(sleep.value, CoachLanguage.vi.sleepHours(7.0))
+        XCTAssertEqual(sleep.status, .neutral)
+    }
+
+    func testDistanceFormatterIsLocaleAwareAndNeverIdeogram() {
+        let distances = [
+            CoachResponseComposer.formatDistance(kilometers: 5.0, language: .vi),
+            CoachResponseComposer.formatDistance(kilometers: 3.1, language: .en)
+        ]
+
+        XCTAssertEqual(distances, ["5 km", "3.1 km"])
+        XCTAssertFalse(distances.contains { $0.contains("公里") })
+
+        let metricValues = CoachResponseComposer.metrics(from: hydrationReadiness(), language: .vi).map(\.value)
+        XCTAssertFalse(metricValues.contains { $0.contains("公里") })
+    }
+
+    func testSourcesMapAndDedupeContextItems() {
+        let sources = CoachResponseComposer.sources(from: hydrationContextItems(), language: .vi)
+
+        XCTAssertEqual(sources.map(\.type), [.healthData, .completedWorkout, .trainingPlan])
+        XCTAssertEqual(sources.first?.label, CoachLanguage.vi.sourceHealthDataLabel)
+    }
+
+    func testComposePreservesModelAuthoredAndFillsHydrated() {
+        let model = CoachStructuredResponse(
+            title: "Prioritize recovery",
+            summary: "Your training load is elevated.",
+            recommendations: [.init(id: "rest", title: "Rest", description: nil, priority: 1)],
+            details: nil,
+            followUps: [],
+            status: nil,
+            metrics: [],
+            primaryAction: nil,
+            secondaryAction: nil,
+            sources: []
+        )
+
+        let result = CoachResponseComposer.compose(
+            model: model,
+            readiness: hydrationReadiness(),
+            contextItems: hydrationContextItems(),
+            language: .vi
+        )
+
+        XCTAssertEqual(result.title, model.title)
+        XCTAssertEqual(result.summary, model.summary)
+        XCTAssertEqual(result.recommendations, model.recommendations)
+        XCTAssertEqual(result.status, .recoveryRecommended)
+        XCTAssertFalse(result.metrics.isEmpty)
+        XCTAssertEqual(result.sources.count, 3)
+    }
+
+    func testMissingOptionalStructuredFieldsDecodeToNil() throws {
+        let jsonString = #"{"content":"Take an easy day."}"#
+        let payload = try JSONDecoder().decode(
+            CoachStructuredResponsePayload.self,
+            from: Data(jsonString.utf8)
+        )
+
+        XCTAssertNil(payload.title)
+        XCTAssertNil(payload.summary)
+        XCTAssertNil(payload.recommendations)
+        XCTAssertNil(payload.details)
+        XCTAssertNil(payload.followUps)
+    }
+
+
     func testDecodingErrorCoachDetailNamesMissingKey() {
         let json = Data("{}".utf8)
         do {
@@ -1816,6 +2022,38 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let configuration = ModelConfiguration("ChatFeatureTests-\(UUID().uuidString)", schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: [configuration])
+    }
+
+    private func hydrationReadiness() -> DailyReadiness {
+        DailyReadiness(
+            date: today,
+            assessment: ReadinessAssessment(
+                verdict: .rest,
+                score: 60,
+                reasons: [],
+                ruleIDs: [.loadRamp],
+                baselineDayCount: 28,
+                snapshot: .init(
+                    hrvMean7: 45,
+                    hrvMean28: nil,
+                    rhrMean7: nil,
+                    rhrMean28: nil,
+                    sleepLastNight: 7.0,
+                    sleepMean14: nil,
+                    acuteChronicRatio: 1.2
+                )
+            ),
+            computedAt: today
+        )
+    }
+
+    private func hydrationContextItems() -> [CoachContextItem] {
+        [
+            .init(type: .healthData, label: "Health"),
+            .init(type: .completedRun, label: "Completed run"),
+            .init(type: .trainingPlan, label: "Training plan"),
+            .init(type: .healthData, label: "Health duplicate")
+        ]
     }
 
     private func seedTrainingData(in context: ModelContext) throws {
