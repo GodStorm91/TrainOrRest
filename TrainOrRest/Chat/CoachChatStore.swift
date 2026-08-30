@@ -1181,16 +1181,34 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
 
     private static func userFacingPlanToolRejection(_ raw: String) -> String {
         let lower = raw.lowercased()
-        if lower.contains("swap does not take a workout") || lower.contains("missing workout") || lower.contains("workout") {
-            return "Coach chưa đọc được buổi chạy cần thay đổi. Anh thử nói rõ ngày, loại buổi và mục tiêu mới, hoặc để em tạo đề xuất từ kế hoạch hiện tại."
+        let friendly: String
+        // Order and needles are substring-safe. Most validation errors mention
+        // "workout" and "payload" contains "load", so a genuinely absent or
+        // misplaced workout is matched with precise phrases first, and the
+        // safety branch uses PlanValidator's real tokens (never "load"/"safe").
+        if lower.contains("no workout on")
+            || lower.contains("requires a workout")
+            || lower.contains("does not take a workout")
+            || lower.contains("missing workout") {
+            friendly = "Coach chưa đọc được buổi chạy cần thay đổi. Anh thử nói rõ ngày, loại buổi và mục tiêu mới, hoặc để em tạo đề xuất từ kế hoạch hiện tại."
+        } else if lower.contains("past") || lower.contains("after race day") {
+            friendly = "Không thể chỉnh buổi tập trong quá khứ hoặc sau ngày đua. Anh chọn ngày hợp lệ rồi thử lại nhé."
+        } else if lower.contains("already has a workout")
+            || lower.contains("already has the workout")
+            || lower.contains("two workouts")
+            || lower.contains("outside the training plan")
+            || lower.contains("outside that week")
+            || lower.contains("race day cannot")
+            || lower.contains("race workouts cannot") {
+            friendly = "Ngày này đã có buổi tập, trùng lịch hoặc nằm ngoài kế hoạch hiện tại. Anh chọn ngày khác hoặc yêu cầu thay thế buổi đang có."
+        } else if lower.contains("volume") || lower.contains("ramp") || lower.contains("taper") || lower.contains("hard sessions") || lower.contains("exceeds cap") {
+            friendly = "Thay đổi này có thể làm tải tập tăng quá nhanh, nên em chưa áp dụng vào lịch. Anh có thể giảm quãng đường/cường độ rồi thử lại."
+        } else if lower.contains("stale") || lower.contains("changed") {
+            friendly = "Kế hoạch đã thay đổi so với lúc Coach tạo đề xuất. Anh mở lại lịch hiện tại rồi gửi yêu cầu mới nhé."
+        } else {
+            friendly = "Em chưa thể áp dụng thay đổi này vào lịch. Buổi tập chưa thay đổi; anh gửi lại với ngày và mục tiêu mới, hoặc mở đúng workout rồi dùng Edit with Coach."
         }
-        if lower.contains("volume") || lower.contains("load") || lower.contains("ramp") || lower.contains("safe") {
-            return "Thay đổi này có thể làm tải tập tăng quá nhanh, nên em chưa áp dụng vào lịch. Anh có thể giảm quãng đường/cường độ rồi thử lại."
-        }
-        if lower.contains("stale") || lower.contains("changed") || lower.contains("current") {
-            return "Kế hoạch đã thay đổi so với lúc Coach tạo đề xuất. Anh mở lại lịch hiện tại rồi gửi yêu cầu mới nhé."
-        }
-        return "Em chưa thể áp dụng thay đổi này vào lịch. Buổi tập chưa thay đổi; anh gửi lại với ngày và mục tiêu mới, hoặc mở đúng workout rồi dùng Edit with Coach."
+        return "\(friendly)\n\n\(raw)"
     }
 
     private static func userFacingContextualDistanceRejection(targetKm: Double, raw: String) -> String {

@@ -1462,6 +1462,53 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(snapshot.actionType, .planMutation)
     }
 
+    func testPlanRejectionSurfacesRawReasonForMissingWorkout() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let coordinator = WorkoutReplacementCoordinator(container: container)
+        let replaceNoWorkout = ClaudeResponse(content: [
+            .toolUse(id: "toolu_bad", name: CoachTools.toolName, input: .object([
+                "changes": .array([.object([
+                    "date": .string(CoachContextBuilder.day(qualityDay, calendar: calendar)),
+                    "action": .string("replace")
+                ])])
+            ]))
+        ], stopReason: "tool_use")
+        let client = MockClaudeClient(responses: Array(repeating: replaceNoWorkout, count: CoachChatConfig.maxToolRounds))
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
+
+        await store.send(text: "Điều chỉnh kế hoạch giúp tôi.", model: "claude-test", apiKey: "test-key", in: context)
+
+        let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertTrue(assistant.text.contains("chưa đọc được buổi chạy"), "expected missing-workout message, got: \(assistant.text)")
+        XCTAssertTrue(assistant.text.lowercased().contains("requires a workout"), "raw reason should be surfaced, got: \(assistant.text)")
+    }
+
+    func testPlanRejectionForPastDateIsNotMislabeledAsMissingWorkout() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let coordinator = WorkoutReplacementCoordinator(container: container)
+        let pastDay = PlanEngineTestSupport.date(2026, 1, 1)
+        let downgradePast = ClaudeResponse(content: [
+            .toolUse(id: "toolu_past", name: CoachTools.toolName, input: .object([
+                "changes": .array([.object([
+                    "date": .string(CoachContextBuilder.day(pastDay, calendar: calendar)),
+                    "action": .string("downgrade")
+                ])])
+            ]))
+        ], stopReason: "tool_use")
+        let client = MockClaudeClient(responses: Array(repeating: downgradePast, count: CoachChatConfig.maxToolRounds))
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
+
+        await store.send(text: "Điều chỉnh kế hoạch giúp tôi.", model: "claude-test", apiKey: "test-key", in: context)
+
+        let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertFalse(assistant.text.contains("chưa đọc được buổi chạy"), "past-date error must not be mislabeled as missing workout, got: \(assistant.text)")
+        XCTAssertTrue(assistant.text.lowercased().contains("past"), "raw reason should be surfaced, got: \(assistant.text)")
+    }
+
     func testDismissingInlineFailurePersistsDismissedTurn() async throws {
         let container = try makeContainer()
         let context = container.mainContext
