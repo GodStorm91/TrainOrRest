@@ -609,7 +609,9 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
                 throw CoachTools.ValidationError(error)
             }
             if response.stopReason == "refusal" {
-                assistantTurn.text = response.content.textContent.isEmpty ? language.coachDeclinedMessage : response.content.textContent
+                assistantTurn.text = response.content.textContent.isEmpty
+                    ? language.coachDeclinedMessage
+                    : CoachGlossary.normalizeModelText(response.content.textContent)
                 assistantTurn.appliedAdjustment = nil
                 try context.save()
                 return
@@ -639,7 +641,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
                     lastToolRejection = lastToolRejection ?? "The model answered with text instead of submitting a plan adjustment tool call."
                     break
                 }
-                assistantTurn.text = text.isEmpty ? language.coachNoResponseMessage : text
+                assistantTurn.text = text.isEmpty ? language.coachNoResponseMessage : CoachGlossary.normalizeModelText(text)
                 assistantTurn.interaction = fallbackInteraction(from: snapshot)
                 assistantTurn.appliedAdjustment = applied.isEmpty ? nil : applied.joined(separator: "; ")
                 if let interaction = assistantTurn.interaction, interaction.status == .pending {
@@ -650,14 +652,17 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             }
 
             if toolUses.count == 1, toolUses[0].1 == CoachToolCatalog.coachResponseName {
-                let payload = try toolUses[0].2.decoded(CoachStructuredResponsePayload.self)
+                var payload = try toolUses[0].2.decoded(CoachStructuredResponsePayload.self)
+                payload.normalizeModelText()
                 var interaction = payload.interaction ?? fallbackInteraction(from: snapshot)
                 interaction?.normalizeForNewAssistantMessage(fallbackLanguage: language)
                 if interaction?.options.count ?? 0 < 2 {
                     interaction = nil
                 }
                 let content = payload.content.trimmingCharacters(in: .whitespacesAndNewlines)
-                assistantTurn.text = content.isEmpty ? response.content.textContent : content
+                assistantTurn.text = content.isEmpty
+                    ? CoachGlossary.normalizeModelText(response.content.textContent)
+                    : content
                 assistantTurn.interaction = interaction
                 if let structured = payload.validatedStructuredResponse(additionalRecommendationsTitle: language.additionalRecommendationsTitle) {
                     let readiness = try? context.fetch(FetchDescriptor<DailyReadiness>(sortBy: [SortDescriptor(\.date, order: .reverse)])).first
@@ -1373,6 +1378,30 @@ private extension CoachAttachmentReference {
             self.init(kind: .completedActivity, uuid: uuid, filename: nil, mediaType: nil, imageData: nil)
         case .image(let image):
             self.init(kind: .image, uuid: nil, filename: image.filename, mediaType: image.mediaType, imageData: image.data)
+        }
+    }
+}
+
+private extension CoachStructuredResponsePayload {
+    mutating func normalizeModelText() {
+        content = CoachGlossary.normalizeModelText(content)
+        title = title.map(CoachGlossary.normalizeModelText)
+        summary = summary.map(CoachGlossary.normalizeModelText)
+        safetyNote = safetyNote.map(CoachGlossary.normalizeModelText)
+
+        if var recommendations {
+            for index in recommendations.indices {
+                recommendations[index].title = CoachGlossary.normalizeModelText(recommendations[index].title)
+                recommendations[index].description = recommendations[index].description.map(CoachGlossary.normalizeModelText)
+            }
+            self.recommendations = recommendations
+        }
+
+        if var details {
+            for index in details.sections.indices {
+                details.sections[index].markdown = CoachGlossary.normalizeModelText(details.sections[index].markdown)
+            }
+            self.details = details
         }
     }
 }

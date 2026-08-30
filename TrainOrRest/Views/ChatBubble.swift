@@ -383,7 +383,13 @@ private struct CoachProgressiveResponseView: View {
     var body: some View {
         if presentation.shouldCollapse {
             VStack(alignment: .leading, spacing: 10) {
-                MarkdownMessageView(text: presentation.visibleText, tone: .standard, allowsRuleTokens: true)
+                MarkdownMessageView(
+                    text: presentation.visibleText,
+                    tone: .standard,
+                    allowsRuleTokens: true,
+                    glossary: .legacy,
+                    language: language
+                )
                 Button {
                     withAnimation(.easeOut(duration: 0.16)) {
                         isExpanded.toggle()
@@ -404,12 +410,24 @@ private struct CoachProgressiveResponseView: View {
                 .accessibilityValue(isExpanded ? language.collapseDetailsLabel : language.expandDetailsLabel)
 
                 if isExpanded {
-                    MarkdownMessageView(text: presentation.detailText, tone: .standard, allowsRuleTokens: true)
+                    MarkdownMessageView(
+                        text: presentation.detailText,
+                        tone: .standard,
+                        allowsRuleTokens: true,
+                        glossary: .legacy,
+                        language: language
+                    )
                         .transition(.opacity)
                 }
             }
         } else {
-            MarkdownMessageView(text: text, tone: .standard, allowsRuleTokens: true)
+            MarkdownMessageView(
+                text: text,
+                tone: .standard,
+                allowsRuleTokens: true,
+                glossary: .legacy,
+                language: language
+            )
         }
     }
 

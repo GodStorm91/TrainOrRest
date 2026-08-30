@@ -26,10 +26,15 @@ struct CoachResponseCard: View {
                 }
 
                 if !response.summary.isEmpty {
-                    Text(response.summary)
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.dim)
-                        .fixedSize(horizontal: false, vertical: true)
+                    CoachGlossaryText(
+                        text: response.summary,
+                        mode: .structured,
+                        language: language,
+                        font: .subheadline,
+                        color: Theme.dim,
+                        values: glossaryValues
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if let note = response.safetyNote, !note.isEmpty {
@@ -146,6 +151,14 @@ struct CoachResponseCard: View {
         return text
     }
 
+    private var glossaryValues: [String: String] {
+        response.metrics.reduce(into: [:]) { values, metric in
+            guard let term = CoachGlossary.term(matchingAlias: metric.label) else { return }
+            values[term.id] = metric.value
+        }
+    }
+
+
     static func updatedTimeText(_ date: Date, language: CoachLanguage) -> String {
         language.coachUpdatedAtLabel(date.formatted(.dateTime.hour().minute().locale(language.uiLocale)))
     }
@@ -184,14 +197,24 @@ struct CoachResponseCard: View {
                 .foregroundStyle(Theme.accent)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(recommendation.title)
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.text)
+                CoachGlossaryText(
+                    text: recommendation.title,
+                    mode: .structured,
+                    language: language,
+                    font: .subheadline,
+                    color: Theme.text,
+                    values: glossaryValues
+                )
 
                 if let description = recommendation.description {
-                    Text(description)
-                        .font(.caption)
-                        .foregroundStyle(Theme.dim)
+                    CoachGlossaryText(
+                        text: description,
+                        mode: .structured,
+                        language: language,
+                        font: .caption,
+                        color: Theme.dim,
+                        values: glossaryValues
+                    )
                 }
             }
         }

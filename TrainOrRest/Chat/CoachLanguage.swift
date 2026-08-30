@@ -1013,6 +1013,78 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
     var coachDetailDoneLabel: String { self == .vi ? "Xong" : self == .ja ? "完了" : "Done" }
     var coachSafetyLabel: String { self == .vi ? "Lưu ý an toàn" : self == .ja ? "安全の注意" : "Safety note" }
 
+    func glossaryTitle(term: String) -> String {
+        switch self {
+        case .en: "What is \(term)?"
+        case .ja: "What is \(term)?"
+        case .vi: "\(term) là gì?"
+        }
+    }
+
+    var glossarySimpleTerms: String {
+        switch self {
+        case .en: "In simple terms"
+        case .ja: "In simple terms"
+        case .vi: "Hiểu đơn giản"
+        }
+    }
+
+    var glossaryWhyItMatters: String {
+        switch self {
+        case .en: "Why TrainOrRest uses it"
+        case .ja: "Why TrainOrRest uses it"
+        case .vi: "Vì sao TrainOrRest sử dụng chỉ số này?"
+        }
+    }
+
+    var glossaryCurrentValue: String {
+        switch self {
+        case .en: "Current value"
+        case .ja: "Current value"
+        case .vi: "Giá trị hiện tại"
+        }
+    }
+
+    var glossaryInterpretation: String {
+        switch self {
+        case .en: "How to interpret it"
+        case .ja: "How to interpret it"
+        case .vi: "Cách hiểu giá trị này"
+        }
+    }
+
+    var glossaryCaution: String {
+        switch self {
+        case .en: "Keep in mind"
+        case .ja: "Keep in mind"
+        case .vi: "Lưu ý"
+        }
+    }
+
+    var glossaryGotIt: String {
+        switch self {
+        case .en: "Got it"
+        case .ja: "Got it"
+        case .vi: "Đã hiểu"
+        }
+    }
+
+    var glossaryTermsLabel: String {
+        switch self {
+        case .en: "Terms"
+        case .ja: "Terms"
+        case .vi: "Thuật ngữ"
+        }
+    }
+
+    var glossaryAccessibilityRole: String {
+        switch self {
+        case .en: "term"
+        case .ja: "term"
+        case .vi: "thuật ngữ"
+        }
+    }
+
     func coachStatusLabel(for status: CoachResponseStatus) -> String {
         switch status {
         case .ready: self == .vi ? "SẴN SÀNG TẬP LUYỆN" : self == .ja ? "トレーニング可能" : "READY TO TRAIN"

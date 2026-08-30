@@ -21,7 +21,9 @@ struct CoachDetailSheet: View {
                             MarkdownMessageView(
                                 text: section.markdown,
                                 tone: .standard,
-                                allowsRuleTokens: false
+                                allowsRuleTokens: false,
+                                glossary: .structured,
+                                language: language
                             )
                             .textSelection(.enabled)
                         }

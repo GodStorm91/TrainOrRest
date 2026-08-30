@@ -2048,6 +2048,9 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertTrue(prompt.contains("optional safetyNote"))
         XCTAssertTrue(prompt.contains("user's app language"))
         XCTAssertTrue(prompt.contains("data-source attribution"))
+        XCTAssertTrue(prompt.contains("[[term:acwr|ACWR]]"))
+        XCTAssertTrue(prompt.contains("never write AWCR"))
+
     }
 
     func testCoachResponseWithTitleSummaryPersistsComposedStructuredResponse() async throws {
@@ -2112,6 +2115,31 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(structured.status, .recoveryRecommended)
         XCTAssertFalse(structured.metrics.isEmpty)
         XCTAssertEqual(structured.sources.count, 2)
+    }
+
+    func testCoachResponseNormalizesGlossaryTypoInStructuredSummary() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [
+                .toolUse(id: "t", name: CoachToolCatalog.coachResponseName, input: .object([
+                    "content": .string("Your AWCR is elevated."),
+                    "title": .string("Reduce load"),
+                    "summary": .string("Your AWCR is elevated today.")
+                ]))
+            ], stopReason: "tool_use")
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(text: "How am I?", model: "claude-test", apiKey: "test-key", in: context)
+
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        let assistant = try XCTUnwrap(messages.last { $0.role == .assistant })
+        let structured = try XCTUnwrap(assistant.structuredResponse)
+
+        XCTAssertEqual(structured.summary, "Your ACWR is elevated today.")
+        XCTAssertFalse(structured.summary.contains("AWCR"))
     }
 
     func testFullStructuredCoachResponseCapsAndPersistsAllModelFields() async throws {
