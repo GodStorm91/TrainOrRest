@@ -428,7 +428,14 @@ final class GoogleCalendarSyncTests: XCTestCase {
         defer { try? GoogleCalendarTokenStore.delete(connectionID: connection.uuid) }
         let api = FakeGoogleCalendarAPI()
         api.patchErrorsByEventID["forbidden-event"] = .unauthorized
-        let service = GoogleCalendarSyncService(modelContext: context, api: api, oauth: nil, calendar: calendar, timeZone: .current)
+        let service = GoogleCalendarSyncService(
+            modelContext: context,
+            api: api,
+            oauth: nil,
+            calendar: calendar,
+            timeZone: .current,
+            now: { self.date(2026, 8, 23, calendar: calendar) }
+        )
 
         await service.reconcile(reason: "test")
 
