@@ -1402,6 +1402,66 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(assistant.interaction?.options.map(\.id), ["a", "b"])
     }
 
+    func testVietnamesePlanAdjustmentDraftClassifiesAsPlanMutation() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [.text("ok")], stopReason: "end_turn")
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(
+            text: "Hãy tạo bản nháp điều chỉnh kế hoạch đã được kiểm tra để tôi xem trước.",
+            model: "claude-test",
+            apiKey: "test-key",
+            in: context
+        )
+
+        let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
+        XCTAssertEqual(snapshot.actionType, .planMutation)
+    }
+
+    func testVietnameseKeepPlanChoiceStaysReadOnly() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [.text("ok")], stopReason: "end_turn")
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(
+            text: "Giữ nguyên kế hoạch hiện tại.",
+            model: "claude-test",
+            apiKey: "test-key",
+            in: context
+        )
+
+        let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
+        XCTAssertEqual(snapshot.actionType, .readOnly)
+    }
+
+    func testJapanesePlanAdjustmentDraftClassifiesAsPlanMutation() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [.text("ok")], stopReason: "end_turn")
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(
+            text: "確認用の計画調整案を作成してください。",
+            model: "claude-test",
+            apiKey: "test-key",
+            in: context
+        )
+
+        let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
+        XCTAssertEqual(snapshot.actionType, .planMutation)
+    }
+
     func testDismissingInlineFailurePersistsDismissedTurn() async throws {
         let container = try makeContainer()
         let context = container.mainContext

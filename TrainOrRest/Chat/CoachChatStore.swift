@@ -920,13 +920,15 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
 
         let actionNeedles = [
             "create", "add", "update", "delete", "modify", "replace", "move", "change", "set",
-            "tao", "them", "sua", "chinh", "doi", "xoa", "chuyen", "cap nhat", "tang", "giam"
+            "tao", "them", "sua", "chinh", "doi", "xoa", "chuyen", "cap nhat", "tang", "giam",
+            "作成", "調整", "変更", "更新", "削除"
         ]
         let objectNeedles = [
             "workout", "run", "plan", "calendar", "schedule",
             "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
             "today", "tomorrow", "hom nay", "ngay mai",
-            "lich", "bai", "buoi", "cu li", "cu ly", "quang duong"
+            "lich", "bai", "buoi", "cu li", "cu ly", "quang duong", "ke hoach",
+            "計画", "予定", "ワークアウト", "ラン"
         ]
         let hasAction = actionNeedles.contains { lower.contains($0) }
         let hasObject = objectNeedles.contains { lower.contains($0) }
