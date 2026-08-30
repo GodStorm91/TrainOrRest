@@ -192,10 +192,11 @@ final class CoachChatStore: ObservableObject {
             }), let targetKm = Self.contextualDistanceTarget(from: trimmed) {
                 assistantTurn.text = Self.userFacingContextualDistanceRejection(
                     targetKm: targetKm,
-                    raw: technicalErrorMessage(error)
+                    raw: technicalErrorMessage(error),
+                    language: CoachLanguage(rawValue: snapshot.locale) ?? .current
                 )
             } else {
-                assistantTurn.text = Self.userFacingPlanToolRejection(technicalErrorMessage(error))
+                assistantTurn.text = Self.userFacingPlanToolRejection(technicalErrorMessage(error), language: CoachLanguage(rawValue: snapshot.locale) ?? .current)
             }
             assistantTurn.assistantStatus = .completed
             assistantTurn.isIncomplete = false
@@ -261,7 +262,7 @@ final class CoachChatStore: ObservableObject {
         )
         guard let replacement else { return false }
 
-        assistantTurn.text = "Em đã chuẩn bị đề xuất đổi cự li cho buổi này. Anh xem card bên dưới rồi xác nhận trước khi em lưu vào lịch."
+        assistantTurn.text = (CoachLanguage(rawValue: snapshot.locale) ?? .current).contextualDistancePreparedThisWorkout
         assistantTurn.assistantStatus = .completed
         assistantTurn.isIncomplete = false
         assistantTurn.errorCategory = nil
@@ -314,7 +315,7 @@ final class CoachChatStore: ObservableObject {
         )
         guard let replacement else { return false }
 
-        assistantTurn.text = "Em đã chuẩn bị đề xuất đổi cự li cho \(Self.dayLabel(for: day, relativeTo: snapshot.createdAt, calendar: calendar)). Anh xem card bên dưới rồi xác nhận trước khi em lưu vào lịch."
+        assistantTurn.text = (CoachLanguage(rawValue: snapshot.locale) ?? .current).contextualDistancePrepared(dayLabel: Self.dayLabel(for: day, relativeTo: snapshot.createdAt, calendar: calendar))
         assistantTurn.assistantStatus = .completed
         assistantTurn.isIncomplete = false
         assistantTurn.errorCategory = nil
@@ -522,9 +523,10 @@ final class CoachChatStore: ObservableObject {
         in context: ModelContext
     ) async throws {
         let today = snapshot.createdAt
+        let language = CoachLanguage(rawValue: snapshot.locale) ?? .current
         generationState = .processing(messageId: assistantTurn.turnID, stage: .preparingContext)
         var system = try CoachContextBuilder.build(in: context, today: today, calendar: calendar)
-        let directive = CoachLanguage(rawValue: snapshot.locale)?.systemPromptDirective ?? CoachLanguage.current.systemPromptDirective
+        let directive = language.systemPromptDirective
         if !directive.isEmpty {
             system += "\n\n\(directive)"
         }
@@ -607,7 +609,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
                 throw CoachTools.ValidationError(error)
             }
             if response.stopReason == "refusal" {
-                assistantTurn.text = response.content.textContent.isEmpty ? "Claude declined to answer that." : response.content.textContent
+                assistantTurn.text = response.content.textContent.isEmpty ? language.coachDeclinedMessage : response.content.textContent
                 assistantTurn.appliedAdjustment = nil
                 try context.save()
                 return
@@ -637,7 +639,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
                     lastToolRejection = lastToolRejection ?? "The model answered with text instead of submitting a plan adjustment tool call."
                     break
                 }
-                assistantTurn.text = text.isEmpty ? "I could not produce a response." : text
+                assistantTurn.text = text.isEmpty ? language.coachNoResponseMessage : text
                 assistantTurn.interaction = fallbackInteraction(from: snapshot)
                 assistantTurn.appliedAdjustment = applied.isEmpty ? nil : applied.joined(separator: "; ")
                 if let interaction = assistantTurn.interaction, interaction.status == .pending {
@@ -648,7 +650,6 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             }
 
             if toolUses.count == 1, toolUses[0].1 == CoachToolCatalog.coachResponseName {
-                let language = CoachLanguage(rawValue: snapshot.locale) ?? .current
                 let payload = try toolUses[0].2.decoded(CoachStructuredResponsePayload.self)
                 var interaction = payload.interaction ?? fallbackInteraction(from: snapshot)
                 interaction?.normalizeForNewAssistantMessage(fallbackLanguage: language)
@@ -699,11 +700,11 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             do {
                 let proposal = try toolUse.2.decoded(PlanAdjustmentProposal.self)
                 try validateContextualProposal(proposal, attachments: attachments, in: context)
-                if let replacement = try CoachTools.pendingReplacement(for: proposal, in: context, today: today, calendar: calendar, language: .current) {
+                if let replacement = try CoachTools.pendingReplacement(for: proposal, in: context, today: today, calendar: calendar, language: language) {
                     guard let replacementCoordinator else {
                         throw CoachTools.ValidationError("Workout replacement confirmation is unavailable.")
                     }
-                    assistantTurn.text = "I prepared this workout replacement. Review it below before I save it."
+                    assistantTurn.text = language.preparedReplacementMessage
                     replacementCoordinator.stage(replacement)
                     try context.save()
                     return
@@ -714,7 +715,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
                 }
                 let validated = try CoachTools.validateForConfirmation(proposal: proposal, in: context, today: today, calendar: calendar)
                 let summary = validated.summary.isEmpty ? CoachTools.summary(for: proposal) : validated.summary
-                assistantTurn.text = "I prepared this calendar update. Review it below before I save it: \(summary)"
+                assistantTurn.text = language.preparedCalendarUpdateMessage(summary: summary)
                 try context.save()
                 replacementCoordinator.stage(proposal, summary: summary, threadID: snapshot.threadID)
                 return
@@ -732,9 +733,9 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             assistantTurn.text = "Applied: \(applied.joined(separator: "; "))"
             assistantTurn.appliedAdjustment = applied.joined(separator: "; ")
         } else if let rejection = underlyingRejection ?? lastToolRejection {
-            assistantTurn.text = Self.userFacingPlanToolRejection(rejection)
+            assistantTurn.text = Self.userFacingPlanToolRejection(rejection, language: language)
         } else {
-            assistantTurn.text = "I could not safely finish the plan adjustment. Please try one specific change at a time."
+            assistantTurn.text = language.couldNotFinishAdjustmentMessage
         }
         try context.save()
     }
@@ -1191,13 +1192,16 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         }
     }
 
-    private static func userFacingPlanToolRejection(_ raw: String) -> String {
+    private static func userFacingPlanToolRejection(_ raw: String, language: CoachLanguage) -> String {
         let lower = raw.lowercased()
-        let friendly: String
-        // Order and needles are substring-safe. Most validation errors mention
-        // "workout" and "payload" contains "load", so a genuinely absent or
-        // misplaced workout is matched with precise phrases first, and the
-        // safety branch uses PlanValidator's real tokens (never "load"/"safe").
+        // Order and needles are substring-safe. A missing target date is matched
+        // first so a move without a destination gets an actionable prompt. Most
+        // other validation errors mention "workout"; "payload" contains "load",
+        // so an absent/misplaced workout is matched with precise phrases before
+        // the safety branch, which uses PlanValidator's real tokens.
+        if lower.contains("requires a target date") {
+            return language.planRejectionMissingTargetDate
+        }
         if lower.contains("no workout on")
             || lower.contains("requires a workout")
             || lower.contains("does not take a workout")
@@ -1205,42 +1209,44 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             || lower.contains("missing field")
             || lower.contains("type mismatch")
             || lower.contains("corrupted data") {
-            friendly = "Coach chưa đọc được buổi chạy cần thay đổi. Anh thử nói rõ ngày, loại buổi và mục tiêu mới, hoặc để em tạo đề xuất từ kế hoạch hiện tại."
-        } else if lower.contains("past") || lower.contains("after race day") {
-            friendly = "Không thể chỉnh buổi tập trong quá khứ hoặc sau ngày đua. Anh chọn ngày hợp lệ rồi thử lại nhé."
-        } else if lower.contains("already has a workout")
+            return language.planRejectionCouldNotReadWorkout
+        }
+        if lower.contains("past") || lower.contains("after race day") {
+            return language.planRejectionPastOrAfterRace
+        }
+        if lower.contains("already has a workout")
             || lower.contains("already has the workout")
             || lower.contains("two workouts")
             || lower.contains("outside the training plan")
             || lower.contains("outside that week")
             || lower.contains("race day cannot")
             || lower.contains("race workouts cannot") {
-            friendly = "Ngày này đã có buổi tập, trùng lịch hoặc nằm ngoài kế hoạch hiện tại. Anh chọn ngày khác hoặc yêu cầu thay thế buổi đang có."
-        } else if lower.contains("volume") || lower.contains("ramp") || lower.contains("taper") || lower.contains("hard sessions") || lower.contains("exceeds cap") {
-            friendly = "Thay đổi này có thể làm tải tập tăng quá nhanh, nên em chưa áp dụng vào lịch. Anh có thể giảm quãng đường/cường độ rồi thử lại."
-        } else if lower.contains("stale") || lower.contains("changed") {
-            friendly = "Kế hoạch đã thay đổi so với lúc Coach tạo đề xuất. Anh mở lại lịch hiện tại rồi gửi yêu cầu mới nhé."
-        } else {
-            friendly = "Em chưa thể áp dụng thay đổi này vào lịch. Buổi tập chưa thay đổi; anh gửi lại với ngày và mục tiêu mới, hoặc mở đúng workout rồi dùng Edit with Coach."
+            return language.planRejectionDayOccupied
         }
-        return "\(friendly)\n\n\(raw)"
+        if lower.contains("volume") || lower.contains("ramp") || lower.contains("taper") || lower.contains("hard sessions") || lower.contains("exceeds cap") {
+            return language.planRejectionLoadTooHigh
+        }
+        if lower.contains("stale") || lower.contains("changed") {
+            return language.planRejectionPlanChanged
+        }
+        return language.planRejectionGeneric
     }
 
-    private static func userFacingContextualDistanceRejection(targetKm: Double, raw: String) -> String {
+    private static func userFacingContextualDistanceRejection(targetKm: Double, raw: String, language: CoachLanguage) -> String {
         let lower = raw.lowercased()
         let target = targetKm.rounded() == targetKm
             ? "\(Int(targetKm)) km"
             : String(format: "%.1f km", targetKm)
         if lower.contains("volume") || lower.contains("load") || lower.contains("ramp") || lower.contains("safe") {
-            return "Em hiểu anh muốn đổi buổi này lên \(target), nhưng validation đang chặn vì tải tập có thể tăng quá nhanh. Buổi tập chưa thay đổi."
+            return language.contextualDistanceLoadBlocked(target: target)
         }
         if lower.contains("locked") || lower.contains("fixed") {
-            return "Em hiểu anh muốn đổi buổi này lên \(target), nhưng buổi này đang được khóa nên chưa thể sửa trực tiếp. Buổi tập chưa thay đổi."
+            return language.contextualDistanceLocked(target: target)
         }
         if lower.contains("stale") || lower.contains("changed") || lower.contains("current") {
-            return "Em hiểu anh muốn đổi buổi này lên \(target), nhưng buổi tập đã thay đổi sau khi Coach mở màn hình này. Anh quay lại lịch rồi mở lại buổi mới nhất nhé."
+            return language.contextualDistanceStale(target: target)
         }
-        return "Em hiểu anh muốn đổi buổi này lên \(target), nhưng chưa tạo được proposal an toàn từ lịch hiện tại. Buổi tập chưa thay đổi."
+        return language.contextualDistanceGeneric(target: target)
     }
 
     private static let calendarImportDetourMessage = "Training schedule changes must update TrainOrRest Calendar through the plan tool, then sync intervals.icu from the app. Do not provide ICS/iCalendar/import instructions."

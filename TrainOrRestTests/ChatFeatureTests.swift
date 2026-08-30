@@ -695,8 +695,8 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertNil(coordinator.pending)
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         let transcript = messages.map(\.text).joined(separator: "\n")
-        XCTAssertTrue(transcript.contains("Em hiểu anh muốn đổi buổi này lên 100 km"))
-        XCTAssertTrue(transcript.contains("Buổi tập chưa thay đổi"))
+        XCTAssertTrue(transcript.contains("I understand you want to change this workout to 100 km"))
+        XCTAssertTrue(transcript.contains("Nothing was changed"))
         XCTAssertFalse(transcript.contains("cụ thể hơn"))
     }
 
@@ -1199,7 +1199,7 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(assistant.assistantStatus, .completed)
         XCTAssertFalse(assistant.text.contains("Cảm ơn bạn"))
         XCTAssertFalse(assistant.text.contains("thứ bảy đang trống"))
-        XCTAssertTrue(assistant.text.contains("Em chưa thể áp dụng") || assistant.text.contains("Coach chưa đọc được"))
+        XCTAssertTrue(assistant.text.contains("couldn't read which workout") || assistant.text.contains("couldn't apply this change"))
     }
 
     func testChatStoreRejectsUnapplyablePlanCardBeforeUserCanConfirm() async throws {
@@ -2384,8 +2384,8 @@ final class ChatFeatureTests: XCTestCase {
         await store.send(text: "Điều chỉnh kế hoạch giúp tôi.", model: "claude-test", apiKey: "test-key", in: context)
 
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
-        XCTAssertTrue(assistant.text.contains("chưa đọc được buổi chạy"), "expected missing-workout message, got: \(assistant.text)")
-        XCTAssertTrue(assistant.text.lowercased().contains("requires a workout"), "raw reason should be surfaced, got: \(assistant.text)")
+        XCTAssertTrue(assistant.text.contains("couldn't read which workout"), "expected localized missing-workout message, got: \(assistant.text)")
+        XCTAssertFalse(assistant.text.lowercased().contains("in the past"), "missing-workout must stay distinct from the past-date message, got: \(assistant.text)")
     }
 
     func testPlanRejectionForPastDateIsNotMislabeledAsMissingWorkout() async throws {
@@ -2408,8 +2408,8 @@ final class ChatFeatureTests: XCTestCase {
         await store.send(text: "Điều chỉnh kế hoạch giúp tôi.", model: "claude-test", apiKey: "test-key", in: context)
 
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
-        XCTAssertFalse(assistant.text.contains("chưa đọc được buổi chạy"), "past-date error must not be mislabeled as missing workout, got: \(assistant.text)")
-        XCTAssertTrue(assistant.text.lowercased().contains("past"), "raw reason should be surfaced, got: \(assistant.text)")
+        XCTAssertFalse(assistant.text.contains("couldn't read which workout"), "past-date error must not be mislabeled as missing workout, got: \(assistant.text)")
+        XCTAssertTrue(assistant.text.lowercased().contains("past"), "past-date must surface the distinct past message, got: \(assistant.text)")
     }
 
     func testRetryDetourDoesNotClobberUnderlyingValidationReason() async throws {
@@ -2434,8 +2434,65 @@ final class ChatFeatureTests: XCTestCase {
         await store.send(text: "Điều chỉnh kế hoạch giúp tôi.", model: "claude-test", apiKey: "test-key", in: context)
 
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
-        XCTAssertTrue(assistant.text.lowercased().contains("requires a workout"), "underlying validation reason should survive the retry nudge, got: \(assistant.text)")
+        XCTAssertTrue(assistant.text.contains("couldn't read which workout"), "underlying validation reason should survive the retry nudge, got: \(assistant.text)")
         XCTAssertFalse(assistant.text.contains("Plan edits must be submitted"), "retry nudge must not replace the real reason, got: \(assistant.text)")
+    }
+
+    func testPlanRejectionRepliesInAppLanguageWithoutMixing() async throws {
+        // App language defaults to English in the test harness. A rejected plan
+        // edit must reply in English only, never a hardcoded Vietnamese message.
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let coordinator = WorkoutReplacementCoordinator(container: container)
+        let replaceNoWorkout = ClaudeResponse(content: [
+            .toolUse(id: "toolu_bad", name: CoachTools.toolName, input: .object([
+                "changes": .array([.object([
+                    "date": .string(CoachContextBuilder.day(qualityDay, calendar: calendar)),
+                    "action": .string("replace")
+                ])])
+            ]))
+        ], stopReason: "tool_use")
+        let client = MockClaudeClient(responses: Array(repeating: replaceNoWorkout, count: CoachChatConfig.maxToolRounds))
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
+
+        await store.send(text: "Adjust my plan please.", model: "claude-test", apiKey: "test-key", in: context)
+
+        let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertFalse(assistant.text.contains("chưa"), "English app must not receive Vietnamese rejection text, got: \(assistant.text)")
+        XCTAssertFalse(assistant.text.contains("Buổi tập"), "English app must not receive Vietnamese rejection text, got: \(assistant.text)")
+    }
+
+    func testMoveWithoutTargetAsksForTargetDate() async throws {
+        // Symptom B: the model omitted the move target. The reply must be an
+        // actionable, localized prompt for the target day, not a generic error.
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let coordinator = WorkoutReplacementCoordinator(container: container)
+        let moveNoTarget = ClaudeResponse(content: [
+            .toolUse(id: "toolu_move", name: CoachTools.toolName, input: .object([
+                "changes": .array([.object([
+                    "date": .string(CoachContextBuilder.day(qualityDay, calendar: calendar)),
+                    "action": .string("move")
+                ])])
+            ]))
+        ], stopReason: "tool_use")
+        let client = MockClaudeClient(responses: Array(repeating: moveNoTarget, count: CoachChatConfig.maxToolRounds))
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
+
+        await store.send(text: "Move it to today.", model: "claude-test", apiKey: "test-key", in: context)
+
+        let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertTrue(assistant.text.contains("Which day should I move the workout to"), "missing move target must ask for the target day, got: \(assistant.text)")
+    }
+
+    func testMovePromptRequiresBothSourceAndTarget() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let prompt = try CoachContextBuilder.build(in: context, today: today, calendar: calendar)
+        XCTAssertTrue(prompt.contains("Every move MUST include both date (source) and detail (target)"))
     }
 
     func testCreateWithMalformedWorkoutSurfacesFieldNotMissingWorkout() throws {

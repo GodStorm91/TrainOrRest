@@ -489,6 +489,152 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         }
     }
 
+    // MARK: - Plan tool localized messages
+
+    var planRejectionCouldNotReadWorkout: String {
+        switch self {
+        case .en: "I couldn't read which workout to change. Tell me the day, workout type, and target, or I can build a proposal from your current plan."
+        case .ja: "変更する練習を読み取れませんでした。日付・種類・目標を教えていただくか、現在のプランから提案を作成します。"
+        case .vi: "Coach chưa đọc được buổi chạy cần thay đổi. Anh thử nói rõ ngày, loại buổi và mục tiêu mới, hoặc để em tạo đề xuất từ kế hoạch hiện tại."
+        }
+    }
+
+    var planRejectionPastOrAfterRace: String {
+        switch self {
+        case .en: "I can't change a workout in the past or after race day. Pick a valid date and try again."
+        case .ja: "過去または大会日以降の練習は変更できません。有効な日付を選んで再度お試しください。"
+        case .vi: "Không thể chỉnh buổi tập trong quá khứ hoặc sau ngày đua. Anh chọn ngày hợp lệ rồi thử lại nhé."
+        }
+    }
+
+    var planRejectionDayOccupied: String {
+        switch self {
+        case .en: "That day already has a workout, conflicts, or is outside the current plan. Pick another day or ask me to replace the existing workout."
+        case .ja: "その日はすでに練習があるか、重複しているか、現在のプラン外です。別の日を選ぶか、既存の練習の置き換えを依頼してください。"
+        case .vi: "Ngày này đã có buổi tập, trùng lịch hoặc nằm ngoài kế hoạch hiện tại. Anh chọn ngày khác hoặc yêu cầu thay thế buổi đang có."
+        }
+    }
+
+    var planRejectionLoadTooHigh: String {
+        switch self {
+        case .en: "This change could raise your training load too quickly, so I didn't apply it. Try a shorter distance or lower intensity."
+        case .ja: "この変更は負荷が急に上がりすぎる可能性があるため、適用しませんでした。距離や強度を下げて再度お試しください。"
+        case .vi: "Thay đổi này có thể làm tải tập tăng quá nhanh, nên em chưa áp dụng vào lịch. Anh có thể giảm quãng đường/cường độ rồi thử lại."
+        }
+    }
+
+    var planRejectionPlanChanged: String {
+        switch self {
+        case .en: "The plan changed since I prepared this. Reopen the current calendar and send a new request."
+        case .ja: "提案を作成した後にプランが変更されました。現在のカレンダーを開き直して、もう一度依頼してください。"
+        case .vi: "Kế hoạch đã thay đổi so với lúc Coach tạo đề xuất. Anh mở lại lịch hiện tại rồi gửi yêu cầu mới nhé."
+        }
+    }
+
+    var planRejectionMissingTargetDate: String {
+        switch self {
+        case .en: "Which day should I move the workout to? Tell me the target day and I'll prepare the change."
+        case .ja: "練習をどの日に移動しますか？移動先の日を教えていただければ、変更を用意します。"
+        case .vi: "Anh muốn chuyển buổi tập sang ngày nào? Cho em biết ngày đích để em chuẩn bị đề xuất nhé."
+        }
+    }
+
+    var planRejectionGeneric: String {
+        switch self {
+        case .en: "I couldn't apply this change to the calendar. Nothing was modified; resend with the day and target, or open the workout and use Edit with Coach."
+        case .ja: "この変更をカレンダーに適用できませんでした。予定は変更していません。日付と目標を添えて送り直すか、対象の練習を開いて「Edit with Coach」をお使いください。"
+        case .vi: "Em chưa thể áp dụng thay đổi này vào lịch. Buổi tập chưa thay đổi; anh gửi lại với ngày và mục tiêu mới, hoặc mở đúng workout rồi dùng Edit with Coach."
+        }
+    }
+
+    func contextualDistanceLoadBlocked(target: String) -> String {
+        switch self {
+        case .en: "I understand you want to change this workout to \(target), but validation blocked it because the training load could rise too fast. Nothing was changed."
+        case .ja: "この練習を\(target)に変更したいとのことですが、負荷が急上昇する可能性があるため検証でブロックされました。予定は変更していません。"
+        case .vi: "Em hiểu anh muốn đổi buổi này lên \(target), nhưng validation đang chặn vì tải tập có thể tăng quá nhanh. Buổi tập chưa thay đổi."
+        }
+    }
+
+    func contextualDistanceLocked(target: String) -> String {
+        switch self {
+        case .en: "I understand you want to change this workout to \(target), but it's locked and can't be edited directly. Nothing was changed."
+        case .ja: "この練習を\(target)に変更したいとのことですが、ロックされているため直接編集できません。予定は変更していません。"
+        case .vi: "Em hiểu anh muốn đổi buổi này lên \(target), nhưng buổi này đang được khóa nên chưa thể sửa trực tiếp. Buổi tập chưa thay đổi."
+        }
+    }
+
+    func contextualDistanceStale(target: String) -> String {
+        switch self {
+        case .en: "I understand you want to change this workout to \(target), but it changed after I opened this screen. Go back to the calendar and reopen the latest workout."
+        case .ja: "この練習を\(target)に変更したいとのことですが、この画面を開いた後に予定が変更されました。カレンダーに戻り、最新の練習を開き直してください。"
+        case .vi: "Em hiểu anh muốn đổi buổi này lên \(target), nhưng buổi tập đã thay đổi sau khi Coach mở màn hình này. Anh quay lại lịch rồi mở lại buổi mới nhất nhé."
+        }
+    }
+
+    func contextualDistanceGeneric(target: String) -> String {
+        switch self {
+        case .en: "I understand you want to change this workout to \(target), but I couldn't create a safe proposal from the current plan. Nothing was changed."
+        case .ja: "この練習を\(target)に変更したいとのことですが、現在のプランから安全な提案を作成できませんでした。予定は変更していません。"
+        case .vi: "Em hiểu anh muốn đổi buổi này lên \(target), nhưng chưa tạo được proposal an toàn từ lịch hiện tại. Buổi tập chưa thay đổi."
+        }
+    }
+
+    var contextualDistancePreparedThisWorkout: String {
+        switch self {
+        case .en: "I prepared a distance change for this workout. Review the card below and confirm before I save it."
+        case .ja: "この練習の距離変更を用意しました。下のカードを確認し、保存する前に承認してください。"
+        case .vi: "Em đã chuẩn bị đề xuất đổi cự li cho buổi này. Anh xem card bên dưới rồi xác nhận trước khi em lưu vào lịch."
+        }
+    }
+
+    func contextualDistancePrepared(dayLabel: String) -> String {
+        switch self {
+        case .en: "I prepared a distance change for \(dayLabel). Review the card below and confirm before I save it."
+        case .ja: "\(dayLabel)の距離変更を用意しました。下のカードを確認し、保存する前に承認してください。"
+        case .vi: "Em đã chuẩn bị đề xuất đổi cự li cho \(dayLabel). Anh xem card bên dưới rồi xác nhận trước khi em lưu vào lịch."
+        }
+    }
+
+    var coachDeclinedMessage: String {
+        switch self {
+        case .en: "Coach declined to answer that."
+        case .ja: "その質問にはお答えできません。"
+        case .vi: "Coach chưa thể trả lời câu này."
+        }
+    }
+
+    var coachNoResponseMessage: String {
+        switch self {
+        case .en: "I couldn't produce a response."
+        case .ja: "回答を生成できませんでした。"
+        case .vi: "Em chưa tạo được câu trả lời. Anh thử lại nhé."
+        }
+    }
+
+    var preparedReplacementMessage: String {
+        switch self {
+        case .en: "I prepared this workout replacement. Review it below before I save it."
+        case .ja: "この練習の置き換えを用意しました。保存する前に下で確認してください。"
+        case .vi: "Em đã chuẩn bị đề xuất thay buổi tập này. Anh xem bên dưới rồi xác nhận trước khi em lưu."
+        }
+    }
+
+    func preparedCalendarUpdateMessage(summary: String) -> String {
+        switch self {
+        case .en: "I prepared this calendar update. Review it below before I save it: \(summary)"
+        case .ja: "このカレンダー更新を用意しました。保存する前に下で確認してください：\(summary)"
+        case .vi: "Em đã chuẩn bị cập nhật lịch này. Anh xem bên dưới rồi xác nhận trước khi em lưu: \(summary)"
+        }
+    }
+
+    var couldNotFinishAdjustmentMessage: String {
+        switch self {
+        case .en: "I couldn't safely finish the plan adjustment. Please try one specific change at a time."
+        case .ja: "プランの調整を安全に完了できませんでした。1つずつ具体的に変更をお試しください。"
+        case .vi: "Em chưa thể hoàn tất thay đổi kế hoạch. Anh thử từng thay đổi cụ thể một nhé."
+        }
+    }
+
     // MARK: - Plan update card
 
     /// Eyebrow above the proposed change.
