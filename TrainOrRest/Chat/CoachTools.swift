@@ -530,6 +530,9 @@ enum CoachTools {
         let paces = fitness.map { VDOTTable.trainingPaces(vdot: $0.vdot) }
         let built = try WorkoutFactory.build(try recipe(from: payload), paces: paces)
         let old = spec.weeks[location.week].workouts[location.workout]
+        if old.kind == built.kind && abs(old.distanceKm - built.distanceKm) < 0.01 {
+            throw ValidationError("No change to apply; the proposed workout matches the current one.")
+        }
         spec.weeks[location.week].workouts[location.workout] = PlannedWorkoutSpec(
             date: date,
             kind: built.kind,

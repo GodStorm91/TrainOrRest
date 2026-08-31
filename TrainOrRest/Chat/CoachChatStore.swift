@@ -1229,6 +1229,9 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         // other validation errors mention "workout"; "payload" contains "load",
         // so an absent/misplaced workout is matched with precise phrases before
         // the safety branch, which uses PlanValidator's real tokens.
+        if lower.contains("no change to apply") {
+            return language.planRejectionNoChange
+        }
         if lower.contains("requires a target date") {
             return language.planRejectionMissingTargetDate
         }

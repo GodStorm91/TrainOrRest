@@ -539,6 +539,14 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         }
     }
 
+    var planRejectionNoChange: String {
+        switch self {
+        case .en: "That already matches your current plan, so there is nothing to change. Tell me the specific change you want (distance, workout type, or day)."
+        case .ja: "現在のプランとすでに同じ内容のため、変更する点がありません。希望する変更（距離・種類・日付）を教えてください。"
+        case .vi: "Nội dung này đã trùng với kế hoạch hiện tại nên không có gì để thay đổi. Anh cho em biết thay đổi cụ thể mong muốn (cự li, loại buổi hoặc ngày) nhé."
+        }
+    }
+
     var planRejectionGeneric: String {
         switch self {
         case .en: "I couldn't apply this change to the calendar. Nothing was modified; resend with the day and target, or open the workout and use Edit with Coach."

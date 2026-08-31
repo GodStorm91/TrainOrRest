@@ -916,6 +916,37 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(plan.weekTargetVolumesKm, originalTargets)
     }
 
+    func testReplacementWithIdenticalWorkoutIsRejected() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedGoalOnly(in: context)
+        let todayStart = calendar.startOfDay(for: today)
+        let easy = try XCTUnwrap(
+            try context.fetch(FetchDescriptor<PlannedWorkout>())
+                .first { $0.kind == .easy && $0.date >= todayStart },
+            "seed should contain a future easy run"
+        )
+        let payload = PlanAdjustmentProposal.CreateWorkout(
+            kind: "easy",
+            blocks: [.init(repeatCount: 1, steps: [.init(
+                role: "work",
+                targetType: "distance_km",
+                targetValue: easy.distanceKm,
+                paceZone: "easy"
+            )])]
+        )
+        let proposal = PlanAdjustmentProposal(changes: [.init(
+            date: CoachContextBuilder.day(easy.date, calendar: calendar),
+            action: .replace,
+            workout: payload
+        )])
+        XCTAssertThrowsError(
+            try CoachTools.pendingReplacement(for: proposal, in: context, today: today, calendar: calendar, language: .en)
+        ) { error in
+            XCTAssertTrue("\(error)".contains("No change to apply"), "identical replace must be a no-op rejection, got: \(error)")
+        }
+    }
+
     func testCoachCanCreateAndMoveInOneProposal() throws {
         let container = try makeContainer()
         let context = container.mainContext

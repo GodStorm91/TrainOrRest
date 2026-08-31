@@ -261,7 +261,10 @@ struct FlowLayout: Layout {
         var current = Row()
 
         for index in subviews.indices {
-            let size = subviews[index].sizeThatFits(.unspecified)
+            let intrinsic = subviews[index].sizeThatFits(.unspecified)
+            let size = intrinsic.width > maxWidth
+                ? subviews[index].sizeThatFits(ProposedViewSize(width: maxWidth, height: nil))
+                : intrinsic
             if !current.items.isEmpty, current.width + spacing + size.width > maxWidth {
                 rows.append(current)
                 current = Row(y: (rows.last.map { $0.y + $0.height + lineSpacing }) ?? 0)
