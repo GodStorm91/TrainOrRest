@@ -1207,7 +1207,23 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         }
     }
 
+    /// True in DEBUG and TestFlight (sandbox receipt), false on the App Store, so
+    /// diagnostics never leak into the shipping single-language experience.
+    private static let showsTechnicalDiagnostics: Bool = {
+        #if DEBUG
+        return true
+        #else
+        return Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt"
+        #endif
+    }()
+
     private static func userFacingPlanToolRejection(_ raw: String, language: CoachLanguage) -> String {
+        let friendly = friendlyPlanRejection(raw, language: language)
+        guard showsTechnicalDiagnostics else { return friendly }
+        return "\(friendly)\n\n\(raw)"
+    }
+
+    static func friendlyPlanRejection(_ raw: String, language: CoachLanguage) -> String {
         let lower = raw.lowercased()
         // Order and needles are substring-safe. A missing target date is matched
         // first so a move without a destination gets an actionable prompt. Most

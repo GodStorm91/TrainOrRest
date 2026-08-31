@@ -1224,6 +1224,21 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertFalse(coordinator.hasPendingDecision, "a describe-only card stages nothing")
     }
 
+    func testPlanPromptForbidsViewDraftStep() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let prompt = try CoachContextBuilder.build(in: context, today: today, calendar: calendar)
+        XCTAssertTrue(prompt.contains("call propose_plan_adjustment right away"))
+        XCTAssertTrue(prompt.contains("there is no separate view-draft step"))
+    }
+
+    func testFriendlyPlanRejectionStaysSingleLanguage() {
+        let vi = CoachChatStore.friendlyPlanRejection("No workout on 2026-01-01.", language: .vi)
+        XCTAssertFalse(vi.contains("No workout on"), "the App Store friendly message must not include the raw English reason")
+        XCTAssertTrue(vi.contains("Coach chưa đọc được"), "maps to the Vietnamese couldn't-read message")
+    }
+
     func testChatStoreRejectsUnapplyablePlanCardBeforeUserCanConfirm() async throws {
         let container = try makeContainer()
         let context = container.mainContext

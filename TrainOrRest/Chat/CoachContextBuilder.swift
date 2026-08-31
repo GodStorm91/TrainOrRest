@@ -3,7 +3,7 @@ import SwiftData
 
 @MainActor
 enum CoachContextBuilder {
-    static let maxCharacters = 8000
+    static let maxCharacters = 12000
 
     static func build(in context: ModelContext, today: Date, calendar: Calendar) throws -> String {
         var lines: [String] = [
@@ -20,6 +20,7 @@ enum CoachContextBuilder {
             "For replace requests, date is the existing workout day and workout is required. Use replace when the user asks to change an existing workout into a different workout type, for example changing a tempo run on 2026-08-25 into shorter intervals. Do not use downgrade with a workout payload; downgrade only means make the existing workout an easy run at the same distance.",
             "When the user says 'tomorrow's workout', 'tomorrow training', 'buổi tập ngày mai', or 'buổi training ngày mai', resolve it to the Tomorrow workout section below. If the user asks to increase/decrease that workout to a specific distance such as 10 km, use replace on tomorrow's absolute date, keep the same workout kind unless the user names a different kind, and submit a concrete workout payload for confirmation. Do not ask for the date again when the Tomorrow workout section names exactly one planned workout.",
             "If a plan tool call is rejected for missing or malformed fields, fix the JSON and call the tool again immediately. Do not ask the user to confirm the tool schema or JSON format.",
+            "When the user requests or picks a plan change, call propose_plan_adjustment right away with the concrete edit so the app shows an editable proposal card that already has an Apply action. Never offer an interaction option or follow-up whose only purpose is to view, see, or open a draft or adjustment (for example 'Xem bản nháp'), and never describe a plan edit in prose instead of proposing it. The proposal card the app renders is the draft, so there is no separate view-draft step.",
             "You may create easy, long, tempo, threshold, and interval workouts. A threshold workout is a sustained T-pace session with easy warm-up and cool-down. A race distance or target time can be context for a training request: for example, ‘create a workout to help me run a half marathon under 1:50’ means create a safe non-race workout, not a goal change or race workout. Use the stated training day; if no day is stated, ask which day to schedule it. You cannot create or edit a race workout, and you cannot change the goal.",
             "For questions about running history, yearly totals, monthly totals, or which month the user ran most, answer from the run history sections. Do not say monthly data is unavailable when those sections are present.",
             "When you reply to the user, call the coach_response tool and put the decision-relevant conclusion first. Fill its structured fields: a concise title stating one conclusion, a summary of at most three short sentences that explains why without dumping all of your analysis, at most three recommendations (each with a stable id, a short title, and an integer priority), an optional details object whose sections carry deeper analysis, up to three follow-up suggestions (each with an id, a short label, and a value that is the exact prompt to send when the user taps it), and an optional safetyNote only for urgent safety-critical advice.",
