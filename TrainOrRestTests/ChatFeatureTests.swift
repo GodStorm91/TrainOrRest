@@ -968,6 +968,27 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertNil(assistant.structuredResponse, "an apply-and-save message must route to a plan mutation, not persist a describe card")
     }
 
+    func testApplyItMessageRoutesToPlanMutation() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let describe = ClaudeResponse(content: [
+            .toolUse(id: "toolu_desc", name: CoachToolCatalog.coachResponseName, input: .object([
+                "content": .string("Applying after you confirm."),
+                "title": .string("Proposal applied"),
+                "summary": .string("Will apply the changes after you confirm.")
+            ]))
+        ], stopReason: "tool_use")
+        let client = MockClaudeClient(responses: Array(repeating: describe, count: CoachChatConfig.maxToolRounds))
+        let coordinator = WorkoutReplacementCoordinator(container: container)
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
+
+        await store.send(text: "Apply it", model: "claude-test", apiKey: "test-key", in: context)
+
+        let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertNil(assistant.structuredResponse, "an apply command must route to a plan mutation, not persist a describe card")
+    }
+
     func testCoachCanCreateAndMoveInOneProposal() throws {
         let container = try makeContainer()
         let context = container.mainContext
