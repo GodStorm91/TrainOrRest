@@ -9,9 +9,9 @@ struct PlanWeekHeaderView: View {
     private var tint: Color {
         if isRecovery { return Theme.good }
         switch phase {
-        case .base: return Theme.accent
+        case .base: return Theme.endurance
         case .build: return Theme.warn
-        case .peak: return Theme.accent2
+        case .peak: return Theme.warn
         case .taper: return Theme.good
         case nil: return Theme.dim
         }

@@ -37,7 +37,6 @@ struct PlanCalendarView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar
-            googleCalendarStatusRow
             ForceIntervalsSyncStatusView(status: forceSyncStatus)
             RecentCoachChangesView(
                 edits: recentCoachEdits,
@@ -45,6 +44,7 @@ struct PlanCalendarView: View {
                 onRevert: revert
             )
             content
+            googleCalendarStatusRow
         }
         .background(Theme.bg)
         .safeAreaInset(edge: .bottom) {

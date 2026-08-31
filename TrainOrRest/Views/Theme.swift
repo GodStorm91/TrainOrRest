@@ -218,7 +218,6 @@ private struct TorGlassSurface: ViewModifier {
                             .padding(.top, 1)
                     }
                     .shadow(color: glassShadow, radius: tint == .graphite ? 22 : 16, x: 0, y: tint == .graphite ? 12 : 8)
-                    .shadow(color: Theme.accent.opacity(0.045), radius: 16, x: 0, y: 4)
             }
     }
 

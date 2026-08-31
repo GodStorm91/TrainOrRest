@@ -20,9 +20,9 @@ struct PlanMonthView: View {
             VStack(alignment: .leading, spacing: 16) {
                 todaysCall
                 monthNav
+                legend
                 weekdayRow
                 grid
-                legend
                 selectedDayDetail
             }
             .padding(.horizontal, 16)
@@ -97,7 +97,6 @@ struct PlanMonthView: View {
         let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
         let isPast = date < calendar.startOfDay(for: .now)
         let kind = workouts(on: date).first?.kind
-        let dot = kind?.styleColor ?? .clear
 
         return Button {
             withAnimation(.easeOut(duration: 0.15)) {
@@ -115,9 +114,7 @@ struct PlanMonthView: View {
                     Text("\(calendar.component(.day, from: date))")
                         .font(.torHeading(15, .bold))
                         .foregroundStyle(numberColor(isToday: isToday, isPast: isPast, hasWorkout: kind != nil))
-                    Circle()
-                        .fill(isPast ? dot.opacity(0.4) : dot)
-                        .frame(width: 6, height: 6)
+                    dayMark(kind: kind, isPast: isPast)
                 }
             }
             .aspectRatio(1, contentMode: .fit)
@@ -125,6 +122,19 @@ struct PlanMonthView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel(date, kind: kind, isToday: isToday))
+    }
+
+    private func dayMark(kind: WorkoutKind?, isPast: Bool) -> some View {
+        Group {
+            if let kind {
+                Image(systemName: kind.symbolName)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(isPast ? kind.styleColor.opacity(0.4) : kind.styleColor)
+            } else {
+                Color.clear
+            }
+        }
+        .frame(height: 12)
     }
 
     private func cellBorder(isToday: Bool, isSelected: Bool) -> Color {
@@ -149,31 +159,24 @@ struct PlanMonthView: View {
 
     private var legend: some View {
         LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 92), spacing: 12, alignment: .leading)],
+            columns: [GridItem(.adaptive(minimum: 84), spacing: 10, alignment: .leading)],
             alignment: .leading,
-            spacing: 10
+            spacing: 8
         ) {
             ForEach(monthKinds, id: \.self) { kind in
-                legendItem(color: kind.styleColor, label: kind.displayName)
+                legendItem(kind: kind)
             }
-            legendItem(color: nil, label: "Rest")
+            legendItem(kind: nil)
         }
-        .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
     }
 
-    private func legendItem(color: Color?, label: String) -> some View {
-        HStack(spacing: 7) {
-            Group {
-                if let color {
-                    Circle().fill(color)
-                } else {
-                    Circle().strokeBorder(Theme.faint, lineWidth: 1.5)
-                }
-            }
-            .frame(width: 8, height: 8)
-            Text(label)
+    private func legendItem(kind: WorkoutKind?) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: kind?.symbolName ?? "circle")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(kind?.styleColor ?? Theme.faint)
+                .frame(width: 14)
+            Text(kind?.displayName ?? "Rest")
                 .font(.system(size: 11.5, weight: .medium))
                 .foregroundStyle(Theme.dim)
         }
@@ -239,6 +242,14 @@ struct PlanMonthView: View {
                             .foregroundStyle(Theme.dim)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
+                        if let why = purpose(workout) {
+                            Text(why)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(Theme.dim)
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.85)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         receiptLine(workout)
                     }
                     Spacer(minLength: 8)
@@ -298,6 +309,20 @@ struct PlanMonthView: View {
                 .minimumScaleFactor(0.75)
         }
         .padding(.top, 2)
+    }
+
+    /// The plain-language reason this session sits on today's plan - the "why"
+    /// behind the prescription, from the workout's role in the training block.
+    private func purpose(_ workout: PlannedWorkout) -> String? {
+        switch workout.kind {
+        case .easy: return "Aerobic base at an easy, conversational effort."
+        case .long: return "Extends endurance for race distance."
+        case .tempo: return "Sustained, comfortably-hard race effort."
+        case .threshold: return "Raises your lactate threshold."
+        case .intervals: return "Short, fast reps that sharpen speed."
+        case .race: return "Your goal race. The plan builds to this."
+        case nil: return nil
+        }
     }
 
     @ViewBuilder
@@ -384,7 +409,8 @@ struct PlanMonthView: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.82)
                         .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.accent.opacity(0.4), lineWidth: 1))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(contextualCoachAccessibilityLabel(for: workout))
@@ -398,7 +424,7 @@ struct PlanMonthView: View {
                     .foregroundStyle(Theme.text)
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
-                    .frame(width: 104, height: 44)
+                    .frame(maxWidth: .infinity, minHeight: 44)
                     .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
             }

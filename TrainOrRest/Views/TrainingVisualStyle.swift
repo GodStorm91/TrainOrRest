@@ -7,8 +7,8 @@ enum TrainingVisualStyle {
     static let long = Theme.endurance
     static let tempo = Theme.warn
     static let threshold = Theme.warn
-    static let intervals = Theme.accent2
-    static let race = Theme.accent2
+    static let intervals = Theme.warn
+    static let race = Theme.warn
     static let recovery = Theme.good
     static let sleep = Theme.data
     static let heart = Theme.data

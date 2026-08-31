@@ -52,7 +52,7 @@ struct CalendarRunSummaryCard: View {
             HStack(spacing: 3) {
                 ForEach(0..<5, id: \.self) { index in
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(index < filledSegments ? Theme.accent : Theme.line)
+                        .fill(index < filledSegments ? Theme.data : Theme.line)
                         .frame(height: compact ? 40 : 54)
                 }
             }
