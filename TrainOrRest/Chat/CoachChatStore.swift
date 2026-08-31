@@ -652,6 +652,15 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             }
 
             if toolUses.count == 1, toolUses[0].1 == CoachToolCatalog.coachResponseName {
+                if snapshot.actionType == .planMutation {
+                    let reason = "This is a plan change. Call \(CoachTools.toolName) with the concrete edit so the user can apply it directly. Do not answer with \(CoachToolCatalog.coachResponseName)."
+                    lastToolRejection = reason
+                    conversation.append(ClaudeMessageParam(role: "assistant", content: response.content))
+                    conversation.append(ClaudeMessageParam(role: "user", content: [
+                        .toolResult(toolUseID: toolUses[0].0, content: "Rejected: \(reason)", isError: true)
+                    ]))
+                    continue
+                }
                 var payload = try toolUses[0].2.decoded(CoachStructuredResponsePayload.self)
                 payload.normalizeModelText()
                 var interaction = payload.interaction ?? fallbackInteraction(from: snapshot)
@@ -831,6 +840,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             return [CoachToolCatalog.coachResponse]
         case .planMutation:
             return CoachToolCatalog.tools(allowProposals: true)
+                .filter { $0.name != CoachToolCatalog.coachResponseName }
         }
     }
 

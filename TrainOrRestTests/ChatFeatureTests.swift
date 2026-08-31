@@ -1202,6 +1202,28 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertTrue(assistant.text.contains("couldn't read which workout") || assistant.text.contains("couldn't apply this change"))
     }
 
+    func testPlanMutationRejectsCoachResponseDescribeCard() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedEveryDayPlan(in: context)
+        let describe = ClaudeResponse(content: [
+            .toolUse(id: "toolu_desc", name: CoachToolCatalog.coachResponseName, input: .object([
+                "content": .string("Đang chuẩn bị tạo kế hoạch."),
+                "title": .string("Điều chỉnh đề xuất"),
+                "summary": .string("Chuẩn bị qua flow xác nhận trước khi áp dụng.")
+            ]))
+        ], stopReason: "tool_use")
+        let client = MockClaudeClient(responses: Array(repeating: describe, count: CoachChatConfig.maxToolRounds))
+        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
+
+        await store.send(text: "Create workout on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
+
+        let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertNil(assistant.structuredResponse, "a plan mutation must stage a proposal, not persist a describe-only card")
+        XCTAssertFalse(coordinator.hasPendingDecision, "a describe-only card stages nothing")
+    }
+
     func testChatStoreRejectsUnapplyablePlanCardBeforeUserCanConfirm() async throws {
         let container = try makeContainer()
         let context = container.mainContext
