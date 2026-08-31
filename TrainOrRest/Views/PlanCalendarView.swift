@@ -28,7 +28,7 @@ struct PlanCalendarView: View {
     @State private var weekScrollToken = 0
     @State private var isEditingGoal = false
     @State private var revertError: String?
-    @State private var forceSyncStatus: String?
+    @State private var forceSyncStatus: ForceSyncStatus?
     @State private var isShowingGoogleCalendarStatus = false
     @State private var didCheckGoogleCalendarOnOpen = false
 
@@ -37,7 +37,7 @@ struct PlanCalendarView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar
-            ForceIntervalsSyncStatusView(status: forceSyncStatus)
+            ForceIntervalsSyncStatusView(status: forceSyncStatus, onRetry: forceSyncIntervals)
             RecentCoachChangesView(
                 edits: recentCoachEdits,
                 error: revertError,
@@ -91,11 +91,19 @@ struct PlanCalendarView: View {
     @ViewBuilder
     private var content: some View {
         if workouts.isEmpty {
-            ContentUnavailableView(
-                "No Plan Yet",
-                systemImage: "calendar.badge.plus",
-                description: Text("Set a race goal to generate your training plan.")
-            )
+            ContentUnavailableView {
+                Label("No plan yet", systemImage: "calendar.badge.plus")
+            } description: {
+                Text("Set a race goal and TrainOrRest builds your day-by-day training plan.")
+            } actions: {
+                Button {
+                    isEditingGoal = true
+                } label: {
+                    Text("Set race goal")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if mode == .month {
             PlanMonthView(
@@ -269,18 +277,18 @@ struct PlanCalendarView: View {
 
 
     private func forceSyncIntervals() {
-        forceSyncStatus = "Syncing planned workouts to intervals.icu…"
+        forceSyncStatus = .syncing
         Task {
             await pushService.reconcile(requireEnabled: false, forceRecreate: true)
             await MainActor.run {
                 if let error = pushService.lastPushError {
-                    forceSyncStatus = "intervals.icu sync failed: \(error)"
+                    forceSyncStatus = .failed(error)
                 } else if let skip = pushService.lastPushSkipReason {
-                    forceSyncStatus = "intervals.icu sync skipped. \(skip)"
+                    forceSyncStatus = .skipped(skip)
                 } else if let lastPushAt = pushService.lastPushAt {
-                    forceSyncStatus = "intervals.icu synced \(lastPushAt.formatted(date: .abbreviated, time: .shortened))"
+                    forceSyncStatus = .synced(lastPushAt)
                 } else {
-                    forceSyncStatus = "intervals.icu sync skipped."
+                    forceSyncStatus = .skipped("Nothing to sync right now.")
                 }
             }
         }
@@ -296,24 +304,67 @@ struct PlanCalendarView: View {
     }
 }
 
+private enum ForceSyncStatus: Equatable {
+    case syncing
+    case synced(Date)
+    case skipped(String)
+    case failed(String)
+}
+
 private struct ForceIntervalsSyncStatusView: View {
-    var status: String?
+    var status: ForceSyncStatus?
+    var onRetry: () -> Void
 
     var body: some View {
         if let status {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Image(systemName: "arrow.triangle.2.circlepath")
+                Image(systemName: icon(status))
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.accent)
-                Text(status)
+                    .foregroundStyle(tint(status))
+                Text(message(status))
                     .font(.caption.weight(.medium))
                     .foregroundStyle(Theme.dim)
                     .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
+                Spacer(minLength: 8)
+                if case .failed = status {
+                    Button("Retry", action: onRetry)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Theme.accent)
+                        .buttonStyle(.plain)
+                        .frame(minHeight: 36)
+                        .accessibilityLabel("Retry intervals.icu sync")
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .background(Theme.card)
+        }
+    }
+
+    private func icon(_ status: ForceSyncStatus) -> String {
+        switch status {
+        case .syncing: "arrow.triangle.2.circlepath"
+        case .synced: "checkmark.circle.fill"
+        case .skipped: "minus.circle"
+        case .failed: "exclamationmark.triangle.fill"
+        }
+    }
+
+    private func tint(_ status: ForceSyncStatus) -> Color {
+        switch status {
+        case .syncing: Theme.dim
+        case .synced: Theme.good
+        case .skipped: Theme.faint
+        case .failed: Theme.bad
+        }
+    }
+
+    private func message(_ status: ForceSyncStatus) -> String {
+        switch status {
+        case .syncing: "Syncing planned workouts to intervals.icu…"
+        case .synced(let date): "Synced to intervals.icu · \(date.formatted(date: .abbreviated, time: .shortened))"
+        case .skipped(let reason): "Sync skipped · \(reason)"
+        case .failed(let reason): "Couldn't sync to intervals.icu · \(reason)"
         }
     }
 }
@@ -328,6 +379,12 @@ private struct RecentCoachChangesView: View {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(edits.prefix(1)) { edit in
                     row(edit)
+                }
+                if edits.count > 1 {
+                    Text("+\(edits.count - 1) more recent change\(edits.count - 1 == 1 ? "" : "s")")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(Theme.faint)
+                        .padding(.leading, 12)
                 }
                 if let error {
                     Text(error)
