@@ -13,14 +13,13 @@ struct PlanMonthView: View {
     @Query(sort: \RunningShoe.createdAt, order: .reverse) private var shoes: [RunningShoe]
 
     private let calendar = Calendar.current
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 3), count: 7)
+    private let railWidth: CGFloat = 40
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 todaysCall
                 monthNav
-                legend
                 weekdayRow
                 grid
                 selectedDayDetail
@@ -71,22 +70,35 @@ struct PlanMonthView: View {
     // MARK: - Grid
 
     private var weekdayRow: some View {
-        LazyVGrid(columns: columns, spacing: 2) {
+        HStack(spacing: 3) {
             ForEach(Array(MonthGrid.weekdaySymbols(calendar).enumerated()), id: \.offset) { _, symbol in
                 Text(symbol)
                     .font(.torLabel(11))
                     .foregroundStyle(Theme.faint)
+                    .frame(maxWidth: .infinity)
             }
+            Text("KM")
+                .font(.torLabel(11))
+                .foregroundStyle(Theme.faint)
+                .frame(width: railWidth, alignment: .leading)
         }
     }
 
     private var grid: some View {
-        LazyVGrid(columns: columns, spacing: 3) {
-            ForEach(Array(MonthGrid.cells(for: monthAnchor, calendar: calendar).enumerated()), id: \.offset) { _, cell in
-                if let date = cell {
-                    dayCell(date)
-                } else {
-                    Color.clear.aspectRatio(1, contentMode: .fit)
+        VStack(spacing: 3) {
+            ForEach(Array(weekRows.enumerated()), id: \.offset) { _, week in
+                HStack(spacing: 3) {
+                    ForEach(Array(week.enumerated()), id: \.offset) { _, cell in
+                        if let date = cell {
+                            dayCell(date)
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Color.clear
+                                .aspectRatio(1, contentMode: .fit)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    weekLoadRail(week)
                 }
             }
         }
@@ -155,41 +167,59 @@ struct PlanMonthView: View {
         return "\(day)\(isToday ? ", today" : ""), \(session)"
     }
 
-    // MARK: - Legend
+    // MARK: - Weekly rhythm
 
-    private var legend: some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 84), spacing: 10, alignment: .leading)],
-            alignment: .leading,
-            spacing: 8
-        ) {
-            ForEach(monthKinds, id: \.self) { kind in
-                legendItem(kind: kind)
+    /// Month cells grouped into calendar weeks so each row can carry its own
+    /// planned volume — the training block's rhythm, read down the month.
+    private var weekRows: [[Date?]] {
+        let cells = MonthGrid.cells(for: monthAnchor, calendar: calendar)
+        return stride(from: 0, to: cells.count, by: 7).map {
+            Array(cells[$0..<min($0 + 7, cells.count)])
+        }
+    }
+
+    /// Planned kilometers for the in-month days of one week row.
+    private func weekLoad(_ week: [Date?]) -> Double {
+        week.compactMap { $0 }
+            .filter { calendar.isDate($0, equalTo: monthAnchor, toGranularity: .month) }
+            .flatMap { workouts(on: $0) }
+            .reduce(0) { $0 + $1.distanceKm }
+    }
+
+    /// The heaviest week in the month, used to scale the volume bars.
+    private var peakWeekLoad: Double {
+        weekRows.map(weekLoad).max() ?? 0
+    }
+
+    /// A week's planned volume: a number plus a cyan bar scaled to the peak
+    /// week, so build, recovery, and taper weeks read as a shape down the rail.
+    @ViewBuilder
+    private func weekLoadRail(_ week: [Date?]) -> some View {
+        let km = weekLoad(week)
+        if km > 0 {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("\(Int(km.rounded()))")
+                    .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                    .foregroundStyle(Theme.dim)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Capsule()
+                    .fill(Theme.data)
+                    .frame(width: barWidth(km), height: 3)
             }
-            legendItem(kind: nil)
+            .frame(width: railWidth, alignment: .leading)
+            .frame(maxHeight: .infinity, alignment: .center)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Week volume \(Int(km.rounded())) kilometers")
+        } else {
+            Color.clear.frame(width: railWidth)
         }
     }
 
-    private func legendItem(kind: WorkoutKind?) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: kind?.symbolName ?? "circle")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(kind?.styleColor ?? Theme.faint)
-                .frame(width: 14)
-            Text(kind?.displayName ?? "Rest")
-                .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(Theme.dim)
-        }
-    }
-
-    /// Kinds that actually appear in the displayed month, in canonical order.
-    private var monthKinds: [WorkoutKind] {
-        let present = Set(
-            workouts
-                .filter { calendar.isDate($0.date, equalTo: monthAnchor, toGranularity: .month) }
-                .compactMap { $0.kind }
-        )
-        return WorkoutKind.allCases.filter { present.contains($0) }
+    private func barWidth(_ km: Double) -> CGFloat {
+        guard peakWeekLoad > 0 else { return 0 }
+        let maxBar = railWidth - 4
+        return max(4, CGFloat(km / peakWeekLoad) * maxBar)
     }
 
     // MARK: - Selected day detail
@@ -238,13 +268,13 @@ struct PlanMonthView: View {
                             .minimumScaleFactor(0.7)
                             .fixedSize(horizontal: false, vertical: true)
                         Text(subtitle(workout))
-                            .font(.torMono(13, .medium))
+                            .font(.system(.footnote, design: .monospaced).weight(.medium))
                             .foregroundStyle(Theme.dim)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                         if let why = purpose(workout) {
                             Text(why)
-                                .font(.system(size: 13, weight: .medium))
+                                .font(.footnote.weight(.medium))
                                 .foregroundStyle(Theme.dim)
                                 .lineLimit(2)
                                 .minimumScaleFactor(0.85)
@@ -273,7 +303,7 @@ struct PlanMonthView: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                     Text("Recovery and adaptation")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.footnote.weight(.medium))
                         .foregroundStyle(Theme.dim)
                 }
                 Spacer(minLength: 8)
@@ -303,7 +333,7 @@ struct PlanMonthView: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(receipt.tint)
             Text(receipt.text)
-                .font(.system(size: 12, weight: .medium))
+                .font(.caption.weight(.medium))
                 .foregroundStyle(Theme.dim)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
@@ -372,7 +402,7 @@ struct PlanMonthView: View {
                         .font(.torHeading(17, .bold))
                         .foregroundStyle(Theme.text)
                     Text(subtitle(workout))
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.caption.weight(.medium))
                         .foregroundStyle(Theme.dim)
                     if let shoe = assignedShoe(for: workout) {
                         HStack(spacing: 5) {
@@ -481,7 +511,7 @@ struct PlanMonthView: View {
                     .font(.torHeading(17, .bold))
                     .foregroundStyle(Theme.text)
                 Text("Recovery and adaptation")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(Theme.dim)
             }
             Spacer()
