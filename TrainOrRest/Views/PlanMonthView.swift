@@ -53,6 +53,8 @@ struct PlanMonthView: View {
                 .foregroundStyle(Theme.dim)
                 .frame(width: 30, height: 30)
                 .background(Theme.chip, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -219,7 +221,7 @@ struct PlanMonthView: View {
     private func todaysCallHero(workout: PlannedWorkout?) -> some View {
         if let workout {
             VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 14) {
+                HStack(alignment: .top, spacing: 14) {
                     Image(systemName: workout.kind?.symbolName ?? "figure.run")
                         .font(.system(size: 26, weight: .semibold, design: .rounded))
                         .foregroundStyle(Theme.text)
@@ -237,6 +239,7 @@ struct PlanMonthView: View {
                             .foregroundStyle(Theme.dim)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
+                        receiptLine(workout)
                     }
                     Spacer(minLength: 8)
                     statusBadge(workout, isToday: true)
@@ -267,6 +270,34 @@ struct PlanMonthView: View {
             .padding(18)
             .torGlass(cornerRadius: 26, tint: .graphite)
         }
+    }
+
+    private func planReceipt(_ workout: PlannedWorkout) -> (symbol: String, tint: Color, text: String) {
+        let phase = TrainingPhase(rawValue: workout.phaseRaw)?.displayName ?? "Plan"
+        switch workout.scheduleUpdatedFrom {
+        case "googleCalendar"?:
+            return ("calendar.badge.clock", Theme.dim, "\(phase) phase · synced from calendar")
+        case .some(let source) where source != "smartSchedulingUndo":
+            return ("arrow.turn.up.right", Theme.dim, "\(phase) phase · moved to fit your week")
+        default:
+            return ("checkmark.seal.fill", Theme.good, "\(phase) phase · on plan")
+        }
+    }
+
+    @ViewBuilder
+    private func receiptLine(_ workout: PlannedWorkout) -> some View {
+        let receipt = planReceipt(workout)
+        HStack(spacing: 5) {
+            Image(systemName: receipt.symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(receipt.tint)
+            Text(receipt.text)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.dim)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .padding(.top, 2)
     }
 
     @ViewBuilder
@@ -312,10 +343,6 @@ struct PlanMonthView: View {
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                     )
                 VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 7) {
-                        Circle().fill(workout.kind?.styleColor ?? Theme.dim).frame(width: 7, height: 7)
-                        TorEyebrow(workout.kind?.displayName ?? "Session").tracking(1.5)
-                    }
                     Text(workout.kind?.displayName ?? "Run")
                         .font(.torHeading(17, .bold))
                         .foregroundStyle(Theme.text)

@@ -137,7 +137,7 @@ struct PlanCalendarView: View {
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(Theme.faint)
             }
-            .frame(minHeight: 36)
+            .frame(minHeight: 44)
             .padding(.horizontal, 16)
             .background(Theme.card)
         }
@@ -157,22 +157,26 @@ struct PlanCalendarView: View {
 
     private func segment(_ option: Mode) -> some View {
         let selected = option == mode
-        return Text(option.rawValue)
-            .font(.torHeading(12, selected ? .bold : .semibold))
-            .foregroundStyle(selected ? Color.white : Theme.faint)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 5)
-            .background(
-                selected ? Theme.accent : Color.clear,
-                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-            )
-            .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(.easeOut(duration: 0.15)) { mode = option }
-                if option == .week {
-                    weekScrollToken += 1
-                }
+        return Button {
+            withAnimation(.easeOut(duration: 0.15)) { mode = option }
+            if option == .week {
+                weekScrollToken += 1
             }
+        } label: {
+            Text(option.rawValue)
+                .font(.torHeading(12, selected ? .bold : .semibold))
+                .foregroundStyle(selected ? Color.white : Theme.faint)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 5)
+                .background(
+                    selected ? Theme.accent : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private var goalButtonTitle: String {
