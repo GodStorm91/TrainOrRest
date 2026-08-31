@@ -65,9 +65,7 @@ struct RootTabView: View {
         case .chat:
             NavigationStack {
                 ChatView(
-                    bottomNavigation: AnyView(
-                        TorTabDock(selection: $selection, namespace: dockNamespace)
-                    ),
+                    reservesBottomDock: true,
                     reviewRequest: pendingReviewChatRequest,
                     onOpenCalendar: { _ in
                         withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
@@ -87,8 +85,15 @@ struct RootTabView: View {
     }
 
     private var shouldShowDock: Bool {
-        !isKeyboardVisible && !isBottomDockHiddenByChild && selection != .chat
+        !isKeyboardVisible && !isBottomDockHiddenByChild
     }
+}
+
+/// Layout constants shared between the floating dock and screens that must
+/// leave room for it (e.g. the coach composer). Dock height (56) + its 8pt
+/// bottom padding = 64 occupied; +2pt gap keeps content just above the dock.
+enum TorTabDockMetrics {
+    static let reservedBottomSpace: CGFloat = 66
 }
 
 private struct TorTabDock: View {

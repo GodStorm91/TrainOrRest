@@ -6,7 +6,7 @@ import SwiftUI
 import UIKit
 
 struct ChatView: View {
-    private let bottomNavigation: AnyView?
+    private let reservesBottomDock: Bool
     private let reviewRequest: CalendarReviewChatRequest?
     private let contextualWorkoutID: UUID?
     private let contextualCompletedActivityID: UUID?
@@ -61,14 +61,14 @@ struct ChatView: View {
     private let nearBottomThreshold: CGFloat = 110
 
     init(
-        bottomNavigation: AnyView? = nil,
+        reservesBottomDock: Bool = false,
         reviewRequest: CalendarReviewChatRequest? = nil,
         contextualWorkoutID: UUID? = nil,
         contextualCompletedActivityID: UUID? = nil,
         onOpenCalendar: @escaping (Date?) -> Void = { _ in },
         onReviewRequestConsumed: @escaping (CalendarReviewChatRequest) -> Void = { _ in }
     ) {
-        self.bottomNavigation = bottomNavigation
+        self.reservesBottomDock = reservesBottomDock
         self.reviewRequest = reviewRequest
         self.contextualWorkoutID = contextualWorkoutID
         self.contextualCompletedActivityID = contextualCompletedActivityID
@@ -153,11 +153,15 @@ struct ChatView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
-            NotificationCenter.default.post(name: .torSetBottomDockHidden, object: true)
+            if !reservesBottomDock {
+                NotificationCenter.default.post(name: .torSetBottomDockHidden, object: true)
+            }
             runAppearSetup()
         }
         .onDisappear {
-            NotificationCenter.default.post(name: .torSetBottomDockHidden, object: false)
+            if !reservesBottomDock {
+                NotificationCenter.default.post(name: .torSetBottomDockHidden, object: false)
+            }
         }
         .onChange(of: allMessages.count) {
             attachUnthreadedMessagesToActiveThread()
@@ -828,15 +832,10 @@ struct ChatView: View {
             }
 
             composer
-            if let bottomNavigation, !isSoftwareKeyboardVisible {
-                bottomNavigation
-                    .padding(.top, 2)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
         }
         .padding(.horizontal, 14)
         .padding(.top, 8)
-        .padding(.bottom, isSoftwareKeyboardVisible ? 6 : (bottomNavigation.map { _ in 4 } ?? 8))
+        .padding(.bottom, isSoftwareKeyboardVisible ? 6 : (reservesBottomDock ? TorTabDockMetrics.reservedBottomSpace : 8))
         .background(.clear)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: replacementCoordinator.pending)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: replacementCoordinator.pendingProposal)

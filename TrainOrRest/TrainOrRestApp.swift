@@ -190,6 +190,8 @@ struct RootView: View {
             CoachProviderSettingsView()
         case .delivery:
             WatchDeliverySettingsView()
+        case .profile:
+            ProfileView()
         }
     }
     #endif

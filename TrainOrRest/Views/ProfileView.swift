@@ -10,6 +10,8 @@ struct ProfileView: View {
     @Query(sort: \DailyReadiness.date, order: .reverse) private var readiness: [DailyReadiness]
 
     @AppStorage(PersonalCoachSettings.weightKgKey) private var weightKg = ""
+    @AppStorage(PersonalCoachSettings.ageKey) private var age = ""
+    @AppStorage(PersonalCoachSettings.heightCmKey) private var heightCm = ""
 
     @State private var showGoalEntry = false
     @State private var showAthleteProfile = false
@@ -20,9 +22,9 @@ struct ProfileView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 header
-                athleteSummaryCard
                 goalAndPlanCard
-                personalNavigationRows
+                athleteSummaryCard
+                personalHistorySection
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
@@ -66,21 +68,15 @@ struct ProfileView: View {
         TorCard {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(athleteName)
-                        .font(.torHeading(22, .bold))
-                        .foregroundStyle(Theme.text)
-                    Text(athleteType)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Theme.dim)
-                }
-
-                let metrics = athleteMetrics
-                if metrics.isEmpty {
-                    Text("Add a few athlete details so Coach can personalize training targets.")
+                    TorEyebrow("ATHLETE")
+                    Text(athleteDetailSummary)
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(Theme.dim)
                         .fixedSize(horizontal: false, vertical: true)
-                } else {
+                }
+
+                let metrics = athleteMetrics
+                if !metrics.isEmpty {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 128), spacing: 10)], alignment: .leading, spacing: 10) {
                         ForEach(metrics) { metric in
                             MetricChip(metric: metric)
@@ -92,7 +88,7 @@ struct ProfileView: View {
                     showAthleteProfile = true
                 } label: {
                     HStack(spacing: 8) {
-                        Text(metrics.count < 2 ? "Complete athlete profile" : "Edit athlete profile")
+                        Text(filledAthleteInputs < 3 ? "Complete athlete profile" : "Edit athlete profile")
                         Image(systemName: "chevron.right")
                             .font(.system(size: 11, weight: .bold))
                     }
@@ -101,7 +97,7 @@ struct ProfileView: View {
                     .frame(minHeight: 44, alignment: .center)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(metrics.count < 2 ? "Complete athlete profile" : "Edit athlete profile")
+                .accessibilityLabel(filledAthleteInputs < 3 ? "Complete athlete profile" : "Edit athlete profile")
             }
         }
     }
@@ -139,6 +135,16 @@ struct ProfileView: View {
                         Text(raceLine(summary))
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(Theme.dim)
+                        Text("\(athleteName) · \(athleteType)")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Theme.faint)
+                        if let detail = planStatusDetail(summary) {
+                            Text(detail)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(statusColor(summary.health.status))
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.top, 2)
+                        }
                     }
                     Spacer(minLength: 8)
                     Image(systemName: "chevron.right")
@@ -158,7 +164,7 @@ struct ProfileView: View {
                             .foregroundStyle(Theme.faint)
                     }
                     ProgressView(value: summary.timelineProgress)
-                        .tint(Theme.accent)
+                        .tint(statusColor(summary.health.status))
                         .accessibilityLabel("Week \(summary.currentWeek) of \(summary.totalWeeks)")
                 }
 
@@ -203,27 +209,35 @@ struct ProfileView: View {
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
     }
 
-    private var personalNavigationRows: some View {
-        VStack(spacing: 10) {
-            navRow("Run history", systemImage: "figure.run") { ActivityListView() }
-            navRow("Running Shoes", systemImage: "shoeprints.fill") { RunningShoesView() }
+    private var personalHistorySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TorEyebrow("PERSONAL HISTORY")
+                .padding(.horizontal, 4)
+            navRow("Run history", systemImage: "figure.run", subtitle: "Completed runs and trends") { ActivityListView() }
+            navRow("Running shoes", systemImage: "shoeprints.fill", subtitle: "Rotation and mileage") { RunningShoesView() }
         }
     }
 
     private func navRow<Destination: View>(
         _ label: String,
         systemImage: String,
+        subtitle: String,
         @ViewBuilder destination: @escaping () -> Destination
     ) -> some View {
         NavigationLink(destination: destination) {
             HStack(spacing: 12) {
                 Image(systemName: systemImage)
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Theme.dim)
                     .frame(width: 28)
-                Text(label)
-                    .font(.torHeading(16, .semibold))
-                    .foregroundStyle(Theme.text)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label)
+                        .font(.torHeading(16, .semibold))
+                        .foregroundStyle(Theme.text)
+                    Text(subtitle)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Theme.faint)
+                }
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
@@ -259,6 +273,20 @@ struct ProfileView: View {
         if goals.first?.spec?.distance == .marathon { return "Marathon runner" }
         if let distance = goals.first?.spec?.distance { return "\(distance.displayName) runner" }
         return "Runner"
+    }
+
+    private var filledAthleteInputs: Int {
+        [age, heightCm, weightKg]
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .count
+    }
+
+    private var athleteDetailSummary: String {
+        switch filledAthleteInputs {
+        case 0: "Add age, height, and weight so Coach can personalize targets."
+        case 1, 2: "\(filledAthleteInputs) of 3 details set · complete for sharper targets."
+        default: "Age, height, and weight on file."
+        }
     }
 
     private var athleteMetrics: [ProfileMetric] {
@@ -354,6 +382,50 @@ struct ProfileView: View {
         case .completed: Theme.accent
         case .active: Theme.accent
         }
+    }
+
+    private func planStatusDetail(_ summary: ActivePlanSummary) -> String? {
+        let health = summary.health
+        if summary.isRaceDay || health.reasons.contains(.raceDay) || health.reasons.contains(.raceDatePassed) {
+            return nil
+        }
+        switch health.status {
+        case .needsAttention:
+            if let keys = missedKeyCount(health), keys > 0 {
+                return "Missed \(keys) key session\(keys == 1 ? "" : "s"). Nothing is broken — reschedule in the plan or ask Coach to rebalance the week."
+            }
+            if health.reasons.contains(.weeklyVolumeBehind) {
+                return "Behind this week's mileage. Review the remaining runs or ease back to target — the plan adapts."
+            }
+            if let missed = missedCount(health), missed > 0 {
+                return "Missed \(missed) run\(missed == 1 ? "" : "s") recently. Pick the next one back up when you are ready."
+            }
+            if health.reasons.contains(.insufficientData) {
+                return "Not enough recent runs to read plan health yet. Sync or log your latest runs."
+            }
+            return "A few sessions slipped. Open the plan to get back on track."
+        case .active:
+            if health.reasons.contains(.insufficientData) {
+                return "Log or sync a few runs so Coach can track how the plan is going."
+            }
+            return nil
+        default:
+            return nil
+        }
+    }
+
+    private func missedKeyCount(_ health: PlanHealth) -> Int? {
+        for reason in health.reasons {
+            if case .missedKeySessions(let count) = reason { return count }
+        }
+        return nil
+    }
+
+    private func missedCount(_ health: PlanHealth) -> Int? {
+        for reason in health.reasons {
+            if case .missedSessions(let count) = reason { return count }
+        }
+        return nil
     }
 
     private func cleanDouble(_ raw: String) -> Double? {

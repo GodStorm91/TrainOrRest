@@ -25,12 +25,13 @@ enum DevSeed {
     }
 
     /// DEBUG-only launch route. When set alongside `TOR_DEV_SEED=1`, the app
-    /// opens straight to a specific Settings destination so its redesigned
-    /// layout can be screenshotted without the onboarding-gated tab flow.
+    /// opens straight to a specific redesigned destination so its layout can
+    /// be screenshotted without the onboarding-gated tab flow.
     enum DevScreen: String {
         case settings
         case provider
         case delivery
+        case profile
     }
 
     /// The requested launch screen, or `nil` for the normal tab shell.
