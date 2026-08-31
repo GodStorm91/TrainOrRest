@@ -175,7 +175,7 @@ final class GoogleCalendarConnection {
         self.googleAccountID = nil
         self.maskedEmail = nil
         self.googleCalendarID = nil
-        self.calendarName = "RestOrTrain Training"
+        self.calendarName = "TrainOrRest Training"
         self.connectionStatusRaw = GoogleCalendarConnectionStatus.disconnected.rawValue
         self.syncStatusRaw = GoogleCalendarConnectionStatus.disconnected.rawValue
         self.lastSyncErrorCategoryRaw = nil

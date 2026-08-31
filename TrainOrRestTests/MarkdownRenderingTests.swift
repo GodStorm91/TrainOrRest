@@ -40,4 +40,46 @@ final class MarkdownRenderingTests: XCTestCase {
 
         XCTAssertEqual(rendered, "1) a\n2) b\n3) c")
     }
+
+    // Block layer — dotted ordered lists (`1. `) reach the block parser, unlike
+    // the paren style above. The number must survive as the rendered marker so a
+    // coach's numbered steps keep their order instead of collapsing to bullets.
+    func testOrderedListItemsKeepTheirNumbers() {
+        let blocks = MarkdownBlockParser.parse("1. Warm up\n2. Intervals\n3. Cool down")
+
+        XCTAssertEqual(blocks, [
+            .listItem(marker: "1.", text: "Warm up"),
+            .listItem(marker: "2.", text: "Intervals"),
+            .listItem(marker: "3.", text: "Cool down"),
+        ])
+    }
+
+    // Unordered lists still render with a bullet marker.
+    func testUnorderedListItemsUseBulletMarker() {
+        let blocks = MarkdownBlockParser.parse("- easy\n* tempo")
+
+        XCTAssertEqual(blocks, [
+            .listItem(marker: "•", text: "easy"),
+            .listItem(marker: "•", text: "tempo"),
+        ])
+    }
+
+    // A sentence that merely starts with a period is prose, not a list — the
+    // ordered-list detector requires at least one digit before the dot.
+    func testLeadingDotIsNotAList() {
+        let blocks = MarkdownBlockParser.parse(". then something")
+
+        XCTAssertEqual(blocks, [.paragraph(". then something")])
+    }
+
+    // Extra spaces after the marker are indentation, not content: the item text
+    // must not keep a leading space, or the marker-to-text gap renders unevenly.
+    func testExtraSpaceAfterMarkerIsTrimmed() {
+        let blocks = MarkdownBlockParser.parse("1.  Warm up\n-  easy")
+
+        XCTAssertEqual(blocks, [
+            .listItem(marker: "1.", text: "Warm up"),
+            .listItem(marker: "•", text: "easy"),
+        ])
+    }
 }

@@ -23,7 +23,7 @@ final class SmartSchedulingTests: XCTestCase {
     }
 
     @MainActor
-    func testFreeBusyNormalizationExcludesRestOrTrainCalendarAndStoresNoTitles() async throws {
+    func testFreeBusyNormalizationExcludesTrainOrRestCalendarAndStoresNoTitles() async throws {
         let container = try makeContainer()
         let context = container.mainContext
         let calendar = fixedCalendar
@@ -39,7 +39,7 @@ final class SmartSchedulingTests: XCTestCase {
         let api = FakeSmartSchedulingAPI()
         api.calendarList = [
             GoogleCalendarListEntry(id: "work", summary: "Work", description: "meetings", timeZone: "Asia/Tokyo", accessRole: "reader", primary: true, selected: true, backgroundColor: nil),
-            GoogleCalendarListEntry(id: "rot-training", summary: "RestOrTrain Training", description: nil, timeZone: "Asia/Tokyo", accessRole: "owner", primary: false, selected: true, backgroundColor: nil),
+            GoogleCalendarListEntry(id: "rot-training", summary: "TrainOrRest Training", description: nil, timeZone: "Asia/Tokyo", accessRole: "owner", primary: false, selected: true, backgroundColor: nil),
             GoogleCalendarListEntry(id: "holidays", summary: "Holidays", description: nil, timeZone: "Asia/Tokyo", accessRole: "reader", primary: false, selected: true, backgroundColor: nil)
         ]
         api.freeBusyResponse = GoogleFreeBusyResponse(calendars: [
@@ -68,7 +68,7 @@ final class SmartSchedulingTests: XCTestCase {
     }
 
     @MainActor
-    func testRefreshAvailabilityDeselectsExistingRestOrTrainCalendarBeforeFreeBusy() async throws {
+    func testRefreshAvailabilityDeselectsExistingTrainOrRestCalendarBeforeFreeBusy() async throws {
         let container = try makeContainer()
         let context = container.mainContext
         let calendar = fixedCalendar
@@ -81,7 +81,7 @@ final class SmartSchedulingTests: XCTestCase {
         context.insert(GoogleAvailabilityCalendar(
             connectionID: connection.uuid,
             googleCalendarID: "rot-training",
-            displayName: "RestOrTrain Training",
+            displayName: "TrainOrRest Training",
             accessRole: "owner",
             isPrimary: false,
             selectedForAvailability: true,
@@ -94,7 +94,7 @@ final class SmartSchedulingTests: XCTestCase {
         let api = FakeSmartSchedulingAPI()
         api.calendarList = [
             GoogleCalendarListEntry(id: "primary", summary: "Primary", description: nil, timeZone: "Asia/Tokyo", accessRole: "owner", primary: true, selected: true, backgroundColor: nil),
-            GoogleCalendarListEntry(id: "rot-training", summary: "RestOrTrain Training", description: nil, timeZone: "Asia/Tokyo", accessRole: "owner", primary: false, selected: true, backgroundColor: nil)
+            GoogleCalendarListEntry(id: "rot-training", summary: "TrainOrRest Training", description: nil, timeZone: "Asia/Tokyo", accessRole: "owner", primary: false, selected: true, backgroundColor: nil)
         ]
         api.freeBusyResponse = GoogleFreeBusyResponse(calendars: [
             "primary": GoogleFreeBusyCalendar(errors: nil, busy: [])
@@ -532,7 +532,7 @@ private final class FakeSmartSchedulingAPI: GoogleCalendarAPIServicing {
     func exchangeCode(_ code: String, verifier: String) async throws -> GoogleCalendarTokenSet { GoogleCalendarTokenSet(accessToken: "access", refreshToken: "refresh", expiresAt: Date().addingTimeInterval(3600), tokenType: "Bearer") }
     func refresh(_ refreshToken: String) async throws -> GoogleCalendarTokenSet { GoogleCalendarTokenSet(accessToken: "access", refreshToken: refreshToken, expiresAt: Date().addingTimeInterval(3600), tokenType: "Bearer") }
     func userInfo(accessToken: String) async throws -> GoogleCalendarUserInfo { GoogleCalendarUserInfo(sub: "user", email: "runner@example.com") }
-    func calendar(id: String, accessToken: String) async throws -> GoogleCalendarListEntry { GoogleCalendarListEntry(id: id, summary: "RestOrTrain Training", description: nil, timeZone: nil, accessRole: nil, primary: nil, selected: nil, backgroundColor: nil) }
+    func calendar(id: String, accessToken: String) async throws -> GoogleCalendarListEntry { GoogleCalendarListEntry(id: id, summary: "TrainOrRest Training", description: nil, timeZone: nil, accessRole: nil, primary: nil, selected: nil, backgroundColor: nil) }
     func createCalendar(name: String, description: String, timeZone: String, accessToken: String) async throws -> GoogleCalendarListEntry { GoogleCalendarListEntry(id: "rot-training", summary: name, description: description, timeZone: timeZone, accessRole: "owner", primary: false, selected: true, backgroundColor: nil) }
     func deleteCalendar(id: String, accessToken: String) async throws {}
     func revokeToken(_ token: String) async throws {}

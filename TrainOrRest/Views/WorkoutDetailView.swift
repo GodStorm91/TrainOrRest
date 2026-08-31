@@ -49,7 +49,7 @@ struct WorkoutDetailView: View {
                 Section {
                     Label("Not shown in Google Calendar", systemImage: "calendar.badge.exclamationmark")
                         .foregroundStyle(Theme.warn)
-                    Text("This workout still exists in your RestOrTrain plan.")
+                    Text("This workout still exists in your TrainOrRest plan.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Button {

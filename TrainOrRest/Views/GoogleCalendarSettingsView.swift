@@ -49,20 +49,20 @@ struct GoogleCalendarSettingsView: View {
             Button("Keep calendar and events") {
                 disconnect(deleteCalendar: false)
             }
-            Button("Delete RestOrTrain Training calendar", role: .destructive) {
+            Button("Delete TrainOrRest Training calendar", role: .destructive) {
                 deleteRemoteCalendar = true
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("RestOrTrain will stop updating your Google Calendar.")
+            Text("TrainOrRest will stop updating your Google Calendar.")
         }
-        .alert("Delete RestOrTrain Training calendar?", isPresented: $deleteRemoteCalendar) {
+        .alert("Delete TrainOrRest Training calendar?", isPresented: $deleteRemoteCalendar) {
             Button("Delete calendar", role: .destructive) {
                 disconnect(deleteCalendar: true)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Only the RestOrTrain-created secondary calendar is removed. Your workouts and personal calendars stay untouched.")
+            Text("Only the TrainOrRest-created secondary calendar is removed. Your workouts and personal calendars stay untouched.")
         }
         .alert("Allow scheduling from Google Calendar?", isPresented: $isShowingSchedulingPrompt) {
             Button("Cancel", role: .cancel) {}
@@ -70,7 +70,7 @@ struct GoogleCalendarSettingsView: View {
                 googleCalendar.updateSchedulingFromGoogle(enabled: true)
             }
         } message: {
-            Text("You’ll be able to change when a RestOrTrain workout happens directly from Google Calendar.\n\nGoogle Calendar can change:\n✓ Workout date\n✓ Start time\n\nGoogle Calendar cannot change:\n✕ Workout type\n✕ Distance\n✕ Pace or intensity\n✕ Workout structure\n✕ Your training goal\n\nMoves that could disrupt your training plan will require review in RestOrTrain.")
+            Text("You’ll be able to change when a TrainOrRest workout happens directly from Google Calendar.\n\nGoogle Calendar can change:\n✓ Workout date\n✓ Start time\n\nGoogle Calendar cannot change:\n✕ Workout type\n✕ Distance\n✕ Pace or intensity\n✕ Workout structure\n✕ Your training goal\n\nMoves that could disrupt your training plan will require review in TrainOrRest.")
         }
         .alert("Use Google Calendar availability?", isPresented: $isShowingSmartSchedulingPrompt) {
             Button("Cancel", role: .cancel) {}
@@ -78,7 +78,7 @@ struct GoogleCalendarSettingsView: View {
                 Task { await googleCalendar.enableSmartScheduling() }
             }
         } message: {
-            Text("RestOrTrain can use your busy and available time to suggest better workout times.\n\nRestOrTrain will be able to see:\n✓ When you are busy\n✓ When you are available\n\nRestOrTrain will not read:\n✕ Event names\n✕ Event descriptions\n✕ Attendees\n✕ Meeting links\n✕ Event notes\n\nYour training plan and workout details remain managed by RestOrTrain.")
+            Text("TrainOrRest can use your busy and available time to suggest better workout times.\n\nTrainOrRest will be able to see:\n✓ When you are busy\n✓ When you are available\n\nTrainOrRest will not read:\n✕ Event names\n✕ Event descriptions\n✕ Attendees\n✕ Meeting links\n✕ Event notes\n\nYour training plan and workout details remain managed by TrainOrRest.")
         }
         .task {
             guard !didSyncOnOpen,
@@ -96,7 +96,7 @@ struct GoogleCalendarSettingsView: View {
                     Section {
                         DatePicker("Workout date", selection: $dateChoiceDraft, displayedComponents: [.date, .hourAndMinute])
                     } footer: {
-                        Text("RestOrTrain will validate the chosen date before applying it.")
+                        Text("TrainOrRest will validate the chosen date before applying it.")
                     }
                 }
                 .navigationTitle("Choose another day")
@@ -130,7 +130,7 @@ struct GoogleCalendarSettingsView: View {
             Section {
                 connectionHeader(
                     title: "Connect Google Calendar",
-                    subtitle: "View RestOrTrain workouts alongside your work and personal schedule.",
+                    subtitle: "View TrainOrRest workouts alongside your work and personal schedule.",
                     symbol: "calendar.badge.plus",
                     tint: Theme.accent
                 )
@@ -141,7 +141,7 @@ struct GoogleCalendarSettingsView: View {
                 }
                 .accessibilityLabel("Connect Google Calendar")
             } footer: {
-                Text("RestOrTrain creates a separate training calendar and does not read personal events.")
+                Text("TrainOrRest creates a separate training calendar and does not read personal events.")
             }
         }
     }
@@ -151,7 +151,7 @@ struct GoogleCalendarSettingsView: View {
             Section {
                 connectionHeader(
                     title: statusTitle,
-                    subtitle: connection.maskedEmail ?? "RestOrTrain Training",
+                    subtitle: connection.maskedEmail ?? "TrainOrRest Training",
                     symbol: statusSymbol,
                     tint: statusTint
                 )
@@ -192,7 +192,7 @@ struct GoogleCalendarSettingsView: View {
             } header: {
                 Text("What syncs")
             } footer: {
-                Text(connection.allowsSchedulingFromGoogle ? "Google Calendar can schedule the workout. RestOrTrain defines the workout." : "RestOrTrain is the source of truth. Changes made in Google Calendar do not update your training plan and may be overwritten during sync.")
+                Text(connection.allowsSchedulingFromGoogle ? "Google Calendar can schedule the workout. TrainOrRest defines the workout." : "TrainOrRest is the source of truth. Changes made in Google Calendar do not update your training plan and may be overwritten during sync.")
             }
 
             Section {
@@ -203,7 +203,7 @@ struct GoogleCalendarSettingsView: View {
             } header: {
                 Text("Scheduling from Google")
             } footer: {
-                Text("When enabled, changing the date or start time of a RestOrTrain workout in Google Calendar can update your training schedule.\n\nWorkout type, distance, pace, and structure remain managed by RestOrTrain.")
+                Text("When enabled, changing the date or start time of a TrainOrRest workout in Google Calendar can update your training schedule.\n\nWorkout type, distance, pace, and structure remain managed by TrainOrRest.")
             }
 
             smartSchedulingSection
@@ -256,7 +256,7 @@ struct GoogleCalendarSettingsView: View {
             Section {
                 connectionHeader(
                     title: "Google Calendar needs attention",
-                    subtitle: "RestOrTrain no longer has permission to update your training calendar.",
+                    subtitle: "TrainOrRest no longer has permission to update your training calendar.",
                     symbol: "exclamationmark.triangle",
                     tint: Theme.warn
                 )
@@ -279,7 +279,7 @@ struct GoogleCalendarSettingsView: View {
             Section {
                 connectionHeader(
                     title: "Training calendar was removed",
-                    subtitle: "The RestOrTrain Training calendar can no longer be found in Google Calendar.",
+                    subtitle: "The TrainOrRest Training calendar can no longer be found in Google Calendar.",
                     symbol: "calendar.badge.exclamationmark",
                     tint: Theme.warn
                 )
@@ -332,7 +332,7 @@ struct GoogleCalendarSettingsView: View {
         Section {
             Toggle("Use calendar availability", isOn: smartSchedulingBinding)
                 .accessibilityLabel("Use Google Calendar availability")
-            Text("Let Coach use busy and available time blocks to suggest better workout times. RestOrTrain does not read event names or details.")
+            Text("Let Coach use busy and available time blocks to suggest better workout times. TrainOrRest does not read event names or details.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -389,7 +389,7 @@ struct GoogleCalendarSettingsView: View {
         } header: {
             Text("Smart Scheduling")
         } footer: {
-            Text("RestOrTrain only uses busy/free time to help schedule workouts. Event names and details are not used.")
+            Text("TrainOrRest only uses busy/free time to help schedule workouts. Event names and details are not used.")
         }
     }
 
@@ -481,73 +481,131 @@ struct GoogleCalendarSettingsView: View {
         }
     }
 
+    private enum ReviewActionKind { case addBack, swap, coach }
+
     @ViewBuilder
     private func reviewActions(for change: GoogleCalendarInboundChange) -> some View {
+        let recommendation = recommendation(for: change)
         VStack(alignment: .leading, spacing: 8) {
-            if change.reason == .eventDeleted {
-                Button("Add back to Google Calendar") {
-                    googleCalendar.addBackToGoogleCalendar(workoutID: change.localEntityID)
-                }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("Add workout back to Google Calendar")
-            }
-            if change.reason == .targetDayConflict {
-                Button("Swap workouts") {
-                    googleCalendar.swapWorkouts(for: change.uuid)
-                }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("Swap workouts")
-            }
-            if let workout = workouts.first(where: { $0.uuid == change.localEntityID }),
-               connection.smartSchedulingEnabled,
-               change.reason != .eventDeleted {
-                let candidates = googleCalendar.smartSchedulingCandidates(for: workout, limit: 3)
-                if !candidates.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Smart Scheduling found")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        ForEach(candidates) { candidate in
-                            Button {
-                                googleCalendar.acceptSmartSchedulingCandidate(candidate, resolvingReview: change.uuid)
-                            } label: {
-                                Label(
-                                    "\(candidate.startTime.formatted(date: .abbreviated, time: .shortened))-\(candidate.endTime.formatted(date: .omitted, time: .shortened))",
-                                    systemImage: "sparkles"
-                                )
-                            }
-                            .buttonStyle(.bordered)
-                            .accessibilityLabel("Accept Smart Scheduling alternative")
-                        }
+            Text(recommendation.rationale)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            recommendedControl(for: change, kind: recommendation.kind)
+            if change.reason != .eventDeleted {
+                DisclosureGroup("Other options") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        otherActions(for: change, recommended: recommendation.kind)
                     }
+                    .padding(.top, 4)
                 }
-            }
-            if change.reason != .eventDeleted {
-                Button("Choose another day") {
-                    dateChoiceDraft = change.proposedDate ?? change.originalDate
-                    dateChoiceChangeID = change.uuid
-                }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("Choose another day")
-            }
-            if change.reason == .outsidePlannedWeek || change.reason == .planValidationFailed {
-                NavigationLink {
-                    ChatView(reviewRequest: CalendarReviewChatRequest(prompt: coachPrompt(for: change)))
-                } label: {
-                    Text("Review with Coach")
-                }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("Review Google Calendar change with Coach")
-            }
-            if change.reason != .eventDeleted {
-                Button(change.reason == .outsidePlannedWeek ? "Restore original date" : "Keep original schedule") {
-                    googleCalendar.restoreOriginalSchedule(for: change.uuid)
-                }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("Restore original workout date")
+                .font(.subheadline)
             }
         }
         .controlSize(.small)
+    }
+
+    private func recommendation(for change: GoogleCalendarInboundChange) -> (kind: ReviewActionKind, rationale: String) {
+        switch change.reason {
+        case .eventDeleted:
+            return (.addBack, "You deleted this workout in Google Calendar. Recommended: add it back so your plan stays intact.")
+        case .targetDayConflict:
+            return (.swap, "That day already has a workout. Recommended: swap the two so both still fit your week.")
+        case .outsidePlannedWeek:
+            return (.coach, "This moves the workout outside its planned week. Recommended: review with Coach before changing plan structure.")
+        case .planValidationFailed:
+            return (.coach, "This move breaks a plan rule. Recommended: review with Coach to find a safe fit.")
+        default:
+            return (.coach, "This change needs review. Recommended: review with Coach before applying it.")
+        }
+    }
+
+    @ViewBuilder
+    private func recommendedControl(for change: GoogleCalendarInboundChange, kind: ReviewActionKind) -> some View {
+        switch kind {
+        case .addBack:
+            Button {
+                googleCalendar.addBackToGoogleCalendar(workoutID: change.localEntityID)
+            } label: {
+                Label("Add back to Google Calendar", systemImage: "arrow.uturn.left")
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityLabel("Add workout back to Google Calendar")
+        case .swap:
+            Button {
+                googleCalendar.swapWorkouts(for: change.uuid)
+            } label: {
+                Label("Swap workouts", systemImage: "arrow.left.arrow.right")
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityLabel("Swap workouts")
+        case .coach:
+            NavigationLink {
+                ChatView(reviewRequest: CalendarReviewChatRequest(prompt: coachPrompt(for: change)))
+            } label: {
+                Label("Review with Coach", systemImage: "sparkles")
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityLabel("Review Google Calendar change with Coach")
+        }
+    }
+
+    @ViewBuilder
+    private func otherActions(for change: GoogleCalendarInboundChange, recommended: ReviewActionKind) -> some View {
+        if change.reason == .targetDayConflict, recommended != .swap {
+            Button("Swap workouts") {
+                googleCalendar.swapWorkouts(for: change.uuid)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Swap workouts")
+        }
+        if let workout = workouts.first(where: { $0.uuid == change.localEntityID }),
+           connection.smartSchedulingEnabled,
+           change.reason != .eventDeleted {
+            let candidates = googleCalendar.smartSchedulingCandidates(for: workout, limit: 3)
+            if !candidates.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Smart Scheduling found")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(candidates) { candidate in
+                        Button {
+                            googleCalendar.acceptSmartSchedulingCandidate(candidate, resolvingReview: change.uuid)
+                        } label: {
+                            Label(
+                                "\(candidate.startTime.formatted(date: .abbreviated, time: .shortened))-\(candidate.endTime.formatted(date: .omitted, time: .shortened))",
+                                systemImage: "sparkles"
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel("Accept Smart Scheduling alternative")
+                    }
+                }
+            }
+        }
+        if recommended != .coach,
+           change.reason == .outsidePlannedWeek || change.reason == .planValidationFailed {
+            NavigationLink {
+                ChatView(reviewRequest: CalendarReviewChatRequest(prompt: coachPrompt(for: change)))
+            } label: {
+                Text("Review with Coach")
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Review Google Calendar change with Coach")
+        }
+        if change.reason != .eventDeleted {
+            Button("Choose another day") {
+                dateChoiceDraft = change.proposedDate ?? change.originalDate
+                dateChoiceChangeID = change.uuid
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Choose another day")
+            Button(change.reason == .outsidePlannedWeek ? "Restore original date" : "Keep original schedule") {
+                googleCalendar.restoreOriginalSchedule(for: change.uuid)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Restore original workout date")
+        }
     }
 
     private func changeStatusTitle(_ status: GoogleCalendarInboundChangeStatus) -> String {
@@ -584,15 +642,15 @@ private struct GoogleCalendarPermissionView: View {
             List {
                 Section {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("See your RestOrTrain workouts alongside your work and personal schedule.")
+                        Text("See your TrainOrRest workouts alongside your work and personal schedule.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                        permissionRow("Create a separate calendar named “RestOrTrain Training”", positive: true)
+                        permissionRow("Create a separate calendar named “TrainOrRest Training”", positive: true)
                         permissionRow("Add and update workouts in that calendar", positive: true)
                         permissionRow("Keep those workouts synchronized when your plan changes", positive: true)
                         permissionRow("Read events from your personal calendars", positive: false)
                         permissionRow("Change your other calendars", positive: false)
-                        permissionRow("Reschedule your RestOrTrain plan from Google Calendar", positive: false)
+                        permissionRow("Reschedule your TrainOrRest plan from Google Calendar", positive: false)
                     }
                     .padding(.vertical, 6)
                 }
@@ -654,7 +712,7 @@ struct GoogleCalendarStatusSheet: View {
                     Spacer()
                 }
                 if connection.connectionStatus == .disconnected {
-                    Text("View your RestOrTrain workouts alongside your work and personal schedule.")
+                    Text("View your TrainOrRest workouts alongside your work and personal schedule.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     Button("Connect Google Calendar") { isShowingPermission = true }

@@ -40,6 +40,11 @@ struct TrainOrRestApp: App {
         let replacementCoordinator = WorkoutReplacementCoordinator(container: container)
         let chatStore = CoachChatStore(replacementCoordinator: replacementCoordinator)
         let chatSession = CoachChatSessionState()
+#if DEBUG
+        if let seededThreadID = DevSeed.seedIfRequested(container.mainContext) {
+            chatSession.activeThreadID = seededThreadID
+        }
+#endif
         let engine = SyncEngine(
             health: HealthKitService(),
             modelContext: container.mainContext,
@@ -147,17 +152,47 @@ struct RootView: View {
             case .firstRun:
                 FirstRunFlowView(health: health, onFinished: activate)
             case .ready:
-                RootTabView()
+                readyRoot
             }
         }
         .preferredColorScheme(appearance.colorScheme)
         .task { await determineStage() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, stage == .ready {
+                #if DEBUG
+                if DevSeed.requestedScreen != nil { return }
+                #endif
                 Task { await engine.syncAll() }
             }
         }
     }
+
+    @ViewBuilder
+    private var readyRoot: some View {
+        #if DEBUG
+        if let screen = DevSeed.requestedScreen {
+            NavigationStack { devScreen(screen) }
+        } else {
+            RootTabView()
+        }
+        #else
+        RootTabView()
+        #endif
+    }
+
+    #if DEBUG
+    @ViewBuilder
+    private func devScreen(_ screen: DevSeed.DevScreen) -> some View {
+        switch screen {
+        case .settings:
+            SettingsView()
+        case .provider:
+            CoachProviderSettingsView()
+        case .delivery:
+            WatchDeliverySettingsView()
+        }
+    }
+    #endif
 
     private func determineStage() async {
         guard HealthKitService.isAvailable else {
@@ -181,6 +216,12 @@ struct RootView: View {
         onboardingCompleted = true
         OnboardingGate.markCompleted()
         stage = .ready
+        #if DEBUG
+        // Dev-screen launches open a single Settings destination for
+        // screenshots; skip the notification prompt and sync so nothing
+        // overlays the captured screen.
+        if DevSeed.requestedScreen != nil { return }
+        #endif
         Task {
             await VerdictNotifier.requestPermission()
             await engine.syncAll()

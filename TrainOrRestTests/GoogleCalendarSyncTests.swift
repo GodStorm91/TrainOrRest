@@ -1128,7 +1128,7 @@ private final class FakeGoogleCalendarAPI: GoogleCalendarAPIServicing {
     }
 
     func calendar(id: String, accessToken: String) async throws -> GoogleCalendarListEntry {
-        GoogleCalendarListEntry(id: id, summary: "RestOrTrain Training", description: nil, timeZone: "Asia/Tokyo")
+        GoogleCalendarListEntry(id: id, summary: "TrainOrRest Training", description: nil, timeZone: "Asia/Tokyo")
     }
 
     func createCalendar(name: String, description: String, timeZone: String, accessToken: String) async throws -> GoogleCalendarListEntry {

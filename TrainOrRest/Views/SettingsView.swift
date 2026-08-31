@@ -89,7 +89,7 @@ struct SettingsView: View {
             }
 
             Section("Support") {
-                settingsRow("About RestOrTrain", systemImage: "info.circle", value: Bundle.main.appVersionSummary)
+                settingsRow("About TrainOrRest", systemImage: "info.circle", value: Bundle.main.appVersionSummary)
             }
         }
         .navigationTitle("Settings")
@@ -179,7 +179,7 @@ struct CalendarsSettingsView: View {
                     .frame(minHeight: 44)
                 }
             } footer: {
-                Text("Calendar integrations mirror RestOrTrain workouts outward. RestOrTrain stays the source of truth.")
+                Text("Calendar integrations mirror TrainOrRest workouts outward. TrainOrRest stays the source of truth.")
             }
         }
         .navigationTitle("Calendars")
@@ -248,7 +248,7 @@ struct IntervalsConnectionSettingsView: View {
     @EnvironmentObject private var pushService: WorkoutPushService
     @State private var apiKey = ""
     @State private var showAPIKey = false
-    @State private var status: String?
+    @State private var status: SettingsStatus?
     @State private var isSyncing = false
 
     private var isConnected: Bool {
@@ -293,28 +293,33 @@ struct IntervalsConnectionSettingsView: View {
             }
 
             Section {
-                Toggle("Watch Push", isOn: $watchPushEnabled)
+                NavigationLink {
+                    WatchDeliverySettingsView()
+                } label: {
+                    HStack {
+                        Text("Watch Push")
+                        Spacer()
+                        Text(watchPushEnabled ? "On" : "Off")
+                            .foregroundStyle(.secondary)
+                    }
                     .frame(minHeight: 44)
+                }
             } footer: {
-                Text("Watch Push sends planned workouts through intervals.icu after the connection is saved.")
+                Text("Watch Push delivery is managed in Watch Delivery.")
             }
 
             if let status {
                 Section {
-                    Text(status)
-                        .foregroundStyle(status.hasPrefix("Could not") ? Theme.bad : Theme.good)
+                    SettingsStatusCard(
+                        symbol: status.symbol,
+                        tint: status.tint,
+                        title: status.title,
+                        message: status.message,
+                        footnote: status.footnote
+                    )
                 }
             }
 
-            if let report = pushService.lastDebugReport, !report.isEmpty {
-                Section {
-                    DebugReportView(text: report)
-                } header: {
-                    Text("Garmin delivery debug")
-                } footer: {
-                    Text("This is the exact intervals.icu push path. If the DSL contains pace but Garmin still shows distance only, the failure is in intervals.icu to Garmin export or Garmin Connect parsing.")
-                }
-            }
         }
         .navigationTitle("intervals.icu")
         .navigationBarTitleDisplayMode(.inline)
@@ -366,9 +371,23 @@ struct IntervalsConnectionSettingsView: View {
     private func saveConnection() {
         do {
             try KeychainStore.save(apiKey.trimmingCharacters(in: .whitespacesAndNewlines), account: KeychainStore.intervalsICUAccount)
-            status = "Connection saved."
+            status = SettingsStatus(
+                symbol: "checkmark.circle.fill",
+                tint: Theme.good,
+                title: "Connection saved",
+                message: "Your intervals.icu credentials are stored on this device.",
+                footnote: watchPushEnabled
+                    ? "Tap Sync now to deliver your plan."
+                    : "Turn on Watch Push in Watch Delivery to send workouts."
+            )
         } catch {
-            status = "Could not save intervals.icu key."
+            status = SettingsStatus(
+                symbol: "exclamationmark.triangle.fill",
+                tint: Theme.bad,
+                title: "Could not save key",
+                message: "The intervals.icu key could not be written to the keychain.",
+                footnote: "Check device access and try again."
+            )
         }
     }
 
@@ -379,9 +398,29 @@ struct IntervalsConnectionSettingsView: View {
             await MainActor.run {
                 isSyncing = false
                 if let skip = pushService.lastPushSkipReason {
-                    status = "Sync skipped. \(skip)"
+                    status = SettingsStatus(
+                        symbol: "pause.circle.fill",
+                        tint: Theme.warn,
+                        title: "Sync skipped",
+                        message: skip,
+                        footnote: nil
+                    )
+                } else if let error = pushService.lastPushError {
+                    status = SettingsStatus(
+                        symbol: "exclamationmark.triangle.fill",
+                        tint: Theme.bad,
+                        title: "Could not sync",
+                        message: error,
+                        footnote: "Check your connection and try again."
+                    )
                 } else {
-                    status = pushService.lastPushError == nil ? "Sync complete. Existing Garmin workouts were recreated." : "Could not sync intervals.icu."
+                    status = SettingsStatus(
+                        symbol: "checkmark.circle.fill",
+                        tint: Theme.good,
+                        title: "Sync complete",
+                        message: "Existing Garmin workouts were recreated on your watch.",
+                        footnote: nil
+                    )
                 }
             }
         }
@@ -390,24 +429,38 @@ struct IntervalsConnectionSettingsView: View {
 
 struct WatchDeliverySettingsView: View {
     @AppStorage(WorkoutPushSettings.enabledKey) private var watchPushEnabled = false
+    @AppStorage(WorkoutPushSettings.athleteIDKey) private var athleteID = ""
     @EnvironmentObject private var pushService: WorkoutPushService
     @State private var isSyncing = false
+    @State private var intervalsConnected = false
+
+    private var isConnected: Bool {
+        intervalsConnected && !athleteID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     var body: some View {
         Form {
             Section {
+                SettingsStatusCard(
+                    symbol: receipt.symbol,
+                    tint: receipt.tint,
+                    title: receipt.title,
+                    message: receipt.message,
+                    footnote: receipt.footnote
+                )
+            }
+
+            Section {
+                if !isConnected {
+                    NavigationLink {
+                        IntervalsConnectionSettingsView()
+                    } label: {
+                        Label("Connect intervals.icu", systemImage: "link.badge.plus")
+                    }
+                }
                 Toggle("Watch Push", isOn: $watchPushEnabled)
                     .frame(minHeight: 44)
-                if let last = pushService.lastPushAt {
-                    LabeledContent("Last synchronization", value: last.formatted(date: .abbreviated, time: .shortened))
-                } else {
-                    LabeledContent("Last synchronization", value: "Never")
-                }
-                if let error = pushService.lastPushError {
-                    Text("Last sync failed: \(error)")
-                        .font(.caption)
-                        .foregroundStyle(Theme.bad)
-                }
+                    .disabled(!isConnected)
                 Button {
                     syncNow()
                 } label: {
@@ -417,9 +470,9 @@ struct WatchDeliverySettingsView: View {
                         Label("Sync now", systemImage: "arrow.triangle.2.circlepath")
                     }
                 }
-                .disabled(isSyncing || !watchPushEnabled)
+                .disabled(isSyncing || !watchPushEnabled || !isConnected)
             } footer: {
-                Text("Watch Push sends planned workouts through intervals.icu. Manage the intervals.icu connection separately under Connected Services.")
+                Text("Watch Push sends planned workouts to your watch through intervals.icu, then Garmin Connect. Manage the intervals.icu connection under Connected Services.")
             }
 
             if let report = pushService.lastDebugReport, !report.isEmpty {
@@ -427,11 +480,44 @@ struct WatchDeliverySettingsView: View {
                     DebugReportView(text: report)
                 } header: {
                     Text("Garmin delivery debug")
+                } footer: {
+                    Text("This is the exact intervals.icu push path. If the DSL contains pace but Garmin shows distance only, the failure is in the intervals.icu to Garmin export.")
                 }
             }
         }
         .navigationTitle("Watch Delivery")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { reloadIntervalsKey() }
+        .onChange(of: athleteID) { _, _ in reloadIntervalsKey() }
+    }
+
+    private func reloadIntervalsKey() {
+        let key = (try? KeychainStore.load(account: KeychainStore.intervalsICUAccount)) ?? ""
+        intervalsConnected = !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var receipt: (symbol: String, tint: Color, title: String, message: String?, footnote: String?) {
+        if !isConnected {
+            return ("link.badge.plus", Theme.warn, "intervals.icu not connected",
+                    "Connect intervals.icu to deliver planned workouts to your watch.", nil)
+        }
+        if !watchPushEnabled {
+            return ("applewatch", Theme.accent, "Watch Push is off",
+                    "Turn on Watch Push to send planned workouts to your watch.", nil)
+        }
+        if let error = pushService.lastPushError {
+            return ("exclamationmark.triangle.fill", Theme.bad, "Last delivery failed",
+                    error, "Tap Sync now to retry.")
+        }
+        if let skip = pushService.lastPushSkipReason {
+            return ("pause.circle.fill", Theme.warn, "Delivery paused", skip, nil)
+        }
+        if let last = pushService.lastPushAt {
+            return ("checkmark.circle.fill", Theme.good, "Workouts delivered",
+                    "Last sync \(last.formatted(date: .abbreviated, time: .shortened)).", nil)
+        }
+        return ("applewatch.radiowaves.left.and.right", Theme.accent, "Ready to deliver",
+                "Tap Sync now to send your plan to your watch.", nil)
     }
 
     private func syncNow() {
@@ -456,6 +542,56 @@ struct DebugReportView: View {
         }
         .accessibilityLabel(text)
     }
+}
+
+/// Compact status receipt used across Settings destinations: icon + headline
+/// plus optional body and a tinted next-action line, colored by outcome.
+struct SettingsStatusCard: View {
+    var symbol: String
+    var tint: Color
+    var title: String
+    var message: String?
+    var footnote: String?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 26)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.headline)
+                if let message, !message.isEmpty {
+                    Text(message)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let footnote, !footnote.isEmpty {
+                    Text(footnote)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(tint)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel([title, message, footnote].compactMap { $0 }.joined(separator: ". "))
+    }
+}
+
+/// Structured outcome backing a `SettingsStatusCard`, set at the call site so
+/// tone and next action stay explicit rather than parsed from a message string.
+struct SettingsStatus {
+    var symbol: String
+    var tint: Color
+    var title: String
+    var message: String?
+    var footnote: String?
 }
 
 struct CoachMemorySettingsView: View {
@@ -617,49 +753,91 @@ struct CoachProviderSettingsView: View {
         "gpt-4.1-mini"
     ]
 
+    private var isOpenAI: Bool { CoachModelProvider.isOpenAIModel(model) }
+
+    private var activeKeyPresent: Bool {
+        let key = isOpenAI ? openAIAPIKey : anthropicAPIKey
+        return !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var receipt: (symbol: String, tint: Color, title: String, message: String?, footnote: String?) {
+        if isTesting {
+            return ("arrow.triangle.2.circlepath", Theme.accent, "Testing connection…", nil, nil)
+        }
+        if let status {
+            if status == "Connection OK" {
+                return ("checkmark.circle.fill", Theme.good, "Coach connected",
+                        "\(modelLabel(model)) is ready.", nil)
+            }
+            return ("exclamationmark.triangle.fill", Theme.bad, "Connection failed",
+                    status, "Check the key and connect again.")
+        }
+        if activeKeyPresent {
+            return ("key.fill", Theme.accent, "Coach key saved",
+                    "\(modelLabel(model)) is selected. Connect to confirm it works.", nil)
+        }
+        return ("sparkles", Theme.warn, "Add your coach key",
+                "TrainOrRest recommends Claude. Paste your Anthropic key below to start coaching.", nil)
+    }
+
     var body: some View {
         Form {
-            Section("Coach provider") {
-                Picker("Model", selection: $model) {
-                    Section("OpenAI") {
-                        ForEach(openAIModels, id: \.self) { Text(modelLabel($0)).tag($0) }
-                    }
-                    Section("Claude") {
-                        ForEach(anthropicModels, id: \.self) { Text(modelLabel($0)).tag($0) }
-                    }
-                }
+            Section {
+                SettingsStatusCard(
+                    symbol: receipt.symbol,
+                    tint: receipt.tint,
+                    title: receipt.title,
+                    message: receipt.message,
+                    footnote: receipt.footnote
+                )
             }
-            Section("OpenAI API") {
-                SecureField("OpenAI API key", text: $openAIAPIKey)
-                    .textContentType(.password)
-                    .autocorrectionDisabled()
-                Button {
-                    saveAndTestOpenAI()
-                } label: {
-                    if isTesting {
-                        ProgressView()
-                    } else {
-                        Label("Save OpenAI and Test", systemImage: "checkmark.shield")
-                    }
-                }
-                .disabled(openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isTesting)
-            }
-            Section("Claude API") {
+
+            Section {
                 SecureField("Anthropic API key", text: $anthropicAPIKey)
                     .textContentType(.password)
                     .autocorrectionDisabled()
                 Button {
                     saveAndTestAnthropic()
                 } label: {
-                    Label("Save Claude and Test", systemImage: "checkmark.shield")
+                    if isTesting {
+                        ProgressView()
+                    } else {
+                        Label("Connect coach", systemImage: "checkmark.shield")
+                    }
                 }
                 .disabled(anthropicAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isTesting)
+            } header: {
+                Text("Recommended coach")
+            } footer: {
+                Text("TrainOrRest picks and tunes the coach model for you. Your key stays in this device's keychain.")
             }
-            if let status {
-                Section {
-                    Text(status)
-                        .foregroundStyle(status == "Connection OK" ? .green : .secondary)
+
+            Section {
+                DisclosureGroup("Advanced provider setup") {
+                    Picker("Model", selection: $model) {
+                        Section("Claude") {
+                            ForEach(anthropicModels, id: \.self) { Text(modelLabel($0)).tag($0) }
+                        }
+                        Section("OpenAI") {
+                            ForEach(openAIModels, id: \.self) { Text(modelLabel($0)).tag($0) }
+                        }
+                    }
+                    SecureField("OpenAI API key", text: $openAIAPIKey)
+                        .textContentType(.password)
+                        .autocorrectionDisabled()
+                    Button {
+                        saveAndTestOpenAI()
+                    } label: {
+                        if isTesting {
+                            ProgressView()
+                        } else {
+                            Label("Save OpenAI and test", systemImage: "checkmark.shield")
+                        }
+                    }
+                    .disabled(openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isTesting)
                 }
+            } footer: {
+                Text("Switch vendor or pick a specific model. Most runners never need this.")
             }
         }
         .navigationTitle("Coach Provider")
@@ -668,6 +846,9 @@ struct CoachProviderSettingsView: View {
             anthropicAPIKey = (try? KeychainStore.load()) ?? ""
             openAIAPIKey = (try? KeychainStore.load(account: KeychainStore.openAIAPIKeyAccount)) ?? ""
         }
+        .onChange(of: model) { _, _ in status = nil }
+        .onChange(of: anthropicAPIKey) { _, _ in status = nil }
+        .onChange(of: openAIAPIKey) { _, _ in status = nil }
     }
 
     private func saveAndTestOpenAI() {
@@ -998,9 +1179,9 @@ extension CoachLanguage {
 
     var coachMemoryIntro: String {
         switch self {
-        case .en: "RestOrTrain remembers useful facts from your chats. You can also add, edit, or remove memories manually."
-        case .ja: "RestOrTrain はチャットから役立つ情報を記憶します。手動で追加、編集、削除もできます。"
-        case .vi: "RestOrTrain ghi nhớ các thông tin hữu ích từ cuộc trò chuyện. Anh cũng có thể tự thêm, sửa hoặc xóa ghi nhớ."
+        case .en: "TrainOrRest remembers useful facts from your chats. You can also add, edit, or remove memories manually."
+        case .ja: "TrainOrRest はチャットから役立つ情報を記憶します。手動で追加、編集、削除もできます。"
+        case .vi: "TrainOrRest ghi nhớ các thông tin hữu ích từ cuộc trò chuyện. Anh cũng có thể tự thêm, sửa hoặc xóa ghi nhớ."
         }
     }
 

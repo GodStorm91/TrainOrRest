@@ -63,10 +63,11 @@ struct MarkdownMessageView: View {
         case .paragraph(let text):
             MarkdownInlineText(text, allowsRuleTokens: allowsRuleTokens, glossary: glossary, language: language, color: tone.primary)
                 .font(.body)
-        case .listItem(let text):
+        case .listItem(let marker, let text):
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("•")
+                Text(marker)
                     .font(.body.weight(.semibold))
+                    .monospacedDigit()
                 MarkdownInlineText(text, allowsRuleTokens: allowsRuleTokens, glossary: glossary, language: language, color: tone.primary)
                     .font(.body)
             }

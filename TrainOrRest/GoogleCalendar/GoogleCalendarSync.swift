@@ -15,7 +15,7 @@ enum GoogleCalendarSyncSettings {
         "email",
         "profile",
         // Sufficient for reading and writing events on calendars created by
-        // RestOrTrain; do not broaden to personal calendar scopes for V1.5.
+        // TrainOrRest; do not broaden to personal calendar scopes for V1.5.
         "https://www.googleapis.com/auth/calendar.app.created"
     ].joined(separator: " ")
     static let smartSchedulingScope = [
@@ -25,8 +25,8 @@ enum GoogleCalendarSyncSettings {
         // availability. Event titles/descriptions are not requested or read.
         "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
     ].joined(separator: " ")
-    static let calendarName = "RestOrTrain Training"
-    static let calendarDescription = "Training workouts managed by RestOrTrain"
+    static let calendarName = "TrainOrRest Training"
+    static let calendarDescription = "Training workouts managed by TrainOrRest"
     static let tokenEndpoint = URL(string: "https://oauth2.googleapis.com/token")!
     static let revokeEndpoint = URL(string: "https://oauth2.googleapis.com/revoke")!
     static let authEndpoint = URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!
@@ -837,7 +837,7 @@ struct GoogleCalendarEventBuilder {
             lines.append("Estimated duration: \(Int((seconds / 60).rounded())) min")
             lines.append("")
         }
-        lines.append("Managed by RestOrTrain")
+        lines.append("Managed by TrainOrRest")
         return lines.joined(separator: "\n")
     }
 
@@ -848,7 +848,7 @@ struct GoogleCalendarEventBuilder {
             Formatters.duration(activity.durationSeconds),
             Formatters.pace(activity.avgPaceSecondsPerKm),
             "",
-            "Managed by RestOrTrain"
+            "Managed by TrainOrRest"
         ].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
@@ -1608,7 +1608,7 @@ final class GoogleCalendarSyncService: ObservableObject {
     func restoreOriginalSchedule(for changeID: UUID) {
         guard let change = inboundChange(id: changeID) else { return }
         change.status = .rejected
-        change.message = "RestOrTrain kept the original schedule and will restore Google Calendar."
+        change.message = "TrainOrRest kept the original schedule and will restore Google Calendar."
         logTelemetry("review_rejected", ["reason": change.reason.rawValue])
         markOutboundPending(entityID: change.localEntityID)
         try? modelContext.save()
@@ -1751,7 +1751,7 @@ final class GoogleCalendarSyncService: ObservableObject {
     private func defaultAvailabilityExclusionReason(_ entry: GoogleCalendarListEntry, connection: GoogleCalendarConnection) -> String? {
         let name = (entry.summary ?? "").lowercased()
         if entry.id == connection.googleCalendarID || entry.summary == connection.calendarName {
-            return "RestOrTrain Training calendar is excluded to avoid double-counting workouts."
+            return "TrainOrRest Training calendar is excluded to avoid double-counting workouts."
         }
         if name.contains("holiday") || name.contains("birthday") {
             return "Holiday and birthday calendars are excluded by default."
@@ -2067,7 +2067,7 @@ final class GoogleCalendarSyncService: ObservableObject {
                     reason: .eventDeleted,
                     status: .pendingReview,
                     proposedDate: nil,
-                    message: "Google Calendar event was deleted. RestOrTrain kept the workout and will restore the calendar event."
+                    message: "Google Calendar event was deleted. TrainOrRest kept the workout and will restore the calendar event."
                 )
                 logTelemetry("google_deletion_suppressed")
                 outcome.deleted += 1
@@ -2085,7 +2085,7 @@ final class GoogleCalendarSyncService: ObservableObject {
                     reason: .contentRestored,
                     status: .restored,
                     proposedDate: workout.date,
-                    message: "Google Calendar title or notes were edited. RestOrTrain restored the authoritative workout content."
+                    message: "Google Calendar title or notes were edited. TrainOrRest restored the authoritative workout content."
                 )
                 logTelemetry("google_content_edit_normalized")
                 outcome.restored += 1
@@ -2697,8 +2697,10 @@ final class GoogleCalendarSyncService: ObservableObject {
     }
 
     private func loadPersistedDebugReportIfNeeded(for connection: GoogleCalendarConnection) {
-        guard lastDebugReport == nil else { return }
-        lastDebugReport = userDefaults.string(forKey: debugReportKey(connectionID: connection.uuid))
+        guard lastDebugReport == nil,
+              let persisted = userDefaults.string(forKey: debugReportKey(connectionID: connection.uuid))
+        else { return }
+        lastDebugReport = persisted
     }
 
     private func debugReportKey(connectionID: UUID) -> String {

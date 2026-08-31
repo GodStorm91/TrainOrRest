@@ -1,7 +1,7 @@
 import SwiftData
 import SwiftUI
 
-/// RestOrTrain-style week mode: collapsed weekly summaries, expandable current
+/// TrainOrRest-style week mode: collapsed weekly summaries, expandable current
 /// week, and completed Garmin runs rendered as post-run cards inside the week.
 struct PlanWeekListView: View {
     /// Bumping this value scrolls the list to the current week.

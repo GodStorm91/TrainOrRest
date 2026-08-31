@@ -2210,7 +2210,7 @@ private struct WeeklySmartSchedulingReviewView: View {
                     } header: {
                         Text("Suggested schedule adjustment")
                     } footer: {
-                        Text("RestOrTrain validates recovery and plan rules before showing these options. No workout moves until you apply the changes.")
+                        Text("TrainOrRest validates recovery and plan rules before showing these options. No workout moves until you apply the changes.")
                     }
                 }
             }

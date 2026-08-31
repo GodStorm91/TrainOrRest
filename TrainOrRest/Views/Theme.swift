@@ -20,8 +20,8 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .system: "Follows your device appearance."
-        case .light: "Always uses the bright RestOrTrain interface."
-        case .dark: "Always uses the low-glare RestOrTrain interface."
+        case .light: "Always uses the bright TrainOrRest interface."
+        case .dark: "Always uses the low-glare TrainOrRest interface."
         }
     }
 
@@ -42,7 +42,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     }
 }
 
-/// Adaptive RestOrTrain design tokens. Dark keeps the original cockpit mood;
+/// Adaptive TrainOrRest design tokens. Dark keeps the original cockpit mood;
 /// light mode uses pearl glass surfaces with strong typography and restrained
 /// purple/green accents.
 enum Theme {
