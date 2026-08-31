@@ -1239,6 +1239,29 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertTrue(vi.contains("Coach chưa đọc được"), "maps to the Vietnamese couldn't-read message")
     }
 
+    func testPlanMutationDoesNotDeadEndOnUnhandledTool() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedEveryDayPlan(in: context)
+        let explain = ClaudeResponse(content: [
+            .toolUse(id: "toolu_explain", name: CoachToolCatalog.explainOnlyName, input: .object([
+                "summary": .string("Đây là bản nháp điều chỉnh."),
+                "evidenceNotes": .array([]),
+                "askableFollowups": .array([])
+            ]))
+        ], stopReason: "tool_use")
+        let client = MockClaudeClient(responses: Array(repeating: explain, count: CoachChatConfig.maxToolRounds))
+        let coordinator = WorkoutReplacementCoordinator(container: container)
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
+
+        await store.send(text: "Create workout on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
+
+        let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertFalse(assistant.text.contains("Unknown coach tool"), "an unhandled tool must nudge to propose, not dead-end")
+        XCTAssertNil(assistant.structuredResponse)
+        XCTAssertFalse(coordinator.hasPendingDecision)
+    }
+
     func testChatStoreRejectsUnapplyablePlanCardBeforeUserCanConfirm() async throws {
         let container = try makeContainer()
         let context = container.mainContext

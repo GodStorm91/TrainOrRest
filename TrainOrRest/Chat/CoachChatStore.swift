@@ -703,10 +703,10 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
 
             let toolUse = toolUses[0]
             guard toolUse.1 == CoachTools.toolName else {
-                lastToolRejection = "Unknown coach tool."
-                underlyingRejection = "Unknown coach tool."
+                let reason = "This is a plan change. Call \(CoachTools.toolName) with the concrete edit so the user can apply it directly."
+                lastToolRejection = reason
                 conversation.append(ClaudeMessageParam(role: "user", content: [
-                    .toolResult(toolUseID: toolUse.0, content: "Unknown tool.", isError: true)
+                    .toolResult(toolUseID: toolUse.0, content: "Rejected: \(reason)", isError: true)
                 ]))
                 continue
             }
@@ -839,8 +839,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         case .readOnly:
             return [CoachToolCatalog.coachResponse]
         case .planMutation:
-            return CoachToolCatalog.tools(allowProposals: true)
-                .filter { $0.name != CoachToolCatalog.coachResponseName }
+            return [CoachToolCatalog.planEditDraft]
         }
     }
 
