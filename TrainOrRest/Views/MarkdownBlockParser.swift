@@ -110,7 +110,7 @@ enum MarkdownBlockParser {
             paragraphLines.append(trimmed)
             index += 1
         }
-        return (paragraphLines.joined(separator: " "), index)
+        return (paragraphLines.joined(separator: "\n"), index)
     }
 
     private static func isTableRow(_ line: String) -> Bool {

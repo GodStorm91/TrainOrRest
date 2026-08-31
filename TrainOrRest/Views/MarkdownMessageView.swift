@@ -19,6 +19,20 @@ enum GlossaryMode {
     case legacy
 }
 
+/// Converts leaf inline text to an `AttributedString` while preserving author
+/// line breaks. The default `.full` markdown syntax collapses soft newlines to
+/// spaces (and eats ordered-list markers), which flattens multi-line coach
+/// replies into an unreadable wall. Block structure is already resolved by
+/// `MarkdownBlockParser`, so only inline syntax needs interpreting here.
+enum InlineMarkdown {
+    static func attributed(_ text: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(text)
+    }
+}
+
 struct MarkdownMessageView: View {
     let text: String
     var tone: MarkdownTone = .standard
@@ -157,7 +171,7 @@ private struct MarkdownInlineText: View {
     }
 
     private static func markdown(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text)) ?? AttributedString(text)
+        InlineMarkdown.attributed(text)
     }
 }
 
@@ -255,7 +269,7 @@ private enum RuleAttributedStringBuilder {
     }
 
     private static func markdown(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text)) ?? AttributedString(text)
+        InlineMarkdown.attributed(text)
     }
 }
 
