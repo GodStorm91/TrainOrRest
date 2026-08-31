@@ -18,6 +18,7 @@ struct PlanMonthView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                todaysCall
                 monthNav
                 weekdayRow
                 grid
@@ -103,7 +104,7 @@ struct PlanMonthView: View {
         } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isToday ? Theme.accentSoft : (isSelected ? Theme.chip : Color.clear))
+                    .fill(isToday || isSelected ? Theme.chip : Color.clear)
                     .overlay(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .strokeBorder(cellBorder(isToday: isToday, isSelected: isSelected), lineWidth: 1)
@@ -125,13 +126,13 @@ struct PlanMonthView: View {
     }
 
     private func cellBorder(isToday: Bool, isSelected: Bool) -> Color {
-        if isToday { return Theme.accent }
+        if isToday { return Theme.text }
         if isSelected { return Theme.border }
         return .clear
     }
 
     private func numberColor(isToday: Bool, isPast: Bool, hasWorkout: Bool) -> Color {
-        if isToday { return Theme.accent }
+        if isToday { return Theme.text }
         if isPast { return Theme.faint }
         return hasWorkout ? Theme.text : Theme.dim
     }
@@ -188,12 +189,13 @@ struct PlanMonthView: View {
 
     // MARK: - Selected day detail
 
-    private var selectedDayDetail: some View {
-        let dayWorkouts = workouts(on: selectedDate)
-        let isToday = calendar.isDateInToday(selectedDate)
+    private var todaysCall: some View {
+        let today = calendar.startOfDay(for: .now)
+        let dayWorkouts = workouts(on: today)
+        let activity = completedActivity(on: today)
         return VStack(alignment: .leading, spacing: 10) {
-            TorEyebrow(detailEyebrow(isToday: isToday)).tracking(2)
-            if let activity = completedActivity(on: selectedDate) {
+            TorEyebrow("Today's call").tracking(2)
+            if let activity {
                 CalendarRunSummaryCard(
                     activity: activity,
                     plannedWorkout: matchedWorkout(for: activity) ?? dayWorkouts.first,
@@ -201,24 +203,104 @@ struct PlanMonthView: View {
                     reviewDestination: AnyView(ChatView(contextualCompletedActivityID: activity.hkUUID)),
                     onReview: { onReviewRunInChat(activity) }
                 )
-            }
-
-            if dayWorkouts.isEmpty && completedActivity(on: selectedDate) == nil {
-                restCard
-            } else {
                 ForEach(dayWorkouts) { workout in
-                    detailCard(workout, highlighted: isToday)
+                    detailCard(workout)
+                }
+            } else {
+                todaysCallHero(workout: dayWorkouts.first)
+            }
+        }
+    }
+
+    /// The bold hero for today's prescription: a graphite-glass card whose peak
+    /// is the workout word, not color. Kind reads from the glyph shape and the
+    /// word; violet appears only on the interactive Coach action.
+    @ViewBuilder
+    private func todaysCallHero(workout: PlannedWorkout?) -> some View {
+        if let workout {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 14) {
+                    Image(systemName: workout.kind?.symbolName ?? "figure.run")
+                        .font(.system(size: 26, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Theme.text)
+                        .frame(width: 52, height: 52)
+                        .background(Theme.chip, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(workout.kind?.displayName ?? "Run")
+                            .font(.torHeading(30, .bold))
+                            .foregroundStyle(Theme.text)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.7)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(subtitle(workout))
+                            .font(.torMono(13, .medium))
+                            .foregroundStyle(Theme.dim)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    Spacer(minLength: 8)
+                    statusBadge(workout, isToday: true)
+                }
+                actionRow(workout)
+            }
+            .padding(18)
+            .torGlass(cornerRadius: 26, tint: .graphite)
+        } else {
+            HStack(spacing: 14) {
+                Image(systemName: "moon.zzz.fill")
+                    .font(.system(size: 24, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Theme.dim)
+                    .frame(width: 52, height: 52)
+                    .background(Theme.chip, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Rest day")
+                        .font(.torHeading(30, .bold))
+                        .foregroundStyle(Theme.text)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Text("Recovery and adaptation")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.dim)
+                }
+                Spacer(minLength: 8)
+            }
+            .padding(18)
+            .torGlass(cornerRadius: 26, tint: .graphite)
+        }
+    }
+
+    @ViewBuilder
+    private var selectedDayDetail: some View {
+        if !calendar.isDateInToday(selectedDate) {
+            let dayWorkouts = workouts(on: selectedDate)
+            let activity = completedActivity(on: selectedDate)
+            VStack(alignment: .leading, spacing: 10) {
+                TorEyebrow(selectedDayEyebrow).tracking(2)
+                if let activity {
+                    CalendarRunSummaryCard(
+                        activity: activity,
+                        plannedWorkout: matchedWorkout(for: activity) ?? dayWorkouts.first,
+                        compact: false,
+                        reviewDestination: AnyView(ChatView(contextualCompletedActivityID: activity.hkUUID)),
+                        onReview: { onReviewRunInChat(activity) }
+                    )
+                }
+                if dayWorkouts.isEmpty && activity == nil {
+                    restCard
+                } else {
+                    ForEach(dayWorkouts) { workout in
+                        detailCard(workout)
+                    }
                 }
             }
         }
     }
 
-    private func detailEyebrow(isToday: Bool) -> String {
-        let base = selectedDate.formatted(.dateTime.weekday(.wide).month(.wide).day())
-        return isToday ? "\(base) · Today" : base
+    private var selectedDayEyebrow: String {
+        selectedDate.formatted(.dateTime.weekday(.wide).month(.wide).day())
     }
 
-    private func detailCard(_ workout: PlannedWorkout, highlighted: Bool) -> some View {
+    private func detailCard(_ workout: PlannedWorkout) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 Image(systemName: workout.kind?.symbolName ?? "figure.run")
@@ -250,48 +332,52 @@ struct PlanMonthView: View {
                     }
                 }
                 Spacer(minLength: 8)
-                statusBadge(workout, isToday: highlighted)
+                statusBadge(workout, isToday: false)
             }
 
-            HStack(spacing: 8) {
-                if contextualCoachActionTitle(for: workout) != nil {
-                    NavigationLink {
-                        ChatView(contextualWorkoutID: workout.uuid)
-                    } label: {
-                        Label(contextualCoachActionTitle(for: workout) ?? "Edit with Coach", systemImage: "sparkles")
-                            .font(.torHeading(13, .bold))
-                            .foregroundStyle(Theme.accent)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.82)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(contextualCoachAccessibilityLabel(for: workout))
-                }
-
-                NavigationLink {
-                    WorkoutDetailView(workout: workout)
-                } label: {
-                    Label("Details", systemImage: "chevron.right")
-                        .font(.torHeading(13, .semibold))
-                        .foregroundStyle(Theme.text)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.82)
-                        .frame(width: 104, height: 44)
-                        .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Open workout details")
-            }
+            actionRow(workout)
         }
         .padding(14)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(highlighted ? Theme.accent : Theme.border, lineWidth: 1)
+                .strokeBorder(Theme.border, lineWidth: 1)
         )
+    }
+
+    private func actionRow(_ workout: PlannedWorkout) -> some View {
+        HStack(spacing: 8) {
+            if contextualCoachActionTitle(for: workout) != nil {
+                NavigationLink {
+                    ChatView(contextualWorkoutID: workout.uuid)
+                } label: {
+                    Label(contextualCoachActionTitle(for: workout) ?? "Edit with Coach", systemImage: "sparkles")
+                        .font(.torHeading(13, .bold))
+                        .foregroundStyle(Theme.accent)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(contextualCoachAccessibilityLabel(for: workout))
+            }
+
+            NavigationLink {
+                WorkoutDetailView(workout: workout)
+            } label: {
+                Label("Details", systemImage: "chevron.right")
+                    .font(.torHeading(13, .semibold))
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+                    .frame(width: 104, height: 44)
+                    .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open workout details")
+        }
     }
 
     private func contextualCoachActionTitle(for workout: PlannedWorkout) -> String? {

@@ -80,6 +80,9 @@ enum Theme {
     static let verdictEasy = dynamic(dark: 0xE4C58A, light: 0x806021)
     /// Verdict only: Rest recommendation.
     static let verdictRest = dynamic(dark: 0x97AEDC, light: 0x496BA3)
+    /// Endurance workout hue: long runs. Distinct from the interaction accent
+    /// so long-run indicators never read as tappable.
+    static let endurance = dynamic(dark: 0x5AA9F0, light: 0x2563EB)
 
     /// Soft tint of a semantic color for badge backgrounds.
     static func soft(_ color: Color, _ opacity: Double = 0.14) -> Color {

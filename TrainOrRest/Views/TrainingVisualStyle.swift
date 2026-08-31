@@ -4,7 +4,7 @@ import SwiftUI
 /// (activity/workout rows, plan phases, status chips) matches the redesign.
 enum TrainingVisualStyle {
     static let easy = Theme.good
-    static let long = Theme.accent
+    static let long = Theme.endurance
     static let tempo = Theme.warn
     static let threshold = Theme.warn
     static let intervals = Theme.accent2
