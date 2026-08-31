@@ -219,10 +219,9 @@ struct RootView: View {
         OnboardingGate.markCompleted()
         stage = .ready
         #if DEBUG
-        // Dev-screen launches open a single Settings destination for
-        // screenshots; skip the notification prompt and sync so nothing
-        // overlays the captured screen.
-        if DevSeed.requestedScreen != nil { return }
+        // Seeded screenshot launches (coach chat and dev screens) skip the
+        // notification prompt and sync so nothing overlays the captured screen.
+        if DevSeed.isRequested { return }
         #endif
         Task {
             await VerdictNotifier.requestPermission()
