@@ -2624,6 +2624,68 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertFalse(assistant.text.contains("answered with text instead"))
     }
 
+    func testDistanceOrDurationEditWithoutTargetClassifiesAsUnspecified() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [.text("ok")], stopReason: "end_turn")
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(
+            text: "Đổi cự ly hoặc thời lượng",
+            model: "claude-test",
+            apiKey: "test-key",
+            in: context
+        )
+
+        let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
+        XCTAssertEqual(
+            snapshot.actionType,
+            .unspecified,
+            "a distance/duration edit with no numeric target must not force a plan mutation the model cannot satisfy"
+        )
+    }
+
+    func testDistanceOrDurationEditWithoutTargetRendersCardWithoutRejection() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let card = ClaudeResponse(content: [
+            .toolUse(id: "toolu_target", name: CoachToolCatalog.coachResponseName, input: .object([
+                "interaction": .object([
+                    "id": .string("distance_target"),
+                    "type": .string("single_choice"),
+                    "options": .array([
+                        .object(["id": .string("a"), "label": .string("A"), "value": .string("A")]),
+                        .object(["id": .string("b"), "label": .string("B"), "value": .string("B")])
+                    ]),
+                    "allowOther": .bool(true),
+                    "status": .string("pending")
+                ])
+            ]))
+        ], stopReason: "tool_use")
+        let client = MockClaudeClient(responses: Array(repeating: card, count: CoachChatConfig.maxToolRounds))
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(
+            text: "Đổi cự ly hoặc thời lượng",
+            model: "claude-test",
+            apiKey: "test-key",
+            in: context
+        )
+
+        let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
+        XCTAssertEqual(snapshot.actionType, .unspecified)
+
+        let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertNotEqual(assistant.assistantStatus, .failed, "a freed distance edit must not dead-end in a forced-plan rejection")
+        XCTAssertNil(assistant.errorCategory)
+        XCTAssertEqual(assistant.interaction?.options.map(\.id), ["a", "b"], "the model's clarifying card must render")
+        XCTAssertFalse(assistant.text.contains("answered with text instead"))
+    }
+
     func testPlanRejectionSurfacesRawReasonForMissingWorkout() async throws {
         let container = try makeContainer()
         let context = container.mainContext

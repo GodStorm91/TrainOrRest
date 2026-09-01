@@ -932,7 +932,6 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         let mutationNeedles = [
             "create workout", "add workout", "update plan", "delete workout", "modify calendar",
             "save settings", "push workout", "thêm bài", "tạo bài", "sửa lịch", "đổi lịch", "xóa bài",
-            "đổi cự li", "đổi cự ly", "đổi quãng đường", "change distance",
             "áp dụng", "apply", "lưu thay đổi", "save the change", "save changes"
         ]
             .map {
