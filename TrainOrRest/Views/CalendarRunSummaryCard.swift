@@ -57,14 +57,7 @@ struct CalendarRunSummaryCard: View {
                 }
             }
 
-            HStack(alignment: .bottom, spacing: 12) {
-                metric("Duration", Formatters.duration(activity.durationSeconds).replacingOccurrences(of: " ", with: ""))
-                metric("Distance", Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " ", with: ""))
-                metric("Pace", Formatters.pace(activity.avgPaceSecondsPerKm).replacingOccurrences(of: " /km", with: "/km"))
-                metric("Load", "\(load)")
-                Spacer(minLength: 4)
-                reviewAction
-            }
+            metricSummary
         }
         .padding(compact ? 12 : 14)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -99,12 +92,31 @@ struct CalendarRunSummaryCard: View {
             Image(systemName: "message.badge")
             Text("Review")
         }
-        .font(.system(size: 12, weight: .bold))
+        .font(.footnote.weight(.bold))
         .foregroundStyle(.white)
-        .lineLimit(1)
-        .minimumScaleFactor(0.82)
-        .frame(width: compact ? 78 : 92, height: 42)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(minWidth: compact ? 78 : 92, minHeight: 42)
         .background(Color.black, in: Capsule())
+    }
+
+    private var metricSummary: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .bottom, spacing: 12) {
+                metric("Duration", Formatters.duration(activity.durationSeconds).replacingOccurrences(of: " ", with: ""), fixedWidth: true)
+                metric("Distance", Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " ", with: ""), fixedWidth: true)
+                metric("Pace", Formatters.pace(activity.avgPaceSecondsPerKm).replacingOccurrences(of: " /km", with: "/km"), fixedWidth: true)
+                metric("Load", "\(load)", fixedWidth: true)
+                Spacer(minLength: 4)
+                reviewAction
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                metric("Duration", Formatters.duration(activity.durationSeconds).replacingOccurrences(of: " ", with: ""))
+                metric("Distance", Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " ", with: ""))
+                metric("Pace", Formatters.pace(activity.avgPaceSecondsPerKm).replacingOccurrences(of: " /km", with: "/km"))
+                metric("Load", "\(load)")
+                reviewAction
+            }
+        }
     }
 
     private var sourceLine: String {
@@ -114,16 +126,15 @@ struct CalendarRunSummaryCard: View {
         return clean
     }
 
-    private func metric(_ label: String, _ value: String) -> some View {
+    private func metric(_ label: String, _ value: String, fixedWidth: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.system(size: 11, weight: .medium))
+                .font(.caption2.weight(.medium))
                 .foregroundStyle(Theme.faint)
             Text(value)
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Theme.text)
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
+                .fixedSize(horizontal: fixedWidth, vertical: !fixedWidth)
         }
         .frame(minWidth: 48, alignment: .leading)
     }

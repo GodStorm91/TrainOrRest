@@ -86,6 +86,7 @@ struct ActivityListView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .padding(.bottom, 24)
+                .torReadableColumn()
             }
         }
         .background(Theme.bg)
@@ -165,8 +166,6 @@ struct ActivityListView: View {
                     Text(monthYearTitle)
                         .font(.torHeading(17, .bold))
                         .foregroundStyle(Theme.text)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: 44)
                 }
@@ -397,6 +396,7 @@ private struct MonthYearPickerSheet: View {
                 Spacer(minLength: 0)
             }
             .padding(20)
+            .torReadableColumn()
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Select Month")
             .navigationBarTitleDisplayMode(.inline)
@@ -460,8 +460,7 @@ private struct MonthYearPickerSheet: View {
             Text(monthName(month))
                 .font(.callout.weight(selected ? .bold : .semibold))
                 .foregroundStyle(selected ? Color.white : disabled ? Theme.faint.opacity(0.45) : Theme.text)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: 48)
                 .background(
@@ -492,6 +491,8 @@ private struct MonthYearPickerSheet: View {
 private struct OverviewCard: View {
     let summary: RunHistorySummary
     let eyebrow: String
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -509,16 +510,40 @@ private struct OverviewCard: View {
                 .font(.system(size: 12.5, weight: .medium))
                 .foregroundStyle(Theme.faint)
 
-            HStack(spacing: 10) {
-                stat(paceText, "AVG PACE", Theme.text)
-                stat(Formatters.duration(summary.totalDurationSeconds), "TOTAL TIME", Theme.text)
-                stat(longestText, "LONGEST km", Theme.good)
-            }
+            summaryMetrics
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private var summaryMetrics: some View {
+        if horizontalSizeClass == .regular {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 140), spacing: 10)],
+                alignment: .leading,
+                spacing: 10
+            ) {
+                stat(paceText, "AVG PACE", Theme.text)
+                stat(Formatters.duration(summary.totalDurationSeconds), "TOTAL TIME", Theme.text)
+                stat(longestText, "LONGEST km", Theme.good)
+            }
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    stat(paceText, "AVG PACE", Theme.text)
+                    stat(Formatters.duration(summary.totalDurationSeconds), "TOTAL TIME", Theme.text)
+                    stat(longestText, "LONGEST km", Theme.good)
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    stat(paceText, "AVG PACE", Theme.text)
+                    stat(Formatters.duration(summary.totalDurationSeconds), "TOTAL TIME", Theme.text)
+                    stat(longestText, "LONGEST km", Theme.good)
+                }
+            }
+        }
     }
 
     private var paceText: String {

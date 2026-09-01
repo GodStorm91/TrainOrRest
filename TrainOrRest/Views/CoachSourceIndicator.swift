@@ -4,14 +4,17 @@ struct CoachSourceIndicator: View {
     let count: Int
     let language: CoachLanguage
     let onTap: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 5) {
                 Image(systemName: "paperclip")
                     .font(.caption.weight(.semibold))
-                Text(language.contextSourceCountLabel(count: count))
+                Text(dynamicTypeSize.isAccessibilitySize ? "\(count)" : language.contextSourceCountLabel(count: count))
                     .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .foregroundStyle(Theme.dim)
             .padding(.horizontal, 10)

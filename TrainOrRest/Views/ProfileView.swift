@@ -13,6 +13,10 @@ struct ProfileView: View {
     @AppStorage(PersonalCoachSettings.ageKey) private var age = ""
     @AppStorage(PersonalCoachSettings.heightCmKey) private var heightCm = ""
 
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+
     @State private var showGoalEntry = false
     @State private var showAthleteProfile = false
 
@@ -27,8 +31,9 @@ struct ProfileView: View {
                 personalHistorySection
             }
             .padding(.horizontal, 16)
-            .padding(.top, 12)
+            .padding(.top, verticalSizeClass == .compact ? 4 : 12)
             .padding(.bottom, 24)
+            .torReadableColumn()
         }
         .background(Theme.bg)
         .safeAreaInset(edge: .bottom) {
@@ -44,7 +49,7 @@ struct ProfileView: View {
     private var header: some View {
         HStack(alignment: .center) {
             Text("Profile")
-                .font(.torHeading(28, .bold))
+                .font(dynamicTypeSize.isAccessibilitySize ? .largeTitle.weight(.bold) : .torHeading(28, .bold))
                 .foregroundStyle(Theme.text)
                 .accessibilityAddTraits(.isHeader)
             Spacer()
@@ -70,7 +75,7 @@ struct ProfileView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     TorEyebrow("ATHLETE")
                     Text(athleteDetailSummary)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.subheadline.weight(.medium))
                         .foregroundStyle(Theme.dim)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -129,18 +134,18 @@ struct ProfileView: View {
                         TorEyebrow(summary.health.status.eyebrowText)
                             .foregroundStyle(statusColor(summary.health.status))
                         Text(summary.title)
-                            .font(.torHeading(22, .bold))
+                            .font(.title3.weight(.bold))
                             .foregroundStyle(Theme.text)
                             .fixedSize(horizontal: false, vertical: true)
                         Text(raceLine(summary))
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.subheadline.weight(.medium))
                             .foregroundStyle(Theme.dim)
                         Text("\(athleteName) · \(athleteType)")
-                            .font(.caption.weight(.medium))
+                            .font(.subheadline)
                             .foregroundStyle(Theme.faint)
                         if let detail = planStatusDetail(summary) {
                             Text(detail)
-                                .font(.system(size: 13, weight: .medium))
+                                .font(.subheadline.weight(.medium))
                                 .foregroundStyle(statusColor(summary.health.status))
                                 .fixedSize(horizontal: false, vertical: true)
                                 .padding(.top, 2)
@@ -154,14 +159,24 @@ struct ProfileView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Week \(summary.currentWeek) of \(summary.totalWeeks)")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Theme.text)
-                        Spacer()
-                        Text("Timeline")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(Theme.faint)
+                    ViewThatFits(in: .horizontal) {
+                        HStack {
+                            Text("Week \(summary.currentWeek) of \(summary.totalWeeks)")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Theme.text)
+                            Spacer()
+                            Text("Timeline")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(Theme.faint)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Week \(summary.currentWeek) of \(summary.totalWeeks)")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Theme.text)
+                            Text("Timeline")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(Theme.faint)
+                        }
                     }
                     ProgressView(value: summary.timelineProgress)
                         .tint(statusColor(summary.health.status))
@@ -191,11 +206,11 @@ struct ProfileView: View {
             VStack(alignment: .leading, spacing: 4) {
                 TorEyebrow("PLAN")
                 Text("Distance, date, and target time become the plan.")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(Theme.dim)
                     .fixedSize(horizontal: false, vertical: true)
                 Text("Set the race you entered")
-                    .font(.torHeading(15, .bold))
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(Theme.accent)
                     .frame(minHeight: 28, alignment: .leading)
             }
@@ -232,7 +247,7 @@ struct ProfileView: View {
                     .frame(width: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(label)
-                        .font(.torHeading(16, .semibold))
+                        .font(.headline.weight(.semibold))
                         .foregroundStyle(Theme.text)
                     Text(subtitle)
                         .font(.caption.weight(.medium))
@@ -244,7 +259,6 @@ struct ProfileView: View {
                     .foregroundStyle(Theme.faint)
             }
             .padding(16)
-            .frame(minHeight: 56)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
         }
@@ -253,15 +267,25 @@ struct ProfileView: View {
     }
 
     private func profileRow(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(label)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Theme.dim)
-            Spacer(minLength: 16)
-            Text(value)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.text)
-                .multilineTextAlignment(.trailing)
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(label)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.dim)
+                Spacer(minLength: 16)
+                Text(value)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.text)
+                    .multilineTextAlignment(.trailing)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(label)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.dim)
+                Text(value)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.text)
+            }
         }
     }
 
@@ -449,13 +473,9 @@ private struct MetricChip: View {
             Text(metric.label)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(Theme.faint)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
             Text(metric.value)
-                .font(.torHeading(17, .bold))
+                .font(.headline.weight(.bold))
                 .foregroundStyle(Theme.text)
-                .lineLimit(1)
-                .minimumScaleFactor(0.76)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)

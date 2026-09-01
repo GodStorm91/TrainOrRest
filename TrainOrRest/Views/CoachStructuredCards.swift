@@ -2,16 +2,29 @@ import SwiftUI
 
 struct CoachRationaleCard: View {
     let rationale: ReadinessRationale
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         TorCard(padding: 14, cornerRadius: 16) {
             VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    CoachVerdictChip(verdict: rationale.verdict, prefix: "Engine")
-                    if let score = rationale.score {
-                        Text("readiness \(score)")
-                            .font(.torMono(11, .medium))
-                            .foregroundStyle(Theme.dim)
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        CoachVerdictChip(verdict: rationale.verdict, prefix: "Engine")
+                        if let score = rationale.score {
+                            Text("readiness \(score)")
+                                .font(.torMono(11, .medium))
+                                .foregroundStyle(Theme.dim)
+                        }
+                    }
+                    .fixedSize(horizontal: dynamicTypeSize.isAccessibilitySize, vertical: false)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        CoachVerdictChip(verdict: rationale.verdict, prefix: "Engine")
+                        if let score = rationale.score {
+                            Text("readiness \(score)")
+                                .font(.torMono(11, .medium))
+                                .foregroundStyle(Theme.dim)
+                        }
                     }
                 }
 
@@ -53,6 +66,7 @@ struct CoachRationaleCard: View {
 
 struct CoachWorkoutCard: View {
     let workout: CoachWorkoutSummary
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(workout: PlannedWorkout) {
         self.workout = CoachWorkoutSummary(from: workout)
@@ -89,16 +103,28 @@ struct CoachWorkoutCard: View {
                     }
                 }
 
-                HStack(spacing: 8) {
-                    WorkoutMetricChip(label: "Distance", value: workout.distance)
-                    if let duration = workout.duration {
-                        WorkoutMetricChip(label: "Duration", value: duration)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        metricChips
                     }
-                    if let paceBand = workout.paceBand {
-                        WorkoutMetricChip(label: "Pace", value: paceBand)
+                    .fixedSize(horizontal: dynamicTypeSize.isAccessibilitySize, vertical: false)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        metricChips
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var metricChips: some View {
+        WorkoutMetricChip(label: "Distance", value: workout.distance)
+        if let duration = workout.duration {
+            WorkoutMetricChip(label: "Duration", value: duration)
+        }
+        if let paceBand = workout.paceBand {
+            WorkoutMetricChip(label: "Pace", value: paceBand)
         }
     }
 }
@@ -222,8 +248,6 @@ private struct WorkoutMetricChip: View {
             Text(value)
                 .font(.torMono(11, .medium))
                 .foregroundStyle(Theme.text)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 7)

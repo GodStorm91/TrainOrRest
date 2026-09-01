@@ -10,25 +10,44 @@ struct PlanMonthView: View {
     @Binding var monthAnchor: Date
     @Binding var selectedDate: Date
     var onReviewRunInChat: (CompletedActivity) -> Void = { _ in }
+    var showsTodaysCall = true
+    var displaysOnlyTodaysCall = false
     @Query(sort: \RunningShoe.createdAt, order: .reverse) private var shoes: [RunningShoe]
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     private let calendar = Calendar.current
     private let railWidth: CGFloat = 40
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                todaysCall
-                monthNav
-                weekdayRow
-                grid
-                selectedDayDetail
+        if displaysOnlyTodaysCall {
+            todaysCall
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if showsTodaysCall {
+                        todaysCall
+                    }
+                    monthNav
+                    if horizontalSizeClass == .regular {
+                        VStack(alignment: .leading, spacing: 8) {
+                            weekdayRow
+                            grid
+                        }
+                        .frame(maxWidth: 7 * 96 + railWidth, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    } else {
+                        weekdayRow
+                        grid
+                    }
+                    selectedDayDetail
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+                .padding(.bottom, 24)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 6)
-            .padding(.bottom, 24)
+            .scrollIndicators(.hidden)
         }
-        .scrollIndicators(.hidden)
     }
 
     // MARK: - Month navigation
@@ -73,12 +92,12 @@ struct PlanMonthView: View {
         HStack(spacing: 3) {
             ForEach(Array(MonthGrid.weekdaySymbols(calendar).enumerated()), id: \.offset) { _, symbol in
                 Text(symbol)
-                    .font(.torLabel(11))
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(Theme.faint)
                     .frame(maxWidth: .infinity)
             }
             Text("KM")
-                .font(.torLabel(11))
+                .font(.caption2.weight(.semibold))
                 .foregroundStyle(Theme.faint)
                 .frame(width: railWidth, alignment: .leading)
         }
@@ -124,7 +143,7 @@ struct PlanMonthView: View {
                     )
                 VStack(spacing: 5) {
                     Text("\(calendar.component(.day, from: date))")
-                        .font(.torHeading(15, .bold))
+                        .font(.subheadline.weight(.bold))
                         .foregroundStyle(numberColor(isToday: isToday, isPast: isPast, hasWorkout: kind != nil))
                     dayMark(kind: kind, isPast: isPast)
                 }
@@ -199,10 +218,10 @@ struct PlanMonthView: View {
         if km > 0 {
             VStack(alignment: .leading, spacing: 5) {
                 Text("\(Int(km.rounded()))")
-                    .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                    .font(.caption2.weight(.semibold))
+                    .monospacedDigit()
                     .foregroundStyle(Theme.dim)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                    .fixedSize(horizontal: false, vertical: true)
                 Capsule()
                     .fill(Theme.data)
                     .frame(width: barWidth(km), height: 3)
@@ -224,27 +243,115 @@ struct PlanMonthView: View {
 
     // MARK: - Selected day detail
 
+    @ViewBuilder
     private var todaysCall: some View {
         let today = calendar.startOfDay(for: .now)
         let dayWorkouts = workouts(on: today)
         let activity = completedActivity(on: today)
-        return VStack(alignment: .leading, spacing: 10) {
-            TorEyebrow("Today's call").tracking(2)
-            if let activity {
-                CalendarRunSummaryCard(
-                    activity: activity,
-                    plannedWorkout: matchedWorkout(for: activity) ?? dayWorkouts.first,
-                    compact: false,
-                    reviewDestination: AnyView(ChatView(contextualCompletedActivityID: activity.hkUUID)),
-                    onReview: { onReviewRunInChat(activity) }
-                )
-                ForEach(dayWorkouts) { workout in
-                    detailCard(workout)
+        if verticalSizeClass == .compact {
+            compactTodaysCall(activity: activity, workout: dayWorkouts.first)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                TorEyebrow("Today's call").tracking(2)
+                if let activity {
+                    CalendarRunSummaryCard(
+                        activity: activity,
+                        plannedWorkout: matchedWorkout(for: activity) ?? dayWorkouts.first,
+                        compact: false,
+                        reviewDestination: AnyView(ChatView(contextualCompletedActivityID: activity.hkUUID)),
+                        onReview: { onReviewRunInChat(activity) }
+                    )
+                    ForEach(dayWorkouts) { workout in
+                        detailCard(workout)
+                    }
+                } else {
+                    todaysCallHero(workout: dayWorkouts.first)
                 }
-            } else {
-                todaysCallHero(workout: dayWorkouts.first)
             }
         }
+    }
+
+    @ViewBuilder
+    private func compactTodaysCall(
+        activity: CompletedActivity?,
+        workout: PlannedWorkout?
+    ) -> some View {
+        if let activity {
+            NavigationLink {
+                ChatView(contextualCompletedActivityID: activity.hkUUID)
+            } label: {
+                compactTodaysCallRow(
+                    symbol: "figure.run",
+                    title: "Completed run",
+                    metrics: completedSubtitle(activity),
+                    compactMetrics: completedCompactSubtitle(activity),
+                    tint: Theme.good
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Review completed run with Coach")
+        } else if let workout {
+            NavigationLink {
+                WorkoutDetailView(workout: workout)
+            } label: {
+                compactTodaysCallRow(
+                    symbol: workout.kind?.symbolName ?? "figure.run",
+                    title: workout.kind?.displayName ?? "Run",
+                    metrics: subtitle(workout),
+                    compactMetrics: compactSubtitle(workout),
+                    tint: workout.kind?.styleColor ?? Theme.accent
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open today’s \(workout.kind?.displayName ?? "workout")")
+        } else {
+            compactTodaysCallRow(
+                symbol: "moon.zzz.fill",
+                title: "Rest day",
+                metrics: "Recovery and adaptation",
+                compactMetrics: "Recovery",
+                tint: Theme.dim,
+                showsChevron: false
+            )
+        }
+    }
+
+    private func compactTodaysCallRow(
+        symbol: String,
+        title: String,
+        metrics: String,
+        compactMetrics: String,
+        tint: Color,
+        showsChevron: Bool = true
+    ) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 32, height: 32)
+                .background(Theme.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            Text(title)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Theme.text)
+            ViewThatFits(in: .horizontal) {
+                Text(metrics)
+                    .fixedSize(horizontal: true, vertical: false)
+                Text(compactMetrics)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(Theme.dim)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Theme.faint)
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 52)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
     }
 
     /// The bold hero for today's prescription: a graphite-glass card whose peak
@@ -264,20 +371,12 @@ struct PlanMonthView: View {
                         Text(workout.kind?.displayName ?? "Run")
                             .font(.torHeading(30, .bold))
                             .foregroundStyle(Theme.text)
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.7)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(subtitle(workout))
-                            .font(.system(.footnote, design: .monospaced).weight(.medium))
-                            .foregroundStyle(Theme.dim)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
+                        workoutMetricLine(workout)
                         if let why = purpose(workout) {
                             Text(why)
                                 .font(.footnote.weight(.medium))
                                 .foregroundStyle(Theme.dim)
-                                .lineLimit(2)
-                                .minimumScaleFactor(0.85)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         receiptLine(workout)
@@ -300,8 +399,6 @@ struct PlanMonthView: View {
                     Text("Rest day")
                         .font(.torHeading(30, .bold))
                         .foregroundStyle(Theme.text)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
                     Text("Recovery and adaptation")
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(Theme.dim)
@@ -330,13 +427,12 @@ struct PlanMonthView: View {
         let receipt = planReceipt(workout)
         HStack(spacing: 5) {
             Image(systemName: receipt.symbol)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.caption2.weight(.semibold))
                 .foregroundStyle(receipt.tint)
             Text(receipt.text)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(Theme.dim)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.top, 2)
     }
@@ -428,39 +524,51 @@ struct PlanMonthView: View {
     }
 
     private func actionRow(_ workout: PlannedWorkout) -> some View {
-        HStack(spacing: 8) {
-            if contextualCoachActionTitle(for: workout) != nil {
-                NavigationLink {
-                    ChatView(contextualWorkoutID: workout.uuid)
-                } label: {
-                    Label(contextualCoachActionTitle(for: workout) ?? "Edit with Coach", systemImage: "sparkles")
-                        .font(.torHeading(13, .bold))
-                        .foregroundStyle(Theme.accent)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.82)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.accent.opacity(0.4), lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(contextualCoachAccessibilityLabel(for: workout))
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                coachAction(workout, fixedWidth: true)
+                detailsAction(workout, fixedWidth: true)
             }
+            VStack(alignment: .leading, spacing: 8) {
+                coachAction(workout, fixedWidth: false)
+                detailsAction(workout, fixedWidth: false)
+            }
+        }
+    }
 
+    @ViewBuilder
+    private func coachAction(_ workout: PlannedWorkout, fixedWidth: Bool) -> some View {
+        if let actionTitle = contextualCoachActionTitle(for: workout) {
             NavigationLink {
-                WorkoutDetailView(workout: workout)
+                ChatView(contextualWorkoutID: workout.uuid)
             } label: {
-                Label("Details", systemImage: "chevron.right")
-                    .font(.torHeading(13, .semibold))
-                    .foregroundStyle(Theme.text)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
+                Label(actionTitle, systemImage: "sparkles")
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(Theme.accent)
+                    .fixedSize(horizontal: fixedWidth, vertical: !fixedWidth)
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.accent.opacity(0.4), lineWidth: 1))
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Open workout details")
+            .accessibilityLabel(contextualCoachAccessibilityLabel(for: workout))
         }
+    }
+
+    private func detailsAction(_ workout: PlannedWorkout, fixedWidth: Bool) -> some View {
+        NavigationLink {
+            WorkoutDetailView(workout: workout)
+        } label: {
+            Label("Details", systemImage: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Theme.text)
+                .fixedSize(horizontal: fixedWidth, vertical: !fixedWidth)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open workout details")
     }
 
     private func contextualCoachActionTitle(for workout: PlannedWorkout) -> String? {
@@ -521,13 +629,52 @@ struct PlanMonthView: View {
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
     }
 
+    private func workoutMetricLine(_ workout: PlannedWorkout) -> some View {
+        let parts = subtitleParts(workout)
+        return ViewThatFits(in: .horizontal) {
+            Text(parts.joined(separator: " · "))
+                .fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(parts[0])
+                if parts.count > 1 {
+                    Text(parts.dropFirst().joined(separator: " · "))
+                }
+            }
+        }
+        .font(.system(.footnote, design: .monospaced).weight(.medium))
+        .foregroundStyle(Theme.dim)
+    }
+
     private func subtitle(_ workout: PlannedWorkout) -> String {
+        subtitleParts(workout).joined(separator: " · ")
+    }
+
+    private func subtitleParts(_ workout: PlannedWorkout) -> [String] {
         var parts = [String(format: "%.2f km", workout.distanceKm)]
-        if let band = workout.paceBand { parts.append(Formatters.paceBand(band).replacingOccurrences(of: " /km", with: "/km")) }
+        if let band = workout.paceBand {
+            parts.append(Formatters.paceBand(band).replacingOccurrences(of: " /km", with: "/km"))
+        }
         if let seconds = workout.expectedDurationSeconds {
             parts.append("~\(Int((seconds / 60).rounded())) min")
         }
-        return parts.joined(separator: " · ")
+        return parts
+    }
+
+    private func completedSubtitle(_ activity: CompletedActivity) -> String {
+        [
+            Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " ", with: ""),
+            Formatters.pace(activity.avgPaceSecondsPerKm).replacingOccurrences(of: " /km", with: "/km"),
+            Formatters.duration(activity.durationSeconds).replacingOccurrences(of: " ", with: "")
+        ]
+        .joined(separator: " · ")
+    }
+
+    private func compactSubtitle(_ workout: PlannedWorkout) -> String {
+        subtitleParts(workout).first ?? "Run"
+    }
+
+    private func completedCompactSubtitle(_ activity: CompletedActivity) -> String {
+        Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " ", with: "")
     }
 
     // MARK: - Helpers

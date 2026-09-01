@@ -34,12 +34,14 @@ struct CoachTodayEngineHeader: View {
 
                 ViewThatFits(in: .horizontal) {
                     Text(CoachTodayHeaderText.text(for: readiness))
+                        .fixedSize(horizontal: true, vertical: false)
                     Text(CoachTodayHeaderText.compactText(for: readiness))
+                        .fixedSize(horizontal: true, vertical: false)
+                    Text(readiness?.verdict.bannerWord ?? "No verdict yet")
+                        .fixedSize(horizontal: true, vertical: false)
                 }
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(tint)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
 
                 Spacer(minLength: 6)
 

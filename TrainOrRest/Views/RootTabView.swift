@@ -5,7 +5,7 @@ import UIKit
 struct RootTabView: View {
     enum Tab: Hashable { case calendar, chat, profile }
 
-    @State private var selection: Tab = .chat
+    @State private var selection: Tab = RootTabView.initialTab
     @State private var isKeyboardVisible = false
     @State private var isBottomDockHiddenByChild = false
     @State private var pendingReviewChatRequest: CalendarReviewChatRequest?
@@ -87,6 +87,18 @@ struct RootTabView: View {
     private var shouldShowDock: Bool {
         !isKeyboardVisible && !isBottomDockHiddenByChild
     }
+
+    private static var initialTab: Tab {
+        #if DEBUG
+        switch DevSeed.requestedTab {
+        case "calendar": return .calendar
+        case "profile": return .profile
+        default: return .chat
+        }
+        #else
+        return .chat
+        #endif
+    }
 }
 
 /// Layout constants shared between the floating dock and screens that must
@@ -117,6 +129,10 @@ private struct TorTabDock: View {
         .clipShape(Capsule(style: .continuous))
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 42)
+        // Chrome scales with Dynamic Type only up to xLarge: the 56pt pill is a
+        // fixed-height control like the system tab bar, and xLarge is the last
+        // size at which "Calendar" still fits one of its three 94pt slots.
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
         .animation(.spring(response: 0.34, dampingFraction: 0.86), value: selection)
     }
 
@@ -136,12 +152,12 @@ private struct TorTabDock: View {
 
                 HStack(spacing: active ? 6 : 0) {
                     Image(systemName: symbol)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.system(.body, design: .default, weight: .semibold))
                         .symbolRenderingMode(.hierarchical)
                         .scaleEffect(active ? 1.04 : 1.0)
                     if active {
                         Text(title)
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .font(.system(.caption, design: .rounded, weight: .semibold))
                             .lineLimit(1)
                             .transition(.asymmetric(
                                 insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .leading)),

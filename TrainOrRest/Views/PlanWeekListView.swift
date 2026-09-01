@@ -168,43 +168,56 @@ struct PlanWeekListView: View {
                 statusBadge(workout)
             }
 
-            HStack(spacing: 8) {
-                if let actionTitle = contextualCoachActionTitle(for: workout) {
-                    NavigationLink {
-                        ChatView(contextualWorkoutID: workout.uuid)
-                    } label: {
-                        Label(actionTitle, systemImage: "sparkles")
-                            .font(.torHeading(13, .bold))
-                            .foregroundStyle(Theme.accent)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.82)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(actionTitle) \(workout.kind?.displayName ?? "workout")")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    coachAction(workout, fixedWidth: true)
+                    detailsAction(workout, fixedWidth: true)
                 }
-
-                NavigationLink {
-                    WorkoutDetailView(workout: workout)
-                } label: {
-                    Label("Details", systemImage: "chevron.right")
-                        .font(.torHeading(13, .semibold))
-                        .foregroundStyle(Theme.text)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.82)
-                        .frame(width: 104, height: 44)
-                        .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+                VStack(alignment: .leading, spacing: 8) {
+                    coachAction(workout, fixedWidth: false)
+                    detailsAction(workout, fixedWidth: false)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Open workout details")
             }
         }
         .padding(14)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(calendar.isDateInToday(workout.date) ? Theme.accent : Theme.border, lineWidth: 1))
     }
+
+    @ViewBuilder
+    private func coachAction(_ workout: PlannedWorkout, fixedWidth: Bool) -> some View {
+        if let actionTitle = contextualCoachActionTitle(for: workout) {
+            NavigationLink {
+                ChatView(contextualWorkoutID: workout.uuid)
+            } label: {
+                Label(actionTitle, systemImage: "sparkles")
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(Theme.accent)
+                    .fixedSize(horizontal: fixedWidth, vertical: !fixedWidth)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(actionTitle) \(workout.kind?.displayName ?? "workout")")
+        }
+    }
+
+    private func detailsAction(_ workout: PlannedWorkout, fixedWidth: Bool) -> some View {
+        NavigationLink {
+            WorkoutDetailView(workout: workout)
+        } label: {
+            Label("Details", systemImage: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Theme.text)
+                .fixedSize(horizontal: fixedWidth, vertical: !fixedWidth)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open workout details")
+    }
+
 
     private func contextualCoachActionTitle(for workout: PlannedWorkout) -> String? {
         switch workout.status {

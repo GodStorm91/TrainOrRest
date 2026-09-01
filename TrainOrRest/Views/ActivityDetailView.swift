@@ -37,6 +37,7 @@ struct ActivityDetailView: View {
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 116)
+            .torReadableColumn()
         }
         .background(Theme.bg.ignoresSafeArea())
         .safeAreaPadding(.bottom, 96)
@@ -379,6 +380,8 @@ struct RunReviewCard: View {
 private struct RunDetailSummary: View {
     let activity: CompletedActivity
     let intervalsAnalysis: IntervalsActivityAnalysisData?
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
 
     private var distanceMeters: Double? {
         intervalsAnalysis?.distanceMeters ?? activity.distanceMeters
@@ -417,12 +420,8 @@ private struct RunDetailSummary: View {
                     .background(TrainingVisualStyle.tint(activity.effortColor, opacity: 0.18), in: Circle())
             }
 
-            HStack(spacing: 8) {
-                ActivityStatPill(Formatters.pace(averagePace), symbol: "speedometer")
-                ActivityStatPill(Formatters.duration(durationSeconds), symbol: "clock")
-                ActivityStatPill(Formatters.heartRate(averageHeartRate), symbol: "heart")
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            summaryMetrics
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(16)
         .background(TrainingVisualStyle.tint(activity.effortColor, opacity: 0.16), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -431,6 +430,34 @@ private struct RunDetailSummary: View {
                 .stroke(TrainingVisualStyle.tint(activity.effortColor, opacity: 0.22), lineWidth: 1)
         }
         .animation(.easeOut(duration: 0.18), value: distanceMeters)
+    }
+
+    @ViewBuilder
+    private var summaryMetrics: some View {
+        if horizontalSizeClass == .regular {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 140), spacing: 8)],
+                alignment: .leading,
+                spacing: 8
+            ) {
+                ActivityStatPill(Formatters.pace(averagePace), symbol: "speedometer")
+                ActivityStatPill(Formatters.duration(durationSeconds), symbol: "clock")
+                ActivityStatPill(Formatters.heartRate(averageHeartRate), symbol: "heart")
+            }
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    ActivityStatPill(Formatters.pace(averagePace), symbol: "speedometer")
+                    ActivityStatPill(Formatters.duration(durationSeconds), symbol: "clock")
+                    ActivityStatPill(Formatters.heartRate(averageHeartRate), symbol: "heart")
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    ActivityStatPill(Formatters.pace(averagePace), symbol: "speedometer")
+                    ActivityStatPill(Formatters.duration(durationSeconds), symbol: "clock")
+                    ActivityStatPill(Formatters.heartRate(averageHeartRate), symbol: "heart")
+                }
+            }
+        }
     }
 }
 
@@ -446,8 +473,6 @@ struct ActivityStatPill: View {
     var body: some View {
         Label {
             Text(value)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
                 .monospacedDigit()
         } icon: {
             Image(systemName: symbol)
@@ -487,6 +512,8 @@ private struct FullAnalysisCard: View {
 
 private struct PaceAnalysisView: View {
     let model: ActivityDetailAnalysis
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -494,13 +521,7 @@ private struct PaceAnalysisView: View {
                 .font(.torHeading(18, .bold))
                 .foregroundStyle(Theme.text)
 
-            HStack(spacing: 8) {
-                AnalysisSummaryPill(value: Formatters.pace(model.actualPace).replacingOccurrences(of: " /km", with: "/km"), label: "actual", color: Theme.accent)
-                if model.hasPlan {
-                    AnalysisSummaryPill(value: Formatters.pace(model.plannedAveragePace).replacingOccurrences(of: " /km", with: "/km"), label: "planned", color: Theme.good)
-                    AnalysisSummaryPill(value: model.paceDeltaText, label: "fast", color: Theme.warn)
-                }
-            }
+            summaryMetrics
 
             PlanComparisonChart(model: model, style: .expanded)
                 .frame(height: 230)
@@ -511,10 +532,46 @@ private struct PaceAnalysisView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
+    @ViewBuilder
+    private var summaryMetrics: some View {
+        if horizontalSizeClass == .regular {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 140), spacing: 8)],
+                alignment: .leading,
+                spacing: 8
+            ) {
+                AnalysisSummaryPill(value: Formatters.pace(model.actualPace).replacingOccurrences(of: " /km", with: "/km"), label: "actual", color: Theme.accent)
+                if model.hasPlan {
+                    AnalysisSummaryPill(value: Formatters.pace(model.plannedAveragePace).replacingOccurrences(of: " /km", with: "/km"), label: "planned", color: Theme.good)
+                    AnalysisSummaryPill(value: model.paceDeltaText, label: "fast", color: Theme.warn)
+                }
+            }
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    AnalysisSummaryPill(value: Formatters.pace(model.actualPace).replacingOccurrences(of: " /km", with: "/km"), label: "actual", color: Theme.accent)
+                    if model.hasPlan {
+                        AnalysisSummaryPill(value: Formatters.pace(model.plannedAveragePace).replacingOccurrences(of: " /km", with: "/km"), label: "planned", color: Theme.good)
+                        AnalysisSummaryPill(value: model.paceDeltaText, label: "fast", color: Theme.warn)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    AnalysisSummaryPill(value: Formatters.pace(model.actualPace).replacingOccurrences(of: " /km", with: "/km"), label: "actual", color: Theme.accent)
+                    if model.hasPlan {
+                        AnalysisSummaryPill(value: Formatters.pace(model.plannedAveragePace).replacingOccurrences(of: " /km", with: "/km"), label: "planned", color: Theme.good)
+                        AnalysisSummaryPill(value: model.paceDeltaText, label: "fast", color: Theme.warn)
+                    }
+                }
+            }
+        }
+    }
+
 }
 
 private struct HeartRateAnalysisView: View {
     let model: ActivityDetailAnalysis
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -522,10 +579,7 @@ private struct HeartRateAnalysisView: View {
                 .font(.torHeading(18, .bold))
                 .foregroundStyle(Theme.text)
 
-            HStack(spacing: 8) {
-                AnalysisSummaryPill(value: Formatters.heartRate(model.averageHeartRate), label: "recorded avg", color: Theme.data)
-                AnalysisSummaryPill(value: Formatters.heartRate(model.maxHeartRate), label: "max", color: Theme.warn)
-            }
+            summaryMetrics
 
             HeartRateTrendChart(model: model)
                 .frame(height: 210)
@@ -534,6 +588,30 @@ private struct HeartRateAnalysisView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.dim)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+    @ViewBuilder
+    private var summaryMetrics: some View {
+        if horizontalSizeClass == .regular {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 140), spacing: 8)],
+                alignment: .leading,
+                spacing: 8
+            ) {
+                AnalysisSummaryPill(value: Formatters.heartRate(model.averageHeartRate), label: "recorded avg", color: Theme.data)
+                AnalysisSummaryPill(value: Formatters.heartRate(model.maxHeartRate), label: "max", color: Theme.warn)
+            }
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    AnalysisSummaryPill(value: Formatters.heartRate(model.averageHeartRate), label: "recorded avg", color: Theme.data)
+                    AnalysisSummaryPill(value: Formatters.heartRate(model.maxHeartRate), label: "max", color: Theme.warn)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    AnalysisSummaryPill(value: Formatters.heartRate(model.averageHeartRate), label: "recorded avg", color: Theme.data)
+                    AnalysisSummaryPill(value: Formatters.heartRate(model.maxHeartRate), label: "max", color: Theme.warn)
+                }
+            }
         }
     }
 }
@@ -640,26 +718,37 @@ struct AnalysisSegmentedControl: View {
     let availableTabs: [ActivityAnalysisTab]
 
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(availableTabs, id: \.self) { tab in
-                Button {
-                    withAnimation(.easeOut(duration: 0.16)) {
-                        selection = tab
-                    }
-                } label: {
-                    Text(tab.title)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(selection == tab ? Color.white : Theme.dim)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 34)
-                        .contentShape(Rectangle())
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 4) {
+                ForEach(availableTabs, id: \.self) { tab in
+                    tabButton(tab)
                 }
-                .buttonStyle(.plain)
-                .background(selection == tab ? Theme.accent : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            VStack(spacing: 4) {
+                ForEach(availableTabs, id: \.self) { tab in
+                    tabButton(tab)
+                }
             }
         }
         .padding(4)
         .background(Theme.chip, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func tabButton(_ tab: ActivityAnalysisTab) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.16)) {
+                selection = tab
+            }
+        } label: {
+            Text(tab.title)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(selection == tab ? Color.white : Theme.dim)
+                .frame(maxWidth: .infinity)
+                .frame(height: 34)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(selection == tab ? Theme.accent : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -911,19 +1000,24 @@ struct SplitComparisonRow: View {
                 .foregroundStyle(split.isMeaningfullyFast ? Theme.warn : Theme.dim)
                 .frame(width: 24)
 
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Theme.chip)
-                    .frame(height: 8)
-                Capsule()
-                    .fill(split.isMeaningfullyFast ? Theme.warn.opacity(0.82) : Theme.accent.opacity(0.72))
-                    .frame(width: max(28, CGFloat(split.relativeWidth) * 150), height: 8)
-                Rectangle()
-                    .fill(Theme.good)
-                    .frame(width: 2, height: 18)
-                    .offset(x: 112)
+            GeometryReader { proxy in
+                let barWidth = proxy.size.width
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Theme.chip)
+                        .frame(height: 8)
+                    Capsule()
+                        .fill(split.isMeaningfullyFast ? Theme.warn.opacity(0.82) : Theme.accent.opacity(0.72))
+                        .frame(width: max(28, CGFloat(split.relativeWidth) * barWidth), height: 8)
+                    Rectangle()
+                        .fill(Theme.good)
+                        .frame(width: 2, height: 18)
+                        .offset(x: barWidth * 0.75)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity)
+            .frame(height: 18)
 
             Text(Formatters.pace(split.paceSecondsPerKm).replacingOccurrences(of: " /km", with: "/km"))
                 .font(.torMono(12, .semibold))

@@ -419,10 +419,17 @@ struct WorkoutDetailView: View {
 
     private var statusButtons: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                statusButton("Done", status: .done, tint: Theme.good)
-                statusButton("Skipped", status: .skipped, tint: Theme.warn)
-                statusButton("Planned", status: .planned, tint: Theme.accent)
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    statusButton("Done", status: .done, tint: Theme.good)
+                    statusButton("Skipped", status: .skipped, tint: Theme.warn)
+                    statusButton("Planned", status: .planned, tint: Theme.accent)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    statusButton("Done", status: .done, tint: Theme.good)
+                    statusButton("Skipped", status: .skipped, tint: Theme.warn)
+                    statusButton("Planned", status: .planned, tint: Theme.accent)
+                }
             }
             .buttonStyle(.bordered)
 
@@ -523,6 +530,7 @@ private struct SmartSchedulingTimeSheet: View {
                     }
                 }
                 .padding()
+                .torReadableColumn()
             }
             .background(Theme.bg)
             .navigationTitle(applyResult == nil ? "Choose start time" : "Workout scheduled")
@@ -718,37 +726,53 @@ private struct SmartSchedulingTimeSheet: View {
     }
 
     private var actionBar: some View {
-        HStack(spacing: 12) {
-            Button(isChoosingCustomTime ? "Back" : "Cancel") {
-                if isChoosingCustomTime {
-                    isChoosingCustomTime = false
-                } else {
-                    onCancel()
-                }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                cancelAction
+                applyAction
             }
-            .buttonStyle(.bordered)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            Button {
-                if isChoosingCustomTime, customValidation == nil {
-                    onValidateCustomTime(time(onWorkoutDateMatching: pickerDate))
-                } else {
-                    onApply()
-                }
-            } label: {
-                if isApplying {
-                    Label("Scheduling workout", systemImage: "hourglass")
-                } else if isChoosingCustomTime, customValidation == nil {
-                    Label("Check \(timeText(time(onWorkoutDateMatching: pickerDate)))", systemImage: "checkmark.shield")
-                } else {
-                    Label(activeStart.map { "Schedule at \(timeText($0))" } ?? "Schedule", systemImage: "checkmark.circle.fill")
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                cancelAction
+                applyAction
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(isApplying || (!canApply && !(isChoosingCustomTime && customValidation == nil)))
-            .frame(maxWidth: .infinity, minHeight: 44)
         }
         .padding()
+        .torReadableColumn()
+        .frame(maxWidth: .infinity)
         .background(.bar)
+    }
+
+    private var cancelAction: some View {
+        Button(isChoosingCustomTime ? "Back" : "Cancel") {
+            if isChoosingCustomTime {
+                isChoosingCustomTime = false
+            } else {
+                onCancel()
+            }
+        }
+        .buttonStyle(.bordered)
+        .frame(maxWidth: .infinity, minHeight: 44)
+    }
+
+    private var applyAction: some View {
+        Button {
+            if isChoosingCustomTime, customValidation == nil {
+                onValidateCustomTime(time(onWorkoutDateMatching: pickerDate))
+            } else {
+                onApply()
+            }
+        } label: {
+            if isApplying {
+                Label("Scheduling workout", systemImage: "hourglass")
+            } else if isChoosingCustomTime, customValidation == nil {
+                Label("Check \(timeText(time(onWorkoutDateMatching: pickerDate)))", systemImage: "checkmark.shield")
+            } else {
+                Label(activeStart.map { "Schedule at \(timeText($0))" } ?? "Schedule", systemImage: "checkmark.circle.fill")
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(isApplying || (!canApply && !(isChoosingCustomTime && customValidation == nil)))
+        .frame(maxWidth: .infinity, minHeight: 44)
     }
 
     private func resultView(_ result: SmartSchedulingApplyResult) -> some View {
@@ -765,13 +789,23 @@ private struct SmartSchedulingTimeSheet: View {
                 Text(result.googleCalendarMessage)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                HStack(spacing: 12) {
-                    Button("Undo") { onUndo() }
-                        .buttonStyle(.bordered)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                    Button("Done") { onDone() }
-                        .buttonStyle(.borderedProminent)
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) {
+                        Button("Undo") { onUndo() }
+                            .buttonStyle(.bordered)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                        Button("Done") { onDone() }
+                            .buttonStyle(.borderedProminent)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button("Undo") { onUndo() }
+                            .buttonStyle(.bordered)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                        Button("Done") { onDone() }
+                            .buttonStyle(.borderedProminent)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
                 }
             case .stale(let validation):
                 validationBlock(validation)

@@ -1,6 +1,7 @@
 #if DEBUG
 import Foundation
 import SwiftData
+import UIKit
 
 /// DEBUG-only launch seam used for visual verification of the coach chat.
 ///
@@ -51,6 +52,31 @@ enum DevSeed {
         isRequested && ProcessInfo.processInfo.environment["TOR_DEV_LIVE"] == "1"
     }
 
+    /// `TOR_DEV_TAB=calendar|chat|profile` picks the tab the seeded shell
+    /// opens on so each root destination can be screenshotted directly.
+    static var requestedTab: String? {
+        guard isRequested else { return nil }
+        return ProcessInfo.processInfo.environment["TOR_DEV_TAB"]
+    }
+
+    /// `TOR_DEV_ORIENTATION=landscape` asks the window scene for a landscape
+    /// geometry at launch. Simulator rotation is otherwise only reachable via
+    /// UI scripting, so this is the only headless route to landscape captures.
+    static var wantsLandscape: Bool {
+        isRequested && ProcessInfo.processInfo.environment["TOR_DEV_ORIENTATION"] == "landscape"
+    }
+
+    /// Applies `TOR_DEV_ORIENTATION` to every connected window scene. iPhone
+    /// honors the request; multitasking-capable iPad builds follow the device
+    /// orientation instead, so iPad landscape still needs a rotated simulator.
+    @MainActor
+    static func applyRequestedGeometry() {
+        guard wantsLandscape else { return }
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeRight))
+        }
+    }
+
     /// The prompt for the live coach turn; a read-only question by default so
     /// the forced `coach_response` tool path is exercised.
     static var livePrompt: String {
@@ -62,11 +88,13 @@ enum DevSeed {
     /// Seeds when requested and returns the thread the coach tab should open.
     /// Returns `nil` when seeding is off so the normal launch is untouched.
     @discardableResult
+    @MainActor
     static func seedIfRequested(_ context: ModelContext) -> UUID? {
         guard isRequested else { return nil }
 
         OnboardingGate.markCompleted()
         preloadAPIKey()
+        seedPlanIfRequested(context)
         if isLiveRequested { return seedLiveThread(context) }
 
         let id = threadID
@@ -105,6 +133,27 @@ enum DevSeed {
         if let openAI = ProcessInfo.processInfo.environment["TOR_OPENAI_KEY"], !openAI.isEmpty {
             try? KeychainStore.save(openAI, account: KeychainStore.openAIAPIKeyAccount)
         }
+    }
+
+    /// `TOR_DEV_PLAN=1` seeds a half-marathon goal ten weeks out so the
+    /// calendar month grid and week list render populated instead of the
+    /// empty state. Idempotent: an existing plan is left alone.
+    @MainActor
+    private static func seedPlanIfRequested(_ context: ModelContext) {
+        guard ProcessInfo.processInfo.environment["TOR_DEV_PLAN"] == "1" else { return }
+        let hasPlan = (try? context.fetch(FetchDescriptor<TrainingPlan>()).isEmpty == false) ?? false
+        if hasPlan { return }
+        let today = Date()
+        let calendar = Calendar.current
+        let spec = GoalSpec(
+            distance: .halfMarathon,
+            targetTimeSeconds: 105 * 60,
+            raceDate: calendar.date(byAdding: .weekOfYear, value: 10, to: today) ?? today,
+            availableDays: [.monday, .wednesday, .friday, .sunday],
+            longRunDay: .sunday
+        )
+        let fitness = FitnessProfile(vdot: 48, weeklyVolumeKm: 40, volumeTrend: 0, longestRecentRunKm: 16)
+        try? PlanStore.replaceGoal(spec: spec, fitness: fitness, today: today, calendar: calendar, in: context)
     }
 
     /// Live-coach verification seam: an empty thread so one real read-only

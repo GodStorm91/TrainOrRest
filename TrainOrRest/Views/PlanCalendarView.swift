@@ -21,6 +21,8 @@ struct PlanCalendarView: View {
     @EnvironmentObject private var googleCalendar: GoogleCalendarSyncService
     @Query private var googleConnections: [GoogleCalendarConnection]
     @Query private var googleCalendarChanges: [GoogleCalendarInboundChange]
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     @State private var mode: Mode = .month
     @State private var monthAnchor: Date = .now
@@ -36,7 +38,9 @@ struct PlanCalendarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            topBar
+            if verticalSizeClass != .compact {
+                topBar
+            }
             ForceIntervalsSyncStatusView(status: forceSyncStatus, onRetry: forceSyncIntervals)
             RecentCoachChangesView(
                 edits: recentCoachEdits,
@@ -44,7 +48,12 @@ struct PlanCalendarView: View {
                 onRevert: revert
             )
             content
-            googleCalendarStatusRow
+            // Landscape phones have ~320pt of height: the Google status lives in
+            // the nav bar there instead of a pinned row, and on regular width it
+            // sits in the side pane under Today's Call.
+            if horizontalSizeClass != .regular && verticalSizeClass != .compact {
+                googleCalendarStatusRow
+            }
         }
         .background(Theme.bg)
         .safeAreaInset(edge: .bottom) {
@@ -52,6 +61,11 @@ struct PlanCalendarView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if verticalSizeClass == .compact {
+                ToolbarItem(placement: .principal) {
+                    modeToggle
+                }
+            }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button {
                     forceSyncIntervals()
@@ -68,6 +82,15 @@ struct PlanCalendarView: View {
                     isEditingGoal = true
                 } label: {
                     Label(goalButtonTitle, systemImage: "target")
+                }
+                if verticalSizeClass == .compact {
+                    Button {
+                        isShowingGoogleCalendarStatus = true
+                    } label: {
+                        Label(googleCalendarStatusText, systemImage: googleCalendarStatusIcon)
+                            .foregroundStyle(googleCalendarStatusTint)
+                    }
+                    .accessibilityLabel(googleCalendarAccessibilityLabel)
                 }
             }
         }
@@ -105,13 +128,44 @@ struct PlanCalendarView: View {
                 .tint(Theme.accent)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if mode == .month {
+        } else if horizontalSizeClass == .regular {
+            HStack(alignment: .top, spacing: TorLayout.screenGutter(.regular)) {
+                planContent(hidesTodaysCall: true)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        PlanMonthView(
+                            workouts: workouts,
+                            completedActivities: completedActivities,
+                            monthAnchor: $monthAnchor,
+                            selectedDate: $selectedDate,
+                            onReviewRunInChat: onReviewRunInChat,
+                            displaysOnlyTodaysCall: true
+                        )
+                        googleCalendarStatusRow
+                    }
+                    .padding(.bottom, 24)
+                }
+                .scrollIndicators(.hidden)
+                .frame(width: TorLayout.sidePaneWidth)
+            }
+            .padding(.horizontal, TorLayout.screenGutter(.regular))
+        } else {
+            planContent(hidesTodaysCall: false)
+        }
+    }
+
+    @ViewBuilder
+    private func planContent(hidesTodaysCall: Bool) -> some View {
+        if mode == .month {
             PlanMonthView(
                 workouts: workouts,
                 completedActivities: completedActivities,
                 monthAnchor: $monthAnchor,
                 selectedDate: $selectedDate,
-                onReviewRunInChat: onReviewRunInChat
+                onReviewRunInChat: onReviewRunInChat,
+                showsTodaysCall: !hidesTodaysCall
             )
         } else {
             PlanWeekListView(scrollToTodayToken: weekScrollToken, onReviewRunInChat: onReviewRunInChat)
@@ -119,10 +173,19 @@ struct PlanCalendarView: View {
     }
 
     private var topBar: some View {
-        HStack {
-            TorEyebrow("Training plan").tracking(2)
-            Spacer()
-            modeToggle
+        // Segment labels never break mid-word: when "Month | Week" no longer fits
+        // beside the eyebrow (large Dynamic Type), the toggle drops below it.
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                TorEyebrow("Training plan").tracking(2)
+                Spacer()
+                modeToggle
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                TorEyebrow("Training plan").tracking(2)
+                modeToggle
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
@@ -172,7 +235,8 @@ struct PlanCalendarView: View {
             }
         } label: {
             Text(option.rawValue)
-                .font(.torHeading(12, selected ? .bold : .semibold))
+                .font(.caption.weight(selected ? .bold : .semibold))
+                .fixedSize(horizontal: true, vertical: false)
                 .foregroundStyle(selected ? Color.white : Theme.faint)
                 .padding(.horizontal, 11)
                 .padding(.vertical, 5)

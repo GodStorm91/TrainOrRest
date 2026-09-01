@@ -156,15 +156,57 @@ struct TorCard<Content: View>: View {
 struct TorEyebrow: View {
     let text: String
     var color: Color = Theme.faint
+    /// caption2 is 11pt at the default size, so this is pixel-identical there
+    /// and follows the caption2 Dynamic Type curve above it.
+    @ScaledMetric(relativeTo: .caption2) private var size: CGFloat = 11
     init(_ text: String, color: Color = Theme.faint) {
         self.text = text
         self.color = color
     }
     var body: some View {
         Text(text.uppercased())
-            .font(.torLabel(11))
+            .font(.torLabel(size))
             .tracking(1.8)
             .foregroundStyle(color)
+    }
+}
+
+// MARK: - Adaptive layout
+
+/// Layout decisions keyed off size class, never device model. Compact width
+/// is the phone layout as designed; regular width (iPad full screen, large
+/// Split View) restructures: reading columns cap and center, two-pane screens
+/// put the detail pane beside the primary one instead of stacking.
+enum TorLayout {
+    /// Widest a single reading column (chat thread, profile, forms) grows on
+    /// regular width before it centers with side margins.
+    static let readableMaxWidth: CGFloat = 720
+    /// Detail pane width for two-pane regular-width screens.
+    static let sidePaneWidth: CGFloat = 360
+    /// Regular width has room to breathe; compact keeps the phone gutter.
+    static func screenGutter(_ horizontal: UserInterfaceSizeClass?) -> CGFloat {
+        horizontal == .regular ? 28 : 16
+    }
+}
+
+private struct TorReadableColumn: ViewModifier {
+    @Environment(\.horizontalSizeClass) private var horizontal
+
+    func body(content: Content) -> some View {
+        if horizontal == .regular {
+            content
+                .frame(maxWidth: TorLayout.readableMaxWidth)
+                .frame(maxWidth: .infinity)
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    /// Caps and centers a reading column on regular width; identity on compact.
+    func torReadableColumn() -> some View {
+        modifier(TorReadableColumn())
     }
 }
 

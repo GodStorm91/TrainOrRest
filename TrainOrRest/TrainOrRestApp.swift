@@ -157,6 +157,9 @@ struct RootView: View {
         }
         .preferredColorScheme(appearance.colorScheme)
         .task { await determineStage() }
+        #if DEBUG
+        .onAppear { DevSeed.applyRequestedGeometry() }
+        #endif
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, stage == .ready {
                 #if DEBUG

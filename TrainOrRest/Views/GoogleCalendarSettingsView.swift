@@ -729,19 +729,32 @@ struct GoogleCalendarStatusSheet: View {
                             .buttonStyle(.bordered)
                             .accessibilityLabel("Review Google Calendar changes")
                     }
-                    HStack {
-                        Button("Sync now") {
-                            Task { await googleCalendar.reconcile(reason: "manual") }
+                    ViewThatFits(in: .horizontal) {
+                        HStack {
+                            Button("Sync now") {
+                                Task { await googleCalendar.reconcile(reason: "manual") }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(googleCalendar.isSyncing)
+                            .accessibilityLabel("Sync Google Calendar now")
+                            Button("Manage sync") { isShowingSettings = true }
+                                .buttonStyle(.bordered)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(googleCalendar.isSyncing)
-                        .accessibilityLabel("Sync Google Calendar now")
-                        Button("Manage sync") { isShowingSettings = true }
-                            .buttonStyle(.bordered)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Button("Sync now") {
+                                Task { await googleCalendar.reconcile(reason: "manual") }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(googleCalendar.isSyncing)
+                            .accessibilityLabel("Sync Google Calendar now")
+                            Button("Manage sync") { isShowingSettings = true }
+                                .buttonStyle(.bordered)
+                        }
                     }
                 }
             }
             .padding(20)
+            .torReadableColumn()
             .navigationDestination(isPresented: $isShowingSettings) {
                 GoogleCalendarSettingsView()
             }

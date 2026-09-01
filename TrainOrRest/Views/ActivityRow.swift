@@ -12,25 +12,12 @@ struct ActivityRow: View {
                 .background(activity.effortColor.opacity(0.92), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
 
             VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Text(activity.date.formatted(.dateTime.month(.abbreviated).day()))
-                        .font(.torHeading(15, .bold))
-                        .foregroundStyle(Theme.text)
-                    Text(activity.date.formatted(date: .omitted, time: .shortened))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.faint)
-                }
+                dateTime
                 Text(activity.effortLabel.uppercased())
                     .font(.torLabel(10, .bold))
                     .tracking(0.4)
                     .foregroundStyle(activity.effortColor)
-                HStack(spacing: 14) {
-                    stat(Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " km", with: ""), "km")
-                    divider
-                    stat(Formatters.pace(activity.avgPaceSecondsPerKm).replacingOccurrences(of: " /km", with: ""), "/km")
-                    divider
-                    stat(Formatters.duration(activity.durationSeconds), nil)
-                }
+                stats
             }
 
             Spacer(minLength: 4)
@@ -42,6 +29,44 @@ struct ActivityRow: View {
         .padding(13)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+    }
+
+    private var dateTime: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                Text(activity.date.formatted(.dateTime.month(.abbreviated).day()))
+                    .font(.torHeading(15, .bold))
+                    .foregroundStyle(Theme.text)
+                Text(activity.date.formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.faint)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(activity.date.formatted(.dateTime.month(.abbreviated).day()))
+                    .font(.torHeading(15, .bold))
+                    .foregroundStyle(Theme.text)
+                Text(activity.date.formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.faint)
+            }
+        }
+    }
+
+    private var stats: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 14) {
+                stat(Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " km", with: ""), "km")
+                divider
+                stat(Formatters.pace(activity.avgPaceSecondsPerKm).replacingOccurrences(of: " /km", with: ""), "/km")
+                divider
+                stat(Formatters.duration(activity.durationSeconds), nil)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                stat(Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " km", with: ""), "km")
+                stat(Formatters.pace(activity.avgPaceSecondsPerKm).replacingOccurrences(of: " /km", with: ""), "/km")
+                stat(Formatters.duration(activity.durationSeconds), nil)
+            }
+        }
     }
 
     private var divider: some View {

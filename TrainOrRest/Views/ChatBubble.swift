@@ -72,6 +72,9 @@ struct ChatBubble: View {
                         followUpsConsumed: message.followUpsConsumed,
                         onSelectFollowUp: { option in onSelectFollowUp(message, option) }
                     )
+                    .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in
+                        min(width * 0.8, 560)
+                    }
                 } else if isUser || hasVisibleAssistantText {
                     messageBody
                         .padding(.horizontal, 14)
@@ -79,6 +82,9 @@ struct ChatBubble: View {
                         .background(bubbleShape.fill(isUser ? Theme.accent : Theme.card))
                         .overlay { if !isUser { bubbleShape.strokeBorder(Theme.border, lineWidth: 1) } }
                         .shadow(color: isUser ? .clear : Color.black.opacity(0.045), radius: 10, x: 0, y: 4)
+                        .containerRelativeFrame(.horizontal, alignment: isUser ? .trailing : .leading) { width, _ in
+                            min(width * 0.8, 560)
+                        }
                 }
 
                 if isUser, !message.contextItems.isEmpty {
@@ -285,7 +291,9 @@ struct CoachResponseInteractionView: View {
                 inactivePendingBadge
             }
         }
-        .frame(maxWidth: 320, alignment: .leading)
+        .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in
+            min(width * 0.8, 560)
+        }
     }
 
     private var pendingChoices: some View {
@@ -535,7 +543,9 @@ private struct CoachContextChipRow: View {
                 .accessibilityLabel(item.label)
             }
         }
-        .frame(maxWidth: 320, alignment: .trailing)
+        .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in
+            min(width * 0.8, 560)
+        }
     }
 
     private func symbol(for type: CoachContextItem.Kind) -> String {
@@ -645,7 +655,10 @@ private struct CoachProcessingRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .frame(maxWidth: 330, minHeight: 58, alignment: .leading)
+        .frame(minHeight: 58, alignment: .leading)
+        .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in
+            min(width * 0.8, 560)
+        }
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -914,7 +927,9 @@ private struct CoachInlineFailureCard: View {
             }
         }
         .padding(12)
-        .frame(maxWidth: 310, alignment: .leading)
+        .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in
+            min(width * 0.8, 560)
+        }
         .background(surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)

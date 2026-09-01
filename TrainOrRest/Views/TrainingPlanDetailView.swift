@@ -75,6 +75,7 @@ struct TrainingPlanDetailView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
                 .padding(.bottom, 32)
+                .torReadableColumn()
             } else {
                 ContentUnavailableView(
                     "Could not load plan details",
@@ -82,6 +83,7 @@ struct TrainingPlanDetailView: View {
                     description: Text("Try again from Profile or create a training plan.")
                 )
                 .frame(maxWidth: .infinity, minHeight: 420)
+                .torReadableColumn()
             }
         }
         .background(Theme.bg)
@@ -199,14 +201,24 @@ struct TrainingPlanDetailView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Week \(summary.currentWeek) of \(summary.totalWeeks)")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Theme.text)
-                        Spacer()
-                        Text("Timeline")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(Theme.faint)
+                    ViewThatFits(in: .horizontal) {
+                        HStack {
+                            Text("Week \(summary.currentWeek) of \(summary.totalWeeks)")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Theme.text)
+                            Spacer()
+                            Text("Timeline")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(Theme.faint)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Week \(summary.currentWeek) of \(summary.totalWeeks)")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Theme.text)
+                            Text("Timeline")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(Theme.faint)
+                        }
                     }
                     ProgressView(value: summary.timelineProgress)
                         .tint(Theme.accent)
@@ -447,10 +459,8 @@ struct TrainingPlanDetailView: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(Theme.faint)
             Text(value)
-                .font(.torHeading(17, .bold))
+                .font(.headline.weight(.bold))
                 .foregroundStyle(Theme.text)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -459,14 +469,24 @@ struct TrainingPlanDetailView: View {
     }
 
     private func detailRow(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(label)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Theme.dim)
-            Spacer()
-            Text(value)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.text)
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(label)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.dim)
+                Spacer()
+                Text(value)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.text)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(label)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.dim)
+                Text(value)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.text)
+            }
         }
     }
 
@@ -862,6 +882,8 @@ struct RaceGoalStatusCard: View {
     let onShowMetricDetail: () -> Void
     let onShowAssessmentDetail: () -> Void
 
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     private var metricValue: Int? { assessment.metric?.value }
     @State private var selectedWeekID: Int?
 
@@ -887,22 +909,15 @@ struct RaceGoalStatusCard: View {
         TorCard(padding: 18, cornerRadius: 22) {
             VStack(alignment: .leading, spacing: 16) {
                 header
-                HStack(alignment: .center, spacing: 16) {
-                    predictionBlock
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text(language.goalAssessmentText(assessment.summaryKey))
-                            .font(.torHeading(22, .bold))
-                            .foregroundStyle(Theme.text)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(language.goalAssessmentText(assessment.summaryDetailKey))
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Theme.dim)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let trend = assessment.trend {
-                            trendRow(trend)
-                        }
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .center, spacing: 16) {
+                        predictionBlock
+                        assessmentSummary
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 12) {
+                        predictionBlock
+                        assessmentSummary
+                    }
                 }
                 targetComparison
                 planActualChart
@@ -912,6 +927,23 @@ struct RaceGoalStatusCard: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var assessmentSummary: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(language.goalAssessmentText(assessment.summaryKey))
+                .font(.torHeading(22, .bold))
+                .foregroundStyle(Theme.text)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(language.goalAssessmentText(assessment.summaryDetailKey))
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.dim)
+                .fixedSize(horizontal: false, vertical: true)
+            if let trend = assessment.trend {
+                trendRow(trend)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var header: some View {
@@ -946,8 +978,7 @@ struct RaceGoalStatusCard: View {
                 }
                 .padding(10)
             }
-            .frame(width: 124, height: 108)
-            .accessibilityLabel(primaryAssessmentAccessibility)
+            .frame(minWidth: 124, idealWidth: 124, maxWidth: .infinity, minHeight: 108)
 
             if let metricValue {
                 Button {
@@ -962,23 +993,33 @@ struct RaceGoalStatusCard: View {
                 .accessibilityLabel(language.goalAssessmentText(.whyMetric, value: metricValue))
             }
         }
-        .frame(width: 124)
     }
 
+    @ViewBuilder
     private var targetComparison: some View {
-        HStack(spacing: 10) {
-            comparisonColumn(
-                label: language.goalAssessmentText(.targetTime),
-                value: assessment.targetFinishTimeSeconds.map(Formatters.duration) ?? assessment.targetLabel
-            )
-            comparisonColumn(
-                label: language.goalAssessmentText(.currentPrediction),
-                value: predictionText
-            )
-            comparisonColumn(
-                label: language.goalAssessmentText(.targetGap),
-                value: gapText
-            )
+        if horizontalSizeClass == .regular {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 140), spacing: 10)],
+                alignment: .leading,
+                spacing: 10
+            ) {
+                comparisonColumn(label: language.goalAssessmentText(.targetTime), value: assessment.targetFinishTimeSeconds.map(Formatters.duration) ?? assessment.targetLabel)
+                comparisonColumn(label: language.goalAssessmentText(.currentPrediction), value: predictionText)
+                comparisonColumn(label: language.goalAssessmentText(.targetGap), value: gapText)
+            }
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    comparisonColumn(label: language.goalAssessmentText(.targetTime), value: assessment.targetFinishTimeSeconds.map(Formatters.duration) ?? assessment.targetLabel)
+                    comparisonColumn(label: language.goalAssessmentText(.currentPrediction), value: predictionText)
+                    comparisonColumn(label: language.goalAssessmentText(.targetGap), value: gapText)
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    comparisonColumn(label: language.goalAssessmentText(.targetTime), value: assessment.targetFinishTimeSeconds.map(Formatters.duration) ?? assessment.targetLabel)
+                    comparisonColumn(label: language.goalAssessmentText(.currentPrediction), value: predictionText)
+                    comparisonColumn(label: language.goalAssessmentText(.targetGap), value: gapText)
+                }
+            }
         }
     }
 
@@ -991,8 +1032,6 @@ struct RaceGoalStatusCard: View {
                 .font(.torHeading(18, .bold))
                 .monospacedDigit()
                 .foregroundStyle(Theme.text)
-                .lineLimit(2)
-                .minimumScaleFactor(0.84)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1002,23 +1041,39 @@ struct RaceGoalStatusCard: View {
     private var factorSummary: some View {
         VStack(spacing: 9) {
             ForEach(Array(assessment.factors.prefix(3))) { factor in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Circle()
-                        .fill(color(for: factor.status))
-                        .frame(width: 7, height: 7)
-                        .accessibilityHidden(true)
-                    Text(language.goalAssessmentText(factor.labelKey))
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Theme.text)
-                    Spacer(minLength: 8)
-                    Text("\(goalFactorValueText(factor, language: language)) · \(statusText(factor.status))")
-                        .font(.subheadline.weight(.semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(color(for: factor.status))
-                        .multilineTextAlignment(.trailing)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .layoutPriority(1)
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Circle()
+                            .fill(color(for: factor.status))
+                            .frame(width: 7, height: 7)
+                            .accessibilityHidden(true)
+                        Text(language.goalAssessmentText(factor.labelKey))
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Theme.text)
+                        Spacer(minLength: 8)
+                        Text("\(goalFactorValueText(factor, language: language)) · \(statusText(factor.status))")
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(color(for: factor.status))
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .layoutPriority(1)
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(color(for: factor.status))
+                                .frame(width: 7, height: 7)
+                                .accessibilityHidden(true)
+                            Text(language.goalAssessmentText(factor.labelKey))
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Theme.text)
+                        }
+                        Text("\(goalFactorValueText(factor, language: language)) · \(statusText(factor.status))")
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(color(for: factor.status))
+                    }
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("\(language.goalAssessmentText(factor.labelKey)), \(goalFactorValueText(factor, language: language)), \(statusText(factor.status))")
@@ -1042,12 +1097,20 @@ struct RaceGoalStatusCard: View {
 
     private var planActualChart: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(language.goalAssessmentText(.planAndActual))
-                    .font(.torHeading(16, .bold))
-                    .foregroundStyle(Theme.text)
-                Spacer()
-                legend
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(language.goalAssessmentText(.planAndActual))
+                        .font(.torHeading(16, .bold))
+                        .foregroundStyle(Theme.text)
+                    Spacer()
+                    legend
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(language.goalAssessmentText(.planAndActual))
+                        .font(.torHeading(16, .bold))
+                        .foregroundStyle(Theme.text)
+                    legend
+                }
             }
             Chart(chartWeeks) { week in
                 BarMark(
@@ -1146,19 +1209,45 @@ struct RaceGoalStatusCard: View {
     }
 
     private func detailLine(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(label).foregroundStyle(Theme.dim)
-            Spacer()
-            Text(value).foregroundStyle(Theme.text).monospacedDigit()
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(label).foregroundStyle(Theme.dim)
+                Spacer()
+                Text(value).foregroundStyle(Theme.text).monospacedDigit()
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label).foregroundStyle(Theme.dim)
+                Text(value).foregroundStyle(Theme.text).monospacedDigit()
+            }
         }
         .font(.caption.weight(.semibold))
     }
 
+    @ViewBuilder
     private var compactMetrics: some View {
-        HStack(spacing: 8) {
-            compactMetric(language.goalAssessmentText(.completedVolume), completedVolumeText, status: volumeStatusText)
-            compactMetric(language.goalAssessmentText(.keyWorkout), keyWorkoutText, status: keyWorkoutStatusText)
-            compactMetric(language.goalAssessmentText(.latestLongRun), longRunText, status: longRunStatusText)
+        if horizontalSizeClass == .regular {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 140), spacing: 8)],
+                alignment: .leading,
+                spacing: 8
+            ) {
+                compactMetric(language.goalAssessmentText(.completedVolume), completedVolumeText, status: volumeStatusText)
+                compactMetric(language.goalAssessmentText(.keyWorkout), keyWorkoutText, status: keyWorkoutStatusText)
+                compactMetric(language.goalAssessmentText(.latestLongRun), longRunText, status: longRunStatusText)
+            }
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    compactMetric(language.goalAssessmentText(.completedVolume), completedVolumeText, status: volumeStatusText)
+                    compactMetric(language.goalAssessmentText(.keyWorkout), keyWorkoutText, status: keyWorkoutStatusText)
+                    compactMetric(language.goalAssessmentText(.latestLongRun), longRunText, status: longRunStatusText)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    compactMetric(language.goalAssessmentText(.completedVolume), completedVolumeText, status: volumeStatusText)
+                    compactMetric(language.goalAssessmentText(.keyWorkout), keyWorkoutText, status: keyWorkoutStatusText)
+                    compactMetric(language.goalAssessmentText(.latestLongRun), longRunText, status: longRunStatusText)
+                }
+            }
         }
     }
 
@@ -1174,26 +1263,39 @@ struct RaceGoalStatusCard: View {
     }
 
     private var actionButtons: some View {
-        HStack(spacing: 10) {
-            Button(action: onAdjustPlan) {
-                Label(language.goalAssessmentText(.adjustPlan), systemImage: "slider.horizontal.3")
-                    .font(.torHeading(15, .bold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(Theme.accent, in: Capsule())
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                adjustPlanButton
+                assessmentMethodButton
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(language.goalAssessmentText(.adjustPlan))
-
-            Button(action: onShowAssessmentDetail) {
-                Text(language.goalAssessmentText(.assessmentMethod))
-                    .font(.torHeading(15, .bold))
-                    .foregroundStyle(Theme.accent)
-                    .frame(minHeight: 44)
-                    .padding(.horizontal, 12)
+            VStack(alignment: .leading, spacing: 8) {
+                adjustPlanButton
+                assessmentMethodButton
             }
-            .buttonStyle(.plain)
         }
+    }
+
+    private var adjustPlanButton: some View {
+        Button(action: onAdjustPlan) {
+            Label(language.goalAssessmentText(.adjustPlan), systemImage: "slider.horizontal.3")
+                .font(.torHeading(15, .bold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(Theme.accent, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(language.goalAssessmentText(.adjustPlan))
+    }
+
+    private var assessmentMethodButton: some View {
+        Button(action: onShowAssessmentDetail) {
+            Text(language.goalAssessmentText(.assessmentMethod))
+                .font(.torHeading(15, .bold))
+                .foregroundStyle(Theme.accent)
+                .frame(minHeight: 44)
+                .padding(.horizontal, 12)
+        }
+        .buttonStyle(.plain)
     }
 
     private func trendRow(_ trend: GoalAssessmentTrend) -> some View {
@@ -1684,6 +1786,7 @@ struct GoalAssessmentDetailSheet: View {
             ScrollView {
                 GoalAssessmentDetailContent(assessment: assessment, language: language)
                     .padding(16)
+                    .torReadableColumn()
             }
             .navigationTitle(language.goalAssessmentText(.raceGoal))
             .navigationBarTitleDisplayMode(.inline)
@@ -2064,6 +2167,7 @@ struct PlanAdjustmentPreviewSheet: View {
                     }
                 }
                 .padding(16)
+                .torReadableColumn()
             }
             .background(Theme.bg)
             .navigationTitle(language.goalAssessmentText(.planAdjustmentProposal))
@@ -2093,6 +2197,8 @@ struct PlanAdjustmentPreviewSheet: View {
                     .buttonStyle(.plain)
                 }
                 .padding(16)
+                .torReadableColumn()
+                .frame(maxWidth: .infinity)
                 .background(.bar)
             }
         }

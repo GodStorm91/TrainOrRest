@@ -25,6 +25,7 @@ struct ChatView: View {
     @EnvironmentObject private var chatSession: CoachChatSessionState
     @EnvironmentObject private var replacementCoordinator: WorkoutReplacementCoordinator
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var draft = ""
     @State private var hasAPIKey = false
     @State private var evidence = EvidenceSelection()
@@ -92,6 +93,9 @@ struct ChatView: View {
     private var messageTopInset: CGFloat {
         CoachHeaderMetrics.messageTopInset(headerHeight: headerHeight)
     }
+    private var usesCompactHeader: Bool {
+        isHeaderCollapsed || verticalSizeClass == .compact
+    }
 
     private var contextSourceCount: Int {
         var n = 0
@@ -138,6 +142,7 @@ struct ChatView: View {
                     chatFooter
                 }
             }
+            .torReadableColumn()
 
             topControlDeck
                 .background(
@@ -303,12 +308,12 @@ struct ChatView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 7) {
-                    if !isHeaderCollapsed { CoachAvatar(size: 24).accessibilityHidden(true) }
+                    if !usesCompactHeader { CoachAvatar(size: 24).accessibilityHidden(true) }
                     Text("Coach")
-                        .font(.torHeading(isHeaderCollapsed ? 16 : 18, .bold))
+                        .font(.torHeading(usesCompactHeader ? 16 : 18, .bold))
                         .foregroundStyle(Theme.text)
                 }
-                if !isHeaderCollapsed, let subtitle = headerSubtitle {
+                if !usesCompactHeader, let subtitle = headerSubtitle {
                     Text(subtitle)
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(Theme.dim)
@@ -330,17 +335,17 @@ struct ChatView: View {
                     Label(language.settingsLabel, systemImage: "gearshape")
                 }
             } label: {
-                Image(systemName: isHeaderCollapsed ? "ellipsis" : "square.and.pencil")
+                Image(systemName: usesCompactHeader ? "ellipsis" : "square.and.pencil")
                     .torTopControlIcon()
             }
             .buttonStyle(.plain)
             .accessibilityLabel(isContextualSession ? language.coachOptionsLabel : language.newConversationLabel)
         }
-        .frame(minHeight: isHeaderCollapsed ? 44 : 52)
+        .frame(minHeight: usesCompactHeader ? 44 : 52)
         .padding(.horizontal, 8)
         .padding(.vertical, 2)
-        .torGlass(cornerRadius: isHeaderCollapsed ? 22 : 24, tint: .subtle)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isHeaderCollapsed)
+        .torGlass(cornerRadius: usesCompactHeader ? 22 : 24, tint: .subtle)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: usesCompactHeader)
     }
 
     private var headerSubtitle: String? {
@@ -1072,6 +1077,7 @@ struct ChatView: View {
                         onReviewEvidence: { showsContextSheet = false }
                     )
                     .padding(16)
+                    .torReadableColumn()
                 }
                 .navigationTitle(language.contextSourcesSheetTitle)
                 .navigationBarTitleDisplayMode(.inline)
@@ -1888,12 +1894,17 @@ struct ChatView: View {
 
     private func updateKeyboardHeight(from notification: Notification, forceHidden: Bool = false) {
         guard !forceHidden,
-              let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else {
+              let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+              let window = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .filter({ $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive })
+                .flatMap(\.windows)
+                .first(where: \.isKeyWindow) else {
             withKeyboardAnimation(notification) { softwareKeyboardHeight = 0 }
             return
         }
-        let screenMaxY = UIScreen.main.bounds.maxY
-        let overlap = max(0, screenMaxY - frame.minY)
+        let keyboardFrame = window.convert(frame, from: window.screen.coordinateSpace)
+        let overlap = window.bounds.intersection(keyboardFrame).height
         withKeyboardAnimation(notification) { softwareKeyboardHeight = overlap }
     }
 

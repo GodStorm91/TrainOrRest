@@ -6,6 +6,7 @@ struct CoachAskNextStrip: View {
     let prompts: [String]
     var label: String = "ASK NEXT"
     let onTap: (String) -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         if !prompts.isEmpty {
@@ -21,11 +22,27 @@ struct CoachAskNextStrip: View {
                 }
                 .padding(.horizontal, 4)
 
-                VStack(spacing: 8) {
-                    ForEach(Array(prompts.prefix(2).enumerated()), id: \.element) { index, prompt in
-                        chip(prompt, primary: index == 0)
+                if dynamicTypeSize.isAccessibilitySize {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 8) {
+                            ForEach(Array(prompts.prefix(2).enumerated()), id: \.offset) { index, prompt in
+                                chip(prompt, primary: index == 0)
+                            }
+                        }
+
+                        suggestionRows
                     }
+                } else {
+                    suggestionRows
                 }
+            }
+        }
+    }
+
+    private var suggestionRows: some View {
+        VStack(spacing: 8) {
+            ForEach(Array(prompts.prefix(2).enumerated()), id: \.offset) { index, prompt in
+                chip(prompt, primary: index == 0)
             }
         }
     }
@@ -35,9 +52,7 @@ struct CoachAskNextStrip: View {
             Text(text)
                 .font(.system(size: 13, weight: primary ? .semibold : .medium))
                 .foregroundStyle(primary ? Theme.accent : Theme.text)
-                .lineLimit(2)
                 .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(minHeight: 44, alignment: .center)
                 .padding(.horizontal, 14)
