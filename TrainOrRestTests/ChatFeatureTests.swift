@@ -1183,6 +1183,64 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertFalse(messages.map(\.text).joined(separator: "\n").contains("could not safely"))
     }
 
+    func testCompletedActivityReviewThreadStagesForwardLookingPlanChange() async throws {
+        // Regression: a plan proposal made from a completed-activity review thread
+        // must be validated on its own merits (future day, not race, within caps),
+        // not blanket-rejected merely because the thread references a completed run.
+        // The mock proposes a known-valid create; its kind is immaterial to the fix.
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedEveryDayPlan(in: context)
+        let review = activity(on: calendar.date(byAdding: .day, value: -1, to: today)!, km: 10, minutes: 55)
+        context.insert(review)
+        try context.save()
+        let saturday = PlanEngineTestSupport.date(2026, 1, 10, hour: 0)
+        XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [
+                .toolUse(id: "toolu_review", name: CoachTools.toolName, input: .object([
+                    "changes": .array([.object([
+                        "date": .string(CoachContextBuilder.day(saturday, calendar: calendar)),
+                        "action": .string("create"),
+                        "workout": .string("Easy"),
+                        "blocks": .array([.object([
+                            "repeat_count": .number(1),
+                            "steps": .array([.object([
+                                "role": .string("work"),
+                                "target_type": .string("distance_km"),
+                                "target_value": .number(5),
+                                "pace_zone": .string("easy")
+                            ])])
+                        ])])
+                    ])])
+                ]))
+            ], stopReason: "tool_use")
+        ])
+        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
+        let store = CoachChatStore(
+            client: client,
+            calendar: calendar,
+            now: { self.today },
+            replacementCoordinator: coordinator
+        )
+
+        await store.send(
+            text: "thêm một buổi threshold ngắn giữa tuần",
+            model: "claude-test",
+            attachments: [.completedActivity(review.hkUUID)],
+            apiKey: "test-key",
+            in: context
+        )
+
+        let pending = try XCTUnwrap(coordinator.pendingProposal)
+        XCTAssertEqual(pending.summary, "Created easy on 2026-01-10")
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+        let transcript = messages.map(\.text).joined(separator: "\n")
+        XCTAssertFalse(transcript.contains("cannot apply workout-plan changes to a completed activity"))
+        XCTAssertFalse(transcript.contains("answered with text instead"))
+        XCTAssertNil(messages.last?.errorCategory)
+    }
+
     func testChatStoreDoesNotPersistToolSchemaConfirmationAfterRejectedPlanEdit() async throws {
         let container = try makeContainer()
         let context = container.mainContext

@@ -895,13 +895,6 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         attachments: [CoachContextAttachment],
         in context: ModelContext
     ) throws {
-        if attachments.contains(where: {
-            if case .completedActivity = $0 { return true }
-            return false
-        }) {
-            throw CoachTools.ValidationError("Completed runs can be reviewed with Coach, but this flow cannot apply workout-plan changes to a completed activity.")
-        }
-
         guard let selectedWorkoutID = attachments.compactMap({ attachment -> UUID? in
             if case .plannedWorkout(let uuid) = attachment { return uuid }
             return nil
