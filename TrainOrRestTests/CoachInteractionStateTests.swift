@@ -102,7 +102,7 @@ final class CoachInteractionStateTests: XCTestCase {
         XCTAssertEqual(assistant.interaction?.options.map(\.id), ["keep_plan", "adjust_plan"])
     }
 
-    func testReadOnlyCoachRequestForcesStructuredResponseTool() async throws {
+    func testAmbiguousCoachRequestExposesBothToolsWithAnyChoice() async throws {
         let container = try makeContainer()
         let context = container.mainContext
         try seedMinimalTrainingData(in: context)
@@ -112,8 +112,8 @@ final class CoachInteractionStateTests: XCTestCase {
         await store.send(text: "Review this run.", model: "claude-test", apiKey: "test-key", threadID: conversationID, in: context)
 
         let request = try XCTUnwrap(client.requests.last)
-        XCTAssertEqual(request.tools.map(\.name), [CoachToolCatalog.coachResponseName])
-        XCTAssertEqual(request.toolChoice, .tool(name: CoachToolCatalog.coachResponseName))
+        XCTAssertEqual(request.tools.map(\.name), [CoachToolCatalog.coachResponseName, CoachToolCatalog.planEditDraftName])
+        XCTAssertEqual(request.toolChoice, .any)
     }
 
     func testActionTypeOverridePreventsRecommendationPromptFromBecomingPlanMutation() async throws {

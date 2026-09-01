@@ -41,7 +41,7 @@ enum CoachContextBuilder {
         lines += try currentYearRunHistorySection(in: context, today: today, calendar: calendar)
         lines += try planSection(in: context, today: today, calendar: calendar)
         lines += try smartSchedulingSection(in: context, today: today, calendar: calendar)
-        lines += try activitySection(in: context, today: today, calendar: calendar)
+        lines += try activitySection(in: context, calendar: calendar)
         lines += try readinessSection(in: context, today: today, calendar: calendar)
         lines += try freshnessSection(in: context)
 
@@ -269,15 +269,13 @@ enum CoachContextBuilder {
         return lines
     }
 
-    private static func activitySection(in context: ModelContext, today: Date, calendar: Calendar) throws -> [String] {
-        let start = calendar.date(byAdding: .day, value: -14, to: today) ?? .distantPast
-        let activities = try context.fetch(FetchDescriptor<CompletedActivity>(
-            predicate: #Predicate { $0.date >= start },
-            sortBy: [SortDescriptor(\.date, order: .reverse)]
-        ))
-        guard !activities.isEmpty else { return ["Last 14 days: no synced runs."] }
-        var lines = ["Last 14 days runs:"]
-        lines += activities.prefix(10).map {
+    private static func activitySection(in context: ModelContext, calendar: Calendar) throws -> [String] {
+        var descriptor = FetchDescriptor<CompletedActivity>(sortBy: [SortDescriptor(\.date, order: .reverse)])
+        descriptor.fetchLimit = 10
+        let activities = try context.fetch(descriptor)
+        guard !activities.isEmpty else { return ["Recent runs: no synced runs."] }
+        var lines = ["Last \(activities.count) run(s), most recent first:"]
+        lines += activities.map {
             "- \(day($0.date, calendar: calendar)): \(Formatters.kilometers($0.distanceMeters)), \(Formatters.pace($0.avgPaceSecondsPerKm)), avg HR \(Formatters.heartRate($0.avgHeartRate))"
         }
         return lines

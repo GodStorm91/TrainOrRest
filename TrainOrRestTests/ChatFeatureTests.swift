@@ -26,7 +26,7 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertTrue(text.contains("Current week plan (2026-01-05...2026-01-12):"))
         XCTAssertTrue(text.contains("Plan next 14 days:"))
         XCTAssertTrue(text.contains("Current-year run history (2026):"))
-        XCTAssertTrue(text.contains("Last 14 days runs:"))
+        XCTAssertTrue(text.contains("Last 1 run(s), most recent first:"))
         XCTAssertTrue(text.contains("Readiness today: train"))
         XCTAssertTrue(text.contains("Data freshness:"))
     }
@@ -2466,7 +2466,7 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(assistant.interaction?.options.map(\.id), ["a", "b"])
     }
 
-    func testVietnamesePlanAdjustmentDraftClassifiesAsPlanMutation() async throws {
+    func testExplicitPlanCommandClassifiesAsPlanMutation() async throws {
         let container = try makeContainer()
         let context = container.mainContext
         try seedTrainingData(in: context)
@@ -2476,7 +2476,7 @@ final class ChatFeatureTests: XCTestCase {
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
         await store.send(
-            text: "Hãy tạo bản nháp điều chỉnh kế hoạch đã được kiểm tra để tôi xem trước.",
+            text: "Tạo bài chạy dài vào thứ Bảy.",
             model: "claude-test",
             apiKey: "test-key",
             in: context
@@ -2486,7 +2486,7 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(snapshot.actionType, .planMutation)
     }
 
-    func testVietnameseKeepPlanChoiceStaysReadOnly() async throws {
+    func testAdviceQuestionClassifiesAsUnspecified() async throws {
         let container = try makeContainer()
         let context = container.mainContext
         try seedTrainingData(in: context)
@@ -2496,17 +2496,17 @@ final class ChatFeatureTests: XCTestCase {
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
         await store.send(
-            text: "Giữ nguyên kế hoạch hiện tại.",
+            text: "Sau buổi chạy này tôi nên điều chỉnh gì tiếp theo?",
             model: "claude-test",
             apiKey: "test-key",
             in: context
         )
 
         let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
-        XCTAssertEqual(snapshot.actionType, .readOnly)
+        XCTAssertEqual(snapshot.actionType, .unspecified)
     }
 
-    func testJapanesePlanAdjustmentDraftClassifiesAsPlanMutation() async throws {
+    func testJapaneseCreateRequestClassifiesAsUnspecified() async throws {
         let container = try makeContainer()
         let context = container.mainContext
         try seedTrainingData(in: context)
@@ -2523,7 +2523,47 @@ final class ChatFeatureTests: XCTestCase {
         )
 
         let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
-        XCTAssertEqual(snapshot.actionType, .planMutation)
+        XCTAssertEqual(snapshot.actionType, .unspecified)
+    }
+
+    func testAdviceQuestionRendersCardWithoutPlanRejection() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [
+                .toolUse(id: "toolu_advice", name: CoachToolCatalog.coachResponseName, input: .object([
+                    "interaction": .object([
+                        "id": .string("next_step"),
+                        "type": .string("single_choice"),
+                        "options": .array([
+                            .object(["id": .string("a"), "label": .string("A"), "value": .string("A")]),
+                            .object(["id": .string("b"), "label": .string("B"), "value": .string("B")])
+                        ]),
+                        "allowOther": .bool(false),
+                        "status": .string("pending")
+                    ])
+                ]))
+            ], stopReason: "tool_use")
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(
+            text: "Sau buổi chạy này tôi nên điều chỉnh gì tiếp theo?",
+            model: "claude-test",
+            apiKey: "test-key",
+            in: context
+        )
+
+        let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
+        XCTAssertEqual(snapshot.actionType, .unspecified)
+
+        let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertNotEqual(assistant.assistantStatus, .failed)
+        XCTAssertNil(assistant.errorCategory)
+        XCTAssertNil(assistant.errorDetail)
+        XCTAssertEqual(assistant.interaction?.options.map(\.id), ["a", "b"])
+        XCTAssertFalse(assistant.text.contains("answered with text instead"))
     }
 
     func testPlanRejectionSurfacesRawReasonForMissingWorkout() async throws {

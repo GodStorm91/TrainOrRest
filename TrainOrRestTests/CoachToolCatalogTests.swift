@@ -75,6 +75,20 @@ final class CoachToolCatalogTests: XCTestCase {
         XCTAssertEqual(decoded, explanation)
     }
 
+    func testCoachResponseSchemaRequiresCardFields() throws {
+        guard case .object(let schema) = CoachToolCatalog.coachResponse.inputSchema,
+              case .array(let required)? = schema["required"] else {
+            return XCTFail("coach_response schema shape changed")
+        }
+
+        // A forced coach_response turn must always carry the fields that render
+        // the structured card; otherwise the reply falls back to a plain bubble.
+        XCTAssertEqual(
+            required,
+            ["content", "title", "summary"].map(JSONValue.string)
+        )
+    }
+
     private func encodedJSON<T: Encodable>(_ value: T) throws -> JSONValue {
         try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(value))
     }

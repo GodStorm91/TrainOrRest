@@ -19,6 +19,8 @@ enum DevSeed {
     /// Stable id so relaunching a booted simulator reuses one thread instead of
     /// piling up duplicates.
     private static let threadID = UUID(uuidString: "00000000-0000-0000-0000-00000DE75EED")!
+    /// Stable id for the empty thread used by the live coach verification seam.
+    private static let liveThreadID = UUID(uuidString: "00000000-0000-0000-0000-00000C0AC11E")!
 
     static var isRequested: Bool {
         ProcessInfo.processInfo.environment["TOR_DEV_SEED"] == "1"
@@ -32,6 +34,7 @@ enum DevSeed {
         case provider
         case delivery
         case profile
+        case coach
     }
 
     /// The requested launch screen, or `nil` for the normal tab shell.
@@ -39,6 +42,21 @@ enum DevSeed {
         guard isRequested else { return nil }
         return ProcessInfo.processInfo.environment["TOR_DEV_SCREEN"]
             .flatMap(DevScreen.init(rawValue:))
+    }
+
+    /// When set with `TOR_DEV_SEED=1` and `TOR_DEV_SCREEN=coach`, the coach
+    /// seam fires one live read-only turn so the real answer card can be
+    /// verified against the provider.
+    static var isLiveRequested: Bool {
+        isRequested && ProcessInfo.processInfo.environment["TOR_DEV_LIVE"] == "1"
+    }
+
+    /// The prompt for the live coach turn; a read-only question by default so
+    /// the forced `coach_response` tool path is exercised.
+    static var livePrompt: String {
+        let custom = ProcessInfo.processInfo.environment["TOR_DEV_LIVE_PROMPT"]
+        if let custom, !custom.isEmpty { return custom }
+        return "Give me a brief read on my recent recovery and readiness."
     }
 
     /// Seeds when requested and returns the thread the coach tab should open.
@@ -49,6 +67,7 @@ enum DevSeed {
 
         OnboardingGate.markCompleted()
         preloadAPIKey()
+        if isLiveRequested { return seedLiveThread(context) }
 
         let id = threadID
         let alreadySeeded = (try? context.fetch(
@@ -80,9 +99,25 @@ enum DevSeed {
     }
 
     private static func preloadAPIKey() {
-        let env = ProcessInfo.processInfo.environment["TOR_ANTHROPIC_KEY"]
-        let key = (env?.isEmpty == false) ? env! : "dev-seed-preview-key"
-        try? KeychainStore.save(key, account: CoachModelProvider.apiKeyAccount(for: CoachChatConfig.defaultModel))
+        let anthropic = ProcessInfo.processInfo.environment["TOR_ANTHROPIC_KEY"]
+        let anthropicKey = (anthropic?.isEmpty == false) ? anthropic! : "dev-seed-preview-key"
+        try? KeychainStore.save(anthropicKey, account: KeychainStore.apiKeyAccount)
+        if let openAI = ProcessInfo.processInfo.environment["TOR_OPENAI_KEY"], !openAI.isEmpty {
+            try? KeychainStore.save(openAI, account: KeychainStore.openAIAPIKeyAccount)
+        }
+    }
+
+    /// Live-coach verification seam: an empty thread so one real read-only
+    /// turn's answer card can be screenshotted against the provider.
+    private static func seedLiveThread(_ context: ModelContext) -> UUID {
+        let id = liveThreadID
+        let exists = (try? context.fetch(
+            FetchDescriptor<ChatThread>(predicate: #Predicate { $0.uuid == id })
+        ).isEmpty == false) ?? false
+        if exists { return id }
+        context.insert(ChatThread(uuid: id, title: "Coach live", mode: .general))
+        try? context.save()
+        return id
     }
 
     // Numbered steps must keep "1." "2." "3." — the exact ordering the parser

@@ -17,9 +17,11 @@ enum CoachToolCatalog {
         ClaudeTool(
             name: coachResponseName,
             description: """
-            Return the user-facing Coach message and, only when the user needs to choose between \
-            next steps, an optional structured single-choice interaction. Use natural language in \
-            content. Do not encode choices in the prose alone when a decision is requested.
+            Return the user-facing Coach reply as a structured answer card. Always provide title, \
+            summary, and content: title is the one-line conclusion, summary is the short reason, and \
+            content is the natural-language message shown in the chat bubble. Use recommendations and \
+            details for depth. Include a single-choice interaction only when the user must choose \
+            between next steps; never encode choices in the prose alone.
             """,
             inputSchema: .object([
                 "type": .string("object"),
@@ -31,11 +33,11 @@ enum CoachToolCatalog {
                     ]),
                     "title": .object([
                         "type": .string("string"),
-                        "description": .string("One concise decision-relevant conclusion, at most two lines.")
+                        "description": .string("One concise conclusion for the answer card, at most two lines. Always provide it.")
                     ]),
                     "summary": .object([
                         "type": .string("string"),
-                        "description": .string("Two or three short sentences explaining why. Do not put all analysis here.")
+                        "description": .string("Two or three short sentences of reasoning for the answer card. Always provide it; do not put all analysis here.")
                     ]),
                     "safetyNote": .object([
                         "type": .string("string"),
@@ -96,7 +98,7 @@ enum CoachToolCatalog {
                     ]),
                     "interaction": interactionSchema
                 ]),
-                "required": .array([.string("content")])
+                "required": .array([.string("content"), .string("title"), .string("summary")])
             ])
         )
     }

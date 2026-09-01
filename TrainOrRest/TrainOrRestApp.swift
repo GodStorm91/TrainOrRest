@@ -192,6 +192,8 @@ struct RootView: View {
             WatchDeliverySettingsView()
         case .profile:
             ProfileView()
+        case .coach:
+            DevCoachLiveView()
         }
     }
     #endif
@@ -229,3 +231,31 @@ struct RootView: View {
         }
     }
 }
+
+#if DEBUG
+/// DEBUG-only coach verification host. Renders the live coach thread and, when
+/// `TOR_DEV_LIVE=1`, fires exactly one read-only turn so the real provider
+/// answer card can be screenshotted. Compiled out of release builds.
+private struct DevCoachLiveView: View {
+    @EnvironmentObject private var chatStore: CoachChatStore
+    @EnvironmentObject private var chatSession: CoachChatSessionState
+    @Environment(\.modelContext) private var modelContext
+    @AppStorage("coachModel") private var model = CoachChatConfig.defaultModel
+    @State private var fired = false
+
+    var body: some View {
+        ChatView()
+            .task {
+                guard DevSeed.isLiveRequested, !fired else { return }
+                fired = true
+                guard let threadID = chatSession.activeThreadID else { return }
+                _ = await chatStore.send(
+                    text: DevSeed.livePrompt,
+                    model: model,
+                    threadID: threadID,
+                    in: modelContext
+                )
+            }
+    }
+}
+#endif

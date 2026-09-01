@@ -53,6 +53,7 @@ enum CoachErrorCategory: String, Codable {
 enum CoachRequestActionType: String, Codable {
     case readOnly
     case planMutation
+    case unspecified
 }
 
 @Model

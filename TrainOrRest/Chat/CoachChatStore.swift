@@ -840,6 +840,8 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             return [CoachToolCatalog.coachResponse]
         case .planMutation:
             return [CoachToolCatalog.planEditDraft]
+        case .unspecified:
+            return [CoachToolCatalog.coachResponse, CoachToolCatalog.planEditDraft]
         }
     }
 
@@ -849,6 +851,8 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             return .tool(name: CoachToolCatalog.coachResponseName)
         case .planMutation:
             return .auto
+        case .unspecified:
+            return .any
         }
     }
 
@@ -946,21 +950,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             return .planMutation
         }
 
-        let actionNeedles = [
-            "create", "add", "update", "delete", "modify", "replace", "move", "change", "set",
-            "tao", "them", "sua", "chinh", "doi", "xoa", "chuyen", "cap nhat", "tang", "giam",
-            "作成", "調整", "変更", "更新", "削除"
-        ]
-        let objectNeedles = [
-            "workout", "run", "plan", "calendar", "schedule",
-            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
-            "today", "tomorrow", "hom nay", "ngay mai",
-            "lich", "bai", "buoi", "cu li", "cu ly", "quang duong", "ke hoach",
-            "計画", "予定", "ワークアウト", "ラン"
-        ]
-        let hasAction = actionNeedles.contains { lower.contains($0) }
-        let hasObject = objectNeedles.contains { lower.contains($0) }
-        return hasAction && hasObject ? .planMutation : .readOnly
+        return .unspecified
     }
 
     private struct DistanceEditRequest {
