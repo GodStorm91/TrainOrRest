@@ -173,4 +173,39 @@ final class CoachToolContractTests: XCTestCase {
             )
         }
     }
+
+    func testChatCoreWireDecoderPreservesUnknownBlocks() throws {
+        let raw = try JSONDecoder().decode(JSONValue.self, from: Data(#"""
+        {
+          "stop_reason": "tool_use",
+          "content": [
+            {"type":"thinking","thinking":"weighing the ramp","signature":"sig-abc"},
+            {"type":"tool_use","id":"toolu_1","name":"propose_plan_adjustment","input":{"changes":[]}}
+          ]
+        }
+        """#.utf8))
+        let response = try ChatCoreWireDecoder.response(from: raw)
+        XCTAssertEqual(response.stopReason, "tool_use")
+        XCTAssertEqual(response.content.count, 2)
+        if case .passthrough = response.content[0] {} else {
+            XCTFail("thinking must survive ChatCoreWireDecoder")
+        }
+        let replay = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(ClaudeMessageParam(
+            role: "assistant",
+            content: response.content
+        )))
+        guard case .object(let message) = replay, case .array(let content)? = message["content"] else {
+            return XCTFail("replayed message must carry its content array")
+        }
+        XCTAssertEqual(content.count, 2)
+        guard case .object(let first) = content[0], case .string("thinking")? = first["type"] else {
+            return XCTFail("thinking must stay first after ChatCoreWireDecoder")
+        }
+    }
+}
+
+enum ChatCoreWireDecoder {
+    static func response(from value: JSONValue) throws -> ClaudeResponse {
+        try JSONDecoder().decode(ClaudeResponse.self, from: JSONEncoder().encode(value))
+    }
 }

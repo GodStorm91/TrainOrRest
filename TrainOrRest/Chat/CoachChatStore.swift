@@ -663,6 +663,16 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
                 }
                 var payload = try toolUses[0].2.decoded(CoachStructuredResponsePayload.self)
                 payload.normalizeModelText()
+                if snapshot.actionType == .readOnly,
+                   payload.validatedStructuredResponse(additionalRecommendationsTitle: language.additionalRecommendationsTitle) == nil {
+                    let reason = "coach_response requires non-empty title and summary."
+                    lastToolRejection = reason
+                    conversation.append(ClaudeMessageParam(role: "assistant", content: response.content))
+                    conversation.append(ClaudeMessageParam(role: "user", content: [
+                        .toolResult(toolUseID: toolUses[0].0, content: "Rejected: \(reason)", isError: true)
+                    ]))
+                    continue
+                }
                 var interaction = payload.interaction ?? fallbackInteraction(from: snapshot)
                 interaction?.normalizeForNewAssistantMessage(fallbackLanguage: language)
                 if interaction?.options.count ?? 0 < 2 {

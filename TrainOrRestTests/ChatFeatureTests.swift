@@ -14,6 +14,11 @@ final class ChatFeatureTests: XCTestCase {
     private let today = PlanEngineTestSupport.date(2026, 1, 5)
     private let qualityDay = PlanEngineTestSupport.date(2026, 1, 7, hour: 0)
 
+    override func setUp() {
+        super.setUp()
+        UserDefaults.standard.set(CoachLanguage.en.rawValue, forKey: CoachLanguage.storageKey)
+    }
+
     func testCoachContextIncludesPlanReadinessAndFreshness() throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -3103,6 +3108,286 @@ final class ChatFeatureTests: XCTestCase {
         )
     }
 
+    func testChatGoldenFixtureInventoryIsCompleteAndDecodable() throws {
+        let expected: [(basename: String, id: String, goldenCase: Int)] = [
+            ("01-no-double-confirm", "case-01-no-double-confirm", 1),
+            ("02-destructive-confirmation", "case-02-destructive-confirmation", 2),
+            ("03-context-attached", "case-03-context-attached", 3),
+            ("04-scannable-reply", "case-04-scannable-reply", 4),
+            ("05-options-and-free-text", "case-05-options-and-free-text", 5)
+        ]
+        for item in expected {
+            guard let url = goldenFixtureURL(named: item.basename) else {
+                XCTFail("Missing chat golden fixture: TrainOrRestTests/Fixtures/ChatCore/\(item.basename).json")
+                continue
+            }
+            do {
+                let fixture = try JSONDecoder().decode(ChatGoldenFixture.self, from: Data(contentsOf: url))
+                XCTAssertEqual(fixture.id, item.id, url.path)
+                XCTAssertEqual(fixture.goldenCase, item.goldenCase, url.path)
+            } catch {
+                XCTFail("Malformed chat golden fixture: TrainOrRestTests/Fixtures/ChatCore/\(item.basename).json (\(error))")
+            }
+        }
+    }
+
+    func testGoldenCase1SingleReplacementDoesNotRequireConfirmation() async throws {
+        let fixture = try loadGoldenFixture(named: "01-no-double-confirm")
+        let prepared = try prepareGoldenCase(fixture)
+        await prepared.store.send(
+            text: fixture.request.text,
+            model: "claude-test",
+            apiKey: "test-key",
+            threadID: prepared.threadID,
+            in: prepared.context
+        )
+
+        try assertGoldenRouting(fixture, client: prepared.client, in: prepared.context)
+        XCTAssertEqual(
+            WorkoutReplacementCoordinator.confirmationKind(for: PlanAdjustmentProposal(changes: [
+                .init(date: "2026-01-06", action: .replace, workout: nil)
+            ])),
+            .notRequired
+        )
+        XCTAssertEqual(prepared.coordinator.lastConfirmationKind, .notRequired)
+        XCTAssertNil(prepared.coordinator.pendingProposal)
+        let pending = try XCTUnwrap(prepared.coordinator.pending)
+        XCTAssertEqual(pending.proposed.distanceKm, fixture.expect.proposedDistanceKm ?? 8, accuracy: 0.01)
+
+        let tuesday = PlanEngineTestSupport.date(2026, 1, 6)
+        prepared.coordinator.confirm(pending.id)
+        let updated = try XCTUnwrap(try plannedWorkouts(on: tuesday, in: prepared.context).first)
+        XCTAssertEqual(updated.distanceKm, 8, accuracy: 0.01)
+        XCTAssertEqual(updated.kind, .easy)
+    }
+
+    func testGoldenCase2MultiRestRequiresConfirmationBeforeApply() async throws {
+        let fixture = try loadGoldenFixture(named: "02-destructive-confirmation")
+        let prepared = try prepareGoldenCase(fixture)
+        await prepared.store.send(
+            text: fixture.request.text,
+            model: "claude-test",
+            apiKey: "test-key",
+            threadID: prepared.threadID,
+            in: prepared.context
+        )
+
+        try assertGoldenRouting(fixture, client: prepared.client, in: prepared.context)
+        XCTAssertEqual(
+            WorkoutReplacementCoordinator.confirmationKind(for: PlanAdjustmentProposal(changes: [
+                .init(date: "2026-01-06", action: .rest),
+                .init(date: "2026-01-08", action: .rest),
+                .init(date: "2026-01-10", action: .rest),
+                .init(date: "2026-01-11", action: .rest)
+            ])),
+            .required
+        )
+        XCTAssertEqual(prepared.coordinator.lastConfirmationKind, .required)
+        XCTAssertNil(prepared.coordinator.pending)
+        let pendingProposal = try XCTUnwrap(prepared.coordinator.pendingProposal)
+
+        let restDates = fixture.setup.workouts.map { fixtureDate($0.date) }
+        for date in restDates {
+            XCTAssertFalse(try plannedWorkouts(on: date, in: prepared.context).isEmpty)
+        }
+
+        prepared.coordinator.confirmProposal(pendingProposal.id)
+        XCTAssertNil(prepared.coordinator.lastError)
+        for date in restDates {
+            XCTAssertTrue(
+                try plannedWorkouts(on: date, in: prepared.context).isEmpty,
+                "\(CoachContextBuilder.day(date, calendar: calendar)) should be rest after confirm"
+            )
+        }
+    }
+
+    func testGoldenCase3AttachedContextIsNotRestatedAsMissing() async throws {
+        let fixture = try loadGoldenFixture(named: "03-context-attached")
+        let prepared = try prepareGoldenCase(fixture)
+        await prepared.store.send(
+            text: fixture.request.text,
+            model: "claude-test",
+            apiKey: "test-key",
+            threadID: prepared.threadID,
+            in: prepared.context
+        )
+
+        try assertGoldenRouting(fixture, client: prepared.client, in: prepared.context)
+        let request = try XCTUnwrap(prepared.client.requests.first)
+        for anchor in fixture.setup.readinessAnchors {
+            XCTAssertTrue(request.system.contains(anchor), "system missing readiness anchor: \(anchor)")
+        }
+        for anchor in fixture.setup.plannedWorkoutAnchors {
+            XCTAssertTrue(request.system.contains(anchor), "system missing plan anchor: \(anchor)")
+        }
+        let replayed = request.messages.map { message in
+            message.content.compactMap { block -> String? in
+                if case .text(let text) = block { return text }
+                return nil
+            }.joined(separator: "\n")
+        }.joined(separator: "\n")
+        XCTAssertTrue(replayed.contains(fixture.setup.priorTurn?.user ?? ""), "prior user turn missing from request")
+        XCTAssertTrue(replayed.contains(fixture.setup.priorTurn?.assistant ?? ""), "prior assistant turn missing from request")
+
+        let assistant = try XCTUnwrap(
+            try prepared.context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last { $0.role == .assistant }
+        )
+        let reply = (assistant.structuredResponse?.title ?? "")
+            + "\n" + (assistant.structuredResponse?.summary ?? "")
+            + "\n" + assistant.text
+        for phrase in fixture.expect.forbiddenRestatePhrases ?? [] {
+            XCTAssertFalse(reply.localizedCaseInsensitiveContains(phrase), "reply restated missing context: \(phrase)")
+        }
+        for anchor in fixture.expect.replyAnchors ?? [] {
+            XCTAssertTrue(reply.contains(anchor), "reply missing \(anchor)")
+        }
+        XCTAssertNotNil(assistant.structuredResponse)
+        XCTAssertNil(assistant.errorCategory)
+    }
+
+    func testGoldenCase4ScannableStructuredReplyAndInvalidFallback() async throws {
+        let fixture = try loadGoldenFixture(named: "04-scannable-reply")
+        let prepared = try prepareGoldenCase(fixture)
+        await prepared.store.send(
+            text: fixture.request.text,
+            model: "claude-test",
+            apiKey: "test-key",
+            threadID: prepared.threadID,
+            actionTypeOverride: .readOnly,
+            in: prepared.context
+        )
+
+        try assertGoldenRouting(fixture, client: prepared.client, in: prepared.context)
+        let assistant = try XCTUnwrap(
+            try prepared.context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last { $0.role == .assistant }
+        )
+        let structured = try XCTUnwrap(assistant.structuredResponse)
+        let details = try XCTUnwrap(structured.details)
+        let expectedIDs = fixture.expect.sectionIDs ?? []
+        let expectedTitles = fixture.expect.sectionTitles ?? []
+        XCTAssertEqual(details.sections.map(\.id), expectedIDs)
+        XCTAssertEqual(details.sections.map(\.title), expectedTitles)
+        XCTAssertEqual(details.sections.count, 4)
+        for section in details.sections {
+            let bullets = section.markdown
+                .split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { $0.hasPrefix("-") }
+            XCTAssertGreaterThanOrEqual(bullets.count, 1, "\(section.id) needs bullets")
+            XCTAssertLessThanOrEqual(bullets.count, 3, "\(section.id) must stay scannable")
+        }
+
+        let invalid = try ChatCoreWireDecoder.response(from: try XCTUnwrap(fixture.invalidResponse))
+        let invalidContainer = try makeContainer()
+        let invalidContext = invalidContainer.mainContext
+        try seedTrainingData(in: invalidContext)
+        let invalidClient = MockClaudeClient(responses: Array(repeating: invalid, count: CoachChatConfig.maxToolRounds))
+        let invalidStore = CoachChatStore(client: invalidClient, calendar: calendar, now: { self.today })
+        await invalidStore.send(
+            text: fixture.request.text,
+            model: "claude-test",
+            apiKey: "test-key",
+            actionTypeOverride: .readOnly,
+            in: invalidContext
+        )
+        let failed = try XCTUnwrap(
+            try invalidContext.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last { $0.role == .assistant }
+        )
+        XCTAssertNil(failed.structuredResponse)
+        XCTAssertFalse(failed.text.contains("without a title or summary"))
+        XCTAssertNotEqual(failed.text, "You are sore because yesterday was hard and this week still has a lot of running left so you should probably change several things including pace, volume, recovery, sleep, and maybe the long run, and I would also think about shoes, fueling, and whether the whole plan still fits, which is a lot to hold in one paragraph without a title or summary or scannable sections.")
+    }
+
+    func testGoldenCase5ChoiceCardsKeepStructuredOptionsAndFreeText() async throws {
+        let fixture = try loadGoldenFixture(named: "05-options-and-free-text")
+        let otherPrepared = try prepareGoldenCase(fixture, extraResponses: Array(repeating: followUpCardResponse(), count: CoachChatConfig.maxToolRounds))
+        await otherPrepared.store.send(
+            text: fixture.request.text,
+            model: "claude-test",
+            apiKey: "test-key",
+            threadID: otherPrepared.threadID,
+            in: otherPrepared.context
+        )
+        try assertGoldenRouting(fixture, client: otherPrepared.client, in: otherPrepared.context)
+
+        let otherAssistant = try XCTUnwrap(
+            try otherPrepared.context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last { $0.role == .assistant }
+        )
+        let interaction = try XCTUnwrap(otherAssistant.interaction)
+        XCTAssertEqual(interaction.id, fixture.expect.interactionID)
+        XCTAssertEqual(interaction.options.map(\.id), fixture.expect.optionIDs)
+        XCTAssertEqual(interaction.allowOther, fixture.expect.allowOther)
+        XCTAssertEqual(interaction.otherLabel, fixture.expect.otherLabel)
+        XCTAssertEqual(interaction.otherPlaceholder, fixture.expect.otherPlaceholder)
+        XCTAssertEqual(interaction.status, .pending)
+
+        _ = otherPrepared.store.resolveInteraction(
+            messageID: otherAssistant.turnID,
+            selectedOptionId: nil,
+            resolvedWithOther: true,
+            in: otherPrepared.context
+        )
+        let freeText = try XCTUnwrap(fixture.expect.freeText)
+        _ = await otherPrepared.store.send(
+            text: freeText,
+            model: "claude-test",
+            apiKey: "test-key",
+            threadID: otherPrepared.threadID,
+            interactionId: interaction.id,
+            isCustomInteractionResponse: true,
+            in: otherPrepared.context
+        )
+        let otherSnapshot = try XCTUnwrap(
+            try otherPrepared.context.fetch(FetchDescriptor<CoachRequestSnapshot>(sortBy: [SortDescriptor(\.createdAt)])).last
+        )
+        XCTAssertEqual(otherSnapshot.interactionId, interaction.id)
+        XCTAssertTrue(otherSnapshot.isCustomInteractionResponse)
+        XCTAssertNil(otherSnapshot.selectedOptionId)
+        let otherRequest = try XCTUnwrap(otherPrepared.client.requests.last)
+        let otherUserText = requestText(otherRequest)
+        XCTAssertTrue(otherUserText.contains(freeText))
+        XCTAssertTrue(otherUserText.contains("response=other"))
+
+        let selectedPrepared = try prepareGoldenCase(fixture, extraResponses: Array(repeating: followUpCardResponse(), count: CoachChatConfig.maxToolRounds))
+        await selectedPrepared.store.send(
+            text: fixture.request.text,
+            model: "claude-test",
+            apiKey: "test-key",
+            threadID: selectedPrepared.threadID,
+            in: selectedPrepared.context
+        )
+        let selectedAssistant = try XCTUnwrap(
+            try selectedPrepared.context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last { $0.role == .assistant }
+        )
+        let selectedInteraction = try XCTUnwrap(selectedAssistant.interaction)
+        let selectedOptionID = try XCTUnwrap(fixture.expect.selectedOptionID)
+        let selectedOption = try XCTUnwrap(selectedInteraction.options.first { $0.id == selectedOptionID })
+        _ = selectedPrepared.store.resolveInteraction(
+            messageID: selectedAssistant.turnID,
+            selectedOptionId: selectedOptionID,
+            in: selectedPrepared.context
+        )
+        _ = await selectedPrepared.store.send(
+            text: selectedOption.value,
+            model: "claude-test",
+            apiKey: "test-key",
+            threadID: selectedPrepared.threadID,
+            interactionId: selectedInteraction.id,
+            selectedOptionId: selectedOptionID,
+            in: selectedPrepared.context
+        )
+        let selectedSnapshot = try XCTUnwrap(
+            try selectedPrepared.context.fetch(FetchDescriptor<CoachRequestSnapshot>(sortBy: [SortDescriptor(\.createdAt)])).last
+        )
+        XCTAssertEqual(selectedSnapshot.interactionId, selectedInteraction.id)
+        XCTAssertEqual(selectedSnapshot.selectedOptionId, selectedOptionID)
+        XCTAssertFalse(selectedSnapshot.isCustomInteractionResponse)
+        let selectedRequest = try XCTUnwrap(selectedPrepared.client.requests.last)
+        let selectedUserText = requestText(selectedRequest)
+        XCTAssertTrue(selectedUserText.contains("optionId=\(selectedOptionID)"))
+        XCTAssertTrue(selectedUserText.contains(selectedOption.value))
+    }
+
     private func makeContainer() throws -> ModelContainer {
         let schema = Schema([
             CompletedActivity.self, DailyWellness.self, SyncState.self,
@@ -3254,7 +3539,217 @@ final class ChatFeatureTests: XCTestCase {
             calendar.isDate($0.date, inSameDayAs: day)
         }
     }
+
+    private struct GoldenCasePrepared {
+        let context: ModelContext
+        let store: CoachChatStore
+        let client: MockClaudeClient
+        let coordinator: WorkoutReplacementCoordinator
+        let threadID: UUID
+    }
+
+    private func goldenFixtureURL(named basename: String) -> URL? {
+        let bundle = Bundle(for: ChatFeatureTests.self)
+        return bundle.url(forResource: basename, withExtension: "json", subdirectory: "Fixtures/ChatCore")
+            ?? bundle.url(forResource: basename, withExtension: "json", subdirectory: "ChatCore")
+            ?? bundle.url(forResource: basename, withExtension: "json")
+    }
+
+    private func loadGoldenFixture(named basename: String) throws -> ChatGoldenFixture {
+        guard let url = goldenFixtureURL(named: basename) else {
+            XCTFail("Missing chat golden fixture: TrainOrRestTests/Fixtures/ChatCore/\(basename).json")
+            throw ChatGoldenFixtureLoadError.missing(basename)
+        }
+        return try JSONDecoder().decode(ChatGoldenFixture.self, from: Data(contentsOf: url))
+    }
+
+    private func fixtureDate(_ value: String) -> Date {
+        let parts = value.split(separator: "-").compactMap { Int($0) }
+        return calendar.startOfDay(for: PlanEngineTestSupport.date(parts[0], parts[1], parts[2]))
+    }
+
+    private func overlayFixtureWorkouts(_ workouts: [ChatGoldenFixture.Workout], in context: ModelContext) throws {
+        guard !workouts.isEmpty else { return }
+        guard let plan = try PlanStore.activePlan(in: context) else {
+            XCTFail("fixture setup needs an active plan")
+            return
+        }
+        let monday = PlanGenerator.mondayOfWeek(containing: plan.anchorDate, calendar: calendar)
+        for workout in workouts {
+            let date = fixtureDate(workout.date)
+            for existing in try plannedWorkouts(on: date, in: context) {
+                context.delete(existing)
+            }
+            guard let kind = WorkoutKind(rawValue: workout.kind) else {
+                XCTFail("unknown fixture kind \(workout.kind)")
+                continue
+            }
+            let days = calendar.dateComponents([.day], from: monday, to: date).day ?? 0
+            let weekIndex = max(0, days / 7)
+            let row = PlannedWorkout(
+                spec: PlannedWorkoutSpec(
+                    date: date,
+                    kind: kind,
+                    distanceKm: workout.distanceKm,
+                    paceBand: nil,
+                    details: "\(kind.rawValue) \(workout.distanceKm) km"
+                ),
+                weekIndex: weekIndex,
+                phase: .base
+            )
+            row.plan = plan
+            context.insert(row)
+        }
+        try context.save()
+    }
+
+    private func prepareGoldenCase(
+        _ fixture: ChatGoldenFixture,
+        extraResponses: [ClaudeResponse] = []
+    ) throws -> GoldenCasePrepared {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        try overlayFixtureWorkouts(fixture.setup.workouts, in: context)
+        let threadID = UUID(uuidString: fixture.request.threadID) ?? UUID()
+        context.insert(ChatThread(uuid: threadID, title: "Golden", createdAt: today, updatedAt: today))
+        if let prior = fixture.setup.priorTurn {
+            context.insert(ChatMessage(
+                role: .user,
+                text: prior.user,
+                date: today.addingTimeInterval(-120),
+                threadID: threadID
+            ))
+            context.insert(ChatMessage(
+                role: .assistant,
+                text: prior.assistant,
+                date: today.addingTimeInterval(-60),
+                threadID: threadID,
+                status: .completed
+            ))
+        }
+        try context.save()
+        var responses = try fixture.mockResponses.map(ChatCoreWireDecoder.response)
+        responses.append(contentsOf: extraResponses)
+        let client = MockClaudeClient(responses: responses)
+        let coordinator = WorkoutReplacementCoordinator(
+            container: container,
+            calendar: calendar,
+            now: { self.today }
+        )
+        let store = CoachChatStore(
+            client: client,
+            calendar: calendar,
+            now: { self.today },
+            replacementCoordinator: coordinator
+        )
+        return GoldenCasePrepared(
+            context: context,
+            store: store,
+            client: client,
+            coordinator: coordinator,
+            threadID: threadID
+        )
+    }
+
+    private func assertGoldenRouting(
+        _ fixture: ChatGoldenFixture,
+        client: MockClaudeClient,
+        in context: ModelContext
+    ) throws {
+        let snapshot = try XCTUnwrap(
+            try context.fetch(FetchDescriptor<CoachRequestSnapshot>(sortBy: [SortDescriptor(\.createdAt)])).first
+        )
+        XCTAssertEqual(snapshot.actionType.rawValue, fixture.expect.actionType)
+        let request = try XCTUnwrap(client.requests.first)
+        XCTAssertEqual(request.tools.map(\.name), fixture.expect.toolNames)
+        let encodedChoice = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request.toolChoice))
+        XCTAssertEqual(encodedChoice, fixture.expect.toolChoice)
+    }
+
+    private func requestText(_ request: ClaudeRequest) -> String {
+        request.messages.flatMap(\.content).compactMap { block -> String? in
+            if case .text(let text) = block { return text }
+            return nil
+        }.joined(separator: "\n")
+    }
+
+    private func followUpCardResponse() -> ClaudeResponse {
+        ClaudeResponse(
+            content: [
+                .toolUse(
+                    id: "toolu_followup",
+                    name: CoachToolCatalog.coachResponseName,
+                    input: .object([
+                        "content": .string("Noted."),
+                        "title": .string("Noted"),
+                        "summary": .string("Follow-up received.")
+                    ])
+                )
+            ],
+            stopReason: "tool_use"
+        )
+    }
+
 }
+
+private enum ChatGoldenFixtureLoadError: Error {
+    case missing(String)
+}
+
+private struct ChatGoldenFixture: Decodable {
+    let id: String
+    let goldenCase: Int
+    let request: Request
+    let setup: Setup
+    let mockResponses: [JSONValue]
+    let invalidResponse: JSONValue?
+    let expect: Expect
+
+    struct Request: Decodable {
+        let text: String
+        let actionType: String
+        let threadID: String
+    }
+
+    struct Setup: Decodable {
+        let readinessAnchors: [String]
+        let plannedWorkoutAnchors: [String]
+        let workouts: [Workout]
+        let priorTurn: PriorTurn?
+    }
+
+    struct Workout: Decodable {
+        let date: String
+        let kind: String
+        let distanceKm: Double
+    }
+
+    struct PriorTurn: Decodable {
+        let user: String
+        let assistant: String
+    }
+
+    struct Expect: Decodable {
+        let actionType: String
+        let toolNames: [String]
+        let toolChoice: JSONValue
+        let confirmation: String?
+        let proposedDistanceKm: Double?
+        let replyAnchors: [String]?
+        let forbiddenRestatePhrases: [String]?
+        let sectionIDs: [String]?
+        let sectionTitles: [String]?
+        let interactionID: String?
+        let optionIDs: [String]?
+        let allowOther: Bool?
+        let otherLabel: String?
+        let otherPlaceholder: String?
+        let freeText: String?
+        let selectedOptionID: String?
+    }
+}
+
 
 @MainActor
 private final class MockClaudeClient: ClaudeServicing {

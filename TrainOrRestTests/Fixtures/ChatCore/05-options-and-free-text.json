@@ -1,0 +1,73 @@
+{
+  "id": "case-05-options-and-free-text",
+  "goldenCase": 5,
+  "request": {
+    "text": "I missed today's run. What should I do?",
+    "actionType": "unspecified",
+    "threadID": "00000000-0000-0000-0000-000000000005"
+  },
+  "setup": {
+    "readinessAnchors": [],
+    "plannedWorkoutAnchors": [],
+    "workouts": [],
+    "priorTurn": null
+  },
+  "mockResponses": [
+    {
+      "stop_reason": "tool_use",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_case5",
+          "name": "coach_response",
+          "input": {
+            "content": "You missed today's run. Choose how to recover the week.",
+            "title": "Missed today's run",
+            "summary": "Pick one recovery option, or describe a different adjustment.",
+            "interaction": {
+              "id": "missed_run_recovery",
+              "type": "single_choice",
+              "title": "How should we recover the week?",
+              "options": [
+                {
+                  "id": "easy_tomorrow",
+                  "label": "Easy run tomorrow",
+                  "description": "Shift today's easy run to tomorrow",
+                  "value": "Move today's easy run to tomorrow."
+                },
+                {
+                  "id": "rest_today",
+                  "label": "Leave it as rest",
+                  "description": "Do not make up the missed run",
+                  "value": "Leave today as rest and keep the rest of the week."
+                },
+                {
+                  "id": "shift_long_run",
+                  "label": "Shift the long run",
+                  "description": "Move the long run later in the week",
+                  "value": "Move the long run to a later day this week."
+                }
+              ],
+              "allowOther": true,
+              "otherLabel": "Something else",
+              "otherPlaceholder": "Describe the adjustment you want",
+              "status": "pending"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "expect": {
+    "actionType": "unspecified",
+    "toolNames": ["coach_response", "propose_plan_adjustment"],
+    "toolChoice": { "type": "any" },
+    "interactionID": "missed_run_recovery",
+    "optionIDs": ["easy_tomorrow", "rest_today", "shift_long_run"],
+    "allowOther": true,
+    "otherLabel": "Something else",
+    "otherPlaceholder": "Describe the adjustment you want",
+    "freeText": "Cut Thursday to 6 km instead.",
+    "selectedOptionID": "easy_tomorrow"
+  }
+}

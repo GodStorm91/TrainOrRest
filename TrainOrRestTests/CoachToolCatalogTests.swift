@@ -89,6 +89,44 @@ final class CoachToolCatalogTests: XCTestCase {
         )
     }
 
+    func testPlanAdjustmentPayloadsAreClosed() throws {
+        guard case .object(let schema) = CoachToolCatalog.planEditDraft.inputSchema,
+              case .object(let properties)? = schema["properties"],
+              case .object(let changes)? = properties["changes"],
+              case .object(let items)? = changes["items"],
+              case .object(let itemProperties)? = items["properties"],
+              case .object(let action)? = itemProperties["action"],
+              case .array(let actions)? = action["enum"],
+              case .object(let workout)? = itemProperties["workout"],
+              case .object(let workoutProperties)? = workout["properties"],
+              case .object(let kind)? = workoutProperties["kind"],
+              case .array(let kinds)? = kind["enum"] else {
+            return XCTFail("propose_plan_adjustment schema shape changed")
+        }
+
+        XCTAssertEqual(schema["additionalProperties"], .bool(false))
+        XCTAssertEqual(items["additionalProperties"], .bool(false))
+        XCTAssertEqual(workout["additionalProperties"], .bool(false))
+        XCTAssertEqual(
+            actions,
+            ["swap", "downgrade", "rest", "move", "create", "replace"].map(JSONValue.string)
+        )
+        XCTAssertFalse(kinds.contains(.string("race")), "race must never be creatable")
+    }
+
+    func testCoachResponseInteractionRequiresFourOptions() throws {
+        guard case .object(let schema) = CoachToolCatalog.coachResponse.inputSchema,
+              case .object(let properties)? = schema["properties"],
+              case .object(let interaction)? = properties["interaction"],
+              case .object(let interactionProperties)? = interaction["properties"],
+              case .object(let options)? = interactionProperties["options"] else {
+            return XCTFail("coach_response interaction schema shape changed")
+        }
+
+        XCTAssertEqual(options["minItems"], .number(2))
+        XCTAssertEqual(options["maxItems"], .number(4))
+    }
+
     private func encodedJSON<T: Encodable>(_ value: T) throws -> JSONValue {
         try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(value))
     }

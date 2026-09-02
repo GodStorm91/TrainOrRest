@@ -1,0 +1,60 @@
+{
+  "id": "case-03-context-attached",
+  "goldenCase": 3,
+  "request": {
+    "text": "Should I train or rest tomorrow?",
+    "actionType": "unspecified",
+    "threadID": "00000000-0000-0000-0000-000000000003"
+  },
+  "setup": {
+    "readinessAnchors": ["Readiness today: train"],
+    "plannedWorkoutAnchors": ["Tomorrow workout:", "2026-01-06"],
+    "workouts": [
+      { "date": "2026-01-06", "kind": "easy", "distanceKm": 10 }
+    ],
+    "priorTurn": {
+      "user": "How did yesterday feel?",
+      "assistant": "Yesterday's run looked aerobic and controlled."
+    }
+  },
+  "mockResponses": [
+    {
+      "stop_reason": "tool_use",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_case3_empty",
+          "name": "propose_plan_adjustment",
+          "input": { "changes": [] }
+        }
+      ]
+    },
+    {
+      "stop_reason": "tool_use",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_case3_card",
+          "name": "coach_response",
+          "input": {
+            "content": "Train tomorrow. Readiness is train and an easy run is already scheduled.",
+            "title": "Train tomorrow",
+            "summary": "Readiness is train and tomorrow is an easy run."
+          }
+        }
+      ]
+    }
+  ],
+  "expect": {
+    "actionType": "unspecified",
+    "toolNames": ["coach_response", "propose_plan_adjustment"],
+    "toolChoice": { "type": "any" },
+    "replyAnchors": ["Train tomorrow", "Readiness is train"],
+    "forbiddenRestatePhrases": [
+      "I don't have your plan",
+      "I don't have your readiness",
+      "no training data",
+      "answered with text instead"
+    ]
+  }
+}

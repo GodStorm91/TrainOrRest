@@ -92,6 +92,9 @@ targets:
     type: bundle.unit-test
     platform: iOS
     sources: [TrainOrRestTests]
+    resources:
+      - path: TrainOrRestTests/Fixtures
+        type: folder
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES

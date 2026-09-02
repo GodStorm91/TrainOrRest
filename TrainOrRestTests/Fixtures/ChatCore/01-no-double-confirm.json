@@ -1,0 +1,60 @@
+{
+  "id": "case-01-no-double-confirm",
+  "goldenCase": 1,
+  "request": {
+    "text": "Update my calendar: shorten tomorrow's easy run. Apply it.",
+    "actionType": "planMutation",
+    "threadID": "00000000-0000-0000-0000-000000000001"
+  },
+  "setup": {
+    "readinessAnchors": ["Readiness today: train"],
+    "plannedWorkoutAnchors": ["Tomorrow workout:", "2026-01-06"],
+    "workouts": [
+      { "date": "2026-01-06", "kind": "easy", "distanceKm": 10 }
+    ],
+    "priorTurn": null
+  },
+  "mockResponses": [
+    {
+      "stop_reason": "tool_use",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_case1",
+          "name": "propose_plan_adjustment",
+          "input": {
+            "changes": [
+              {
+                "date": "2026-01-06",
+                "action": "replace",
+                "workout": {
+                  "kind": "easy",
+                  "blocks": [
+                    {
+                      "repeat_count": 1,
+                      "steps": [
+                        {
+                          "role": "work",
+                          "target_type": "distance_km",
+                          "target_value": 8,
+                          "pace_zone": "easy"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "expect": {
+    "actionType": "planMutation",
+    "toolNames": ["propose_plan_adjustment"],
+    "toolChoice": { "type": "auto" },
+    "confirmation": "notRequired",
+    "proposedDistanceKm": 8
+  }
+}

@@ -131,6 +131,23 @@ final class WorkoutReplacementCoordinator: ObservableObject {
     @Published private(set) var pendingProposal: PendingPlanProposal?
     @Published private(set) var isConfirming = false
     @Published private(set) var lastError: String?
+    @Published private(set) var lastConfirmationKind: ConfirmationKind?
+
+    enum ConfirmationKind: Equatable {
+        case required
+        case notRequired
+    }
+
+    static func confirmationKind(for proposal: PlanAdjustmentProposal) -> ConfirmationKind {
+        let restCount = proposal.changes.filter { $0.action == .rest }.count
+        if restCount > 1 { return .required }
+        if proposal.changes.count == 1,
+           let action = proposal.changes.first?.action,
+           action == .create || action == .replace {
+            return .notRequired
+        }
+        return .required
+    }
 
     private let container: ModelContainer
     private let calendar: Calendar
@@ -154,12 +171,14 @@ final class WorkoutReplacementCoordinator: ObservableObject {
         guard !hasPendingDecision, !isConfirming else { return }
         pending = replacement
         lastError = nil
+        lastConfirmationKind = .notRequired
     }
 
     func stage(_ proposal: PlanAdjustmentProposal, summary: String, threadID: UUID?) {
         guard !hasPendingDecision, !isConfirming else { return }
         pendingProposal = PendingPlanProposal(proposal: proposal, summary: summary, threadID: threadID)
         lastError = nil
+        lastConfirmationKind = .required
     }
 
     func cancel() {
@@ -167,6 +186,7 @@ final class WorkoutReplacementCoordinator: ObservableObject {
         pending = nil
         pendingProposal = nil
         lastError = nil
+        lastConfirmationKind = nil
     }
 
     func confirm(_ id: UUID) {
