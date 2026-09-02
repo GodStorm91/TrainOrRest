@@ -954,6 +954,32 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
 
     var viewTodayPlanLabel: String { self == .vi ? "Xem kế hoạch hôm nay" : self == .ja ? "今日のプランを見る" : "View today's plan" }
 
+    func nextWorkoutHeadline(weekday: String, kind: String, distance: String) -> String {
+        "\(weekday) · \(kind) · \(distance)"
+    }
+
+    func nextWorkoutSummary(weekday: String, kind: String, distance: String, isToday: Bool) -> String {
+        switch (self, isToday) {
+        case (.vi, true):
+            return "Buổi hôm nay: \(kind) \(distance)."
+        case (.ja, true):
+            return "今日のセッション: \(kind) \(distance)。"
+        case (.en, true):
+            return "Today's session is \(kind), \(distance)."
+        case (.vi, false):
+            return "Buổi tiếp theo là \(weekday) — \(kind) \(distance)."
+        case (.ja, false):
+            return "次のセッションは\(weekday) — \(kind) \(distance)。"
+        case (.en, false):
+            return "Next session is \(weekday) — \(kind), \(distance)."
+        }
+    }
+
+    var noPlanLookupSummary: String {
+        self == .vi ? "Chưa có kế hoạch tập luyện đang hoạt động." : self == .ja ? "表示できるアクティブなプランはありません。" : "There is no active plan to show."
+    }
+
+
     func todayReadinessTitle(_ verdict: ReadinessVerdict?) -> String {
         switch verdict {
         case .train: return self == .vi ? "Hôm nay: Sẵn sàng tập luyện" : self == .ja ? "今日: トレーニング可能" : "Today: Ready to train"

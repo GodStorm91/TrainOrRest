@@ -2168,6 +2168,93 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(result.sources.count, 3)
     }
 
+    func testPlanLookupMatchesUpcomingAndTodayPrompts() {
+        XCTAssertTrue(CoachPlanLookup.matches("Xem chi tiết các buổi sắp tới"))
+        XCTAssertTrue(CoachPlanLookup.matches("View today's plan"))
+        XCTAssertTrue(CoachPlanLookup.matches("Xem kế hoạch hôm nay"))
+        XCTAssertTrue(CoachPlanLookup.matches("Next scheduled workouts"))
+        XCTAssertFalse(CoachPlanLookup.matches("Sau buổi chạy này tôi nên điều chỉnh gì tiếp theo?"))
+        XCTAssertFalse(CoachPlanLookup.matches("Should I skip my next workout?"))
+        XCTAssertFalse(CoachPlanLookup.matches("How am I?"))
+        XCTAssertFalse(CoachPlanLookup.matches("Hãy đề xuất cách điều chỉnh các buổi tập tiếp theo."))
+    }
+
+    func testPlanLookupShortcutRendersNextWorkoutWithoutReadiness() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [
+                .toolUse(id: "t", name: CoachToolCatalog.coachResponseName, input: .object([
+                    "title": .string("Xem chi tiết các buổi tập đã lên lịch"),
+                    "summary": .string("Echoed request"),
+                    "recommendations": .array([]),
+                    "followUps": .array([]),
+                    "metrics": .array([]),
+                    "sources": .array([])
+                ]))
+            ], stopReason: "tool_use")
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(
+            text: "Xem chi tiết các buổi sắp tới",
+            model: "claude-test",
+            apiKey: "test-key",
+            in: context
+        )
+
+        XCTAssertEqual(client.requests.count, 0)
+        let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last { $0.role == .assistant })
+        let structured = try XCTUnwrap(assistant.structuredResponse)
+        XCTAssertNil(structured.status)
+        XCTAssertFalse(structured.metrics.isEmpty)
+        XCTAssertFalse(structured.metrics.contains(where: { $0.id == "hrv" || $0.label.contains("HRV") || $0.label.contains("RHR") }))
+        XCTAssertEqual(structured.sources.map(\.type), [.upcomingWorkouts])
+        let expected = try XCTUnwrap(
+            ActivePlanSummaryBuilder.build(
+                goal: try context.fetch(FetchDescriptor<Goal>()).first,
+                plan: try PlanStore.activePlan(in: context),
+                activities: try context.fetch(FetchDescriptor<CompletedActivity>()),
+                today: today,
+                calendar: calendar
+            )?.nextWorkout
+        )
+        XCTAssertTrue(structured.title.contains(expected.displayName))
+        XCTAssertTrue(structured.metrics.contains(where: { $0.value.contains(expected.displayName) }))
+    }
+
+    func testPlanLookupDoesNotStealAdviceQuestions() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [
+                .toolUse(id: "t", name: CoachToolCatalog.coachResponseName, input: .object([
+                    "title": .string("Keep today's session"),
+                    "summary": .string("Do the planned workout unless you feel unwell."),
+                    "recommendations": .array([]),
+                    "followUps": .array([]),
+                    "metrics": .array([]),
+                    "sources": .array([])
+                ]))
+            ], stopReason: "tool_use")
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.send(
+            text: "Should I skip my next workout?",
+            model: "claude-test",
+            apiKey: "test-key",
+            in: context
+        )
+
+        XCTAssertEqual(client.requests.count, 1)
+        let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last { $0.role == .assistant })
+        XCTAssertEqual(assistant.structuredResponse?.title, "Keep today's session")
+    }
+
+
     func testMissingOptionalStructuredFieldsDecodeToNil() throws {
         let jsonString = #"{"content":"Take an easy day."}"#
         let payload = try JSONDecoder().decode(

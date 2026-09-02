@@ -166,3 +166,140 @@ enum CoachResponseComposer {
         }
     }
 }
+
+enum CoachPlanLookup {
+    static func matches(_ text: String) -> Bool {
+        let folded = fold(text)
+        if chipPhrases.contains(where: { folded.contains($0) }) {
+            return true
+        }
+        guard lookupPhrases.contains(where: { folded.contains($0) }) else {
+            return false
+        }
+        return !advicePhrases.contains(where: { folded.contains($0) })
+    }
+
+    static func response(
+        summary: ActivePlanSummary?,
+        today: Date,
+        calendar: Calendar,
+        language: CoachLanguage
+    ) -> CoachStructuredResponse {
+        let workouts = summary?.upcomingWorkouts ?? []
+        let next = summary?.nextWorkout ?? workouts.first
+        let metrics = workouts.map { workout in
+            CoachMetric(
+                id: workout.id.uuidString,
+                label: dayLabel(workout.date, language: language, calendar: calendar),
+                value: "\(workout.displayName) · \(CoachResponseComposer.formatDistance(kilometers: workout.distanceKm, language: language))",
+                interpretation: workout.details.isEmpty ? nil : workout.details,
+                status: .neutral
+            )
+        }
+
+        let title: String
+        let summaryText: String
+        if let next {
+            let distance = CoachResponseComposer.formatDistance(kilometers: next.distanceKm, language: language)
+            let weekday = dayLabel(next.date, language: language, calendar: calendar)
+            title = language.nextWorkoutHeadline(weekday: weekday, kind: next.displayName, distance: distance)
+            summaryText = language.nextWorkoutSummary(
+                weekday: weekday,
+                kind: next.displayName,
+                distance: distance,
+                isToday: calendar.isDate(next.date, inSameDayAs: today)
+            )
+        } else if summary == nil {
+            title = language.plan.noUpcomingWorkout
+            summaryText = language.noPlanLookupSummary
+        } else {
+            title = language.plan.noUpcomingWorkout
+            summaryText = language.plan.noUpcomingWorkout
+        }
+
+        return CoachStructuredResponse(
+            title: title,
+            summary: summaryText,
+            safetyNote: nil,
+            recommendations: [],
+            details: nil,
+            followUps: [],
+            status: nil,
+            metrics: metrics,
+            primaryAction: nil,
+            secondaryAction: nil,
+            sources: [
+                CoachDataSource(
+                    id: CoachDataSource.Kind.upcomingWorkouts.rawValue,
+                    type: .upcomingWorkouts,
+                    label: language.sourceUpcomingWorkoutsLabel,
+                    updatedAt: nil
+                )
+            ]
+        )
+    }
+
+    private static let chipPhrases = [
+        "view today's plan",
+        "view todays plan",
+        "today's plan",
+        "todays plan",
+        "xem ke hoach hom nay",
+        "ke hoach hom nay",
+        "今日のプラン",
+    ].map(fold)
+
+    private static let lookupPhrases = [
+        "next scheduled",
+        "next workout",
+        "upcoming workout",
+        "upcoming session",
+        "upcoming plan",
+        "scheduled workout",
+        "buoi sap toi",
+        "cac buoi sap",
+        "buoi tap tiep theo",
+        "xem chi tiet cac buoi",
+        "chi tiet cac buoi",
+        "次のワークアウト",
+        "今後のワークアウト",
+        "今後のプラン",
+    ].map(fold)
+
+    private static let advicePhrases = [
+        "should i",
+        "should we",
+        "co nen",
+        "skip",
+        "dieu chinh",
+        "adjust",
+        "change my",
+        "create workout",
+        "tao bai",
+    ].map(fold)
+
+    private static func fold(_ text: String) -> String {
+        text
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "vi_VN"))
+            .replacingOccurrences(of: "đ", with: "d")
+            .replacingOccurrences(of: "Đ", with: "d")
+            .replacingOccurrences(of: "’", with: "'")
+            .replacingOccurrences(of: "‘", with: "'")
+    }
+
+    private static func dayLabel(_ date: Date, language: CoachLanguage, calendar: Calendar) -> String {
+        let locale: Locale
+        switch language {
+        case .en: locale = Locale(identifier: "en_US")
+        case .ja: locale = Locale(identifier: "ja_JP")
+        case .vi: locale = Locale(identifier: "vi_VN")
+        }
+        var calendar = calendar
+        calendar.locale = locale
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = locale
+        formatter.setLocalizedDateFormatFromTemplate("EEEMd")
+        return formatter.string(from: date)
+    }
+}

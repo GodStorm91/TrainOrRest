@@ -208,6 +208,16 @@ final class CoachChatStore: ObservableObject {
             return true
         }
 
+        if handlePlanLookupShortcut(
+            trimmed,
+            snapshot: snapshot,
+            assistantTurn: assistantTurn,
+            in: context
+        ) {
+            isSending = false
+            return true
+        }
+
         try? context.save()
 
         await executeAttempt(
@@ -225,6 +235,45 @@ final class CoachChatStore: ObservableObject {
             generationState = .completed(messageId: assistantTurn.turnID)
         }
         return assistantTurn.assistantStatus == .completed
+    }
+
+    private func handlePlanLookupShortcut(
+        _ text: String,
+        snapshot: CoachRequestSnapshot,
+        assistantTurn: ChatMessage,
+        in context: ModelContext
+    ) -> Bool {
+        guard classifyAction(text) != .planMutation, CoachPlanLookup.matches(text) else {
+            return false
+        }
+
+        let language = CoachLanguage(rawValue: snapshot.locale) ?? .current
+        let goal = try? context.fetch(FetchDescriptor<Goal>()).first
+        let plan = try? PlanStore.activePlan(in: context)
+        let activities = (try? context.fetch(FetchDescriptor<CompletedActivity>())) ?? []
+        let summary = ActivePlanSummaryBuilder.build(
+            goal: goal,
+            plan: plan,
+            activities: activities,
+            today: snapshot.createdAt,
+            calendar: calendar
+        )
+        let response = CoachPlanLookup.response(
+            summary: summary,
+            today: snapshot.createdAt,
+            calendar: calendar,
+            language: language
+        )
+        assistantTurn.text = response.summary
+        assistantTurn.structuredResponse = response
+        assistantTurn.assistantStatus = .completed
+        assistantTurn.isIncomplete = false
+        assistantTurn.errorCategory = nil
+        assistantTurn.errorMessage = nil
+        assistantTurn.activeAttemptID = nil
+        generationState = .completed(messageId: assistantTurn.turnID)
+        try? context.save()
+        return true
     }
 
     private func handleContextualDistanceShortcut(
