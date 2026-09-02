@@ -23,6 +23,12 @@ enum MonthGrid {
         return cells
     }
 
+
+    static func weekdays(_ calendar: Calendar) -> [Weekday] {
+        (0..<7).compactMap { offset in
+            Weekday(rawValue: (calendar.firstWeekday - 1 + offset) % 7 + 1)
+        }
+    }
     /// Very-short weekday symbols ordered to the calendar's first weekday
     /// (e.g. ["S","M","T","W","T","F","S"] for a Sunday-start Gregorian calendar).
     static func weekdaySymbols(_ calendar: Calendar) -> [String] {

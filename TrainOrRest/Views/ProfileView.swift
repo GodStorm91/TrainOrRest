@@ -9,6 +9,7 @@ struct ProfileView: View {
     @Query(sort: \CompletedActivity.date, order: .reverse) private var activities: [CompletedActivity]
     @Query(sort: \DailyReadiness.date, order: .reverse) private var readiness: [DailyReadiness]
 
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
     @AppStorage(PersonalCoachSettings.weightKgKey) private var weightKg = ""
     @AppStorage(PersonalCoachSettings.ageKey) private var age = ""
     @AppStorage(PersonalCoachSettings.heightCmKey) private var heightCm = ""
@@ -21,6 +22,7 @@ struct ProfileView: View {
     @State private var showAthleteProfile = false
 
     private let calendar = Calendar.current
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
 
     var body: some View {
         ScrollView {
@@ -48,7 +50,7 @@ struct ProfileView: View {
 
     private var header: some View {
         HStack(alignment: .center) {
-            Text("Profile")
+            Text(language.settings.profileTitle)
                 .font(dynamicTypeSize.isAccessibilitySize ? .largeTitle.weight(.bold) : .torHeading(28, .bold))
                 .foregroundStyle(Theme.text)
                 .accessibilityAddTraits(.isHeader)
@@ -65,7 +67,7 @@ struct ProfileView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Open Settings")
+            .accessibilityLabel(language.settings.openSettingsAccessibilityLabel)
         }
     }
 
@@ -73,7 +75,7 @@ struct ProfileView: View {
         TorCard {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 3) {
-                    TorEyebrow("ATHLETE")
+                    TorEyebrow(language.settings.athleteEyebrow)
                     Text(athleteDetailSummary)
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Theme.dim)
@@ -93,7 +95,7 @@ struct ProfileView: View {
                     showAthleteProfile = true
                 } label: {
                     HStack(spacing: 8) {
-                        Text(filledAthleteInputs < 3 ? "Complete athlete profile" : "Edit athlete profile")
+                        Text(filledAthleteInputs < 3 ? language.settings.completeAthleteProfile : language.settings.editAthleteProfile)
                         Image(systemName: "chevron.right")
                             .font(.system(size: 11, weight: .bold))
                     }
@@ -102,7 +104,7 @@ struct ProfileView: View {
                     .frame(minHeight: 44, alignment: .center)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(filledAthleteInputs < 3 ? "Complete athlete profile" : "Edit athlete profile")
+                .accessibilityLabel(filledAthleteInputs < 3 ? language.settings.completeAthleteProfile : language.settings.editAthleteProfile)
             }
         }
     }
@@ -116,13 +118,13 @@ struct ProfileView: View {
                 activePlanCard(summary)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Open active training plan details")
+            .accessibilityLabel(language.settings.openActivePlanDetailsAccessibilityLabel)
         } else {
             Button { showGoalEntry = true } label: {
                 emptyPlanCard
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Set the race you entered")
+            .accessibilityLabel(language.settings.setRaceEnteredAccessibilityLabel)
         }
     }
 
@@ -131,9 +133,9 @@ struct ProfileView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        TorEyebrow(summary.health.status.eyebrowText)
+                        TorEyebrow(language.settings.planStatusEyebrow(summary.health.status))
                             .foregroundStyle(statusColor(summary.health.status))
-                        Text(summary.title)
+                        Text(planTitle(summary))
                             .font(.title3.weight(.bold))
                             .foregroundStyle(Theme.text)
                             .fixedSize(horizontal: false, vertical: true)
@@ -161,36 +163,36 @@ struct ProfileView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     ViewThatFits(in: .horizontal) {
                         HStack {
-                            Text("Week \(summary.currentWeek) of \(summary.totalWeeks)")
+                            Text(language.settings.weekProgress(current: summary.currentWeek, total: summary.totalWeeks))
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Theme.text)
                             Spacer()
-                            Text("Timeline")
+                            Text(language.settings.timeline)
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(Theme.faint)
                         }
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Week \(summary.currentWeek) of \(summary.totalWeeks)")
+                            Text(language.settings.weekProgress(current: summary.currentWeek, total: summary.totalWeeks))
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Theme.text)
-                            Text("Timeline")
+                            Text(language.settings.timeline)
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(Theme.faint)
                         }
                     }
                     ProgressView(value: summary.timelineProgress)
                         .tint(statusColor(summary.health.status))
-                        .accessibilityLabel("Week \(summary.currentWeek) of \(summary.totalWeeks)")
+                        .accessibilityLabel(language.settings.weekProgress(current: summary.currentWeek, total: summary.totalWeeks))
                 }
 
                 VStack(spacing: 9) {
                     if let phase = summary.currentPhase {
-                        profileRow("Current phase", phase.displayName)
+                        profileRow(language.settings.currentPhase, language.name(phase.phase))
                     }
                     if let thisWeek = summary.thisWeek, thisWeek.plannedSessions > 0 {
-                        profileRow("This week", thisWeekLine(thisWeek))
+                        profileRow(language.settings.thisWeek, thisWeekLine(thisWeek))
                     }
-                    profileRow("Next workout", nextWorkoutLine(summary))
+                    profileRow(language.settings.nextWorkout, nextWorkoutLine(summary))
                 }
             }
         }
@@ -204,12 +206,12 @@ struct ProfileView: View {
                 .frame(width: 42, height: 42)
                 .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
             VStack(alignment: .leading, spacing: 4) {
-                TorEyebrow("PLAN")
-                Text("Distance, date, and target time become the plan.")
+                TorEyebrow(language.settings.planEyebrow)
+                Text(language.settings.emptyPlanDescription)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Theme.dim)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Set the race you entered")
+                Text(language.settings.setRaceEntered)
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(Theme.accent)
                     .frame(minHeight: 28, alignment: .leading)
@@ -226,10 +228,10 @@ struct ProfileView: View {
 
     private var personalHistorySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            TorEyebrow("PERSONAL HISTORY")
+            TorEyebrow(language.settings.personalHistoryEyebrow)
                 .padding(.horizontal, 4)
-            navRow("Run history", systemImage: "figure.run", subtitle: "Completed runs and trends") { ActivityListView() }
-            navRow("Running shoes", systemImage: "shoeprints.fill", subtitle: "Rotation and mileage") { RunningShoesView() }
+            navRow(language.settings.runHistory, systemImage: "figure.run", subtitle: language.settings.runHistorySubtitle) { ActivityListView() }
+            navRow(language.settings.runningShoes, systemImage: "shoeprints.fill", subtitle: language.settings.runningShoesSubtitle) { RunningShoesView() }
         }
     }
 
@@ -263,7 +265,7 @@ struct ProfileView: View {
             .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Open \(label.lowercased())")
+        .accessibilityLabel(language.settings.openAccessibilityLabel(label))
     }
 
     private func profileRow(_ label: String, _ value: String) -> some View {
@@ -290,13 +292,13 @@ struct ProfileView: View {
     }
 
     private var athleteName: String {
-        return "Khanh Nguyen"
+        language.settings.athleteName
     }
 
     private var athleteType: String {
-        if goals.first?.spec?.distance == .marathon { return "Marathon runner" }
-        if let distance = goals.first?.spec?.distance { return "\(distance.displayName) runner" }
-        return "Runner"
+        if goals.first?.spec?.distance == .marathon { return language.settings.marathonRunner }
+        if let distance = goals.first?.spec?.distance { return language.settings.distanceRunner(distance) }
+        return language.settings.runner
     }
 
     private var filledAthleteInputs: Int {
@@ -307,26 +309,26 @@ struct ProfileView: View {
 
     private var athleteDetailSummary: String {
         switch filledAthleteInputs {
-        case 0: "Add age, height, and weight so Coach can personalize targets."
-        case 1, 2: "\(filledAthleteInputs) of 3 details set · complete for sharper targets."
-        default: "Age, height, and weight on file."
+        case 0: language.settings.athleteDetailsMissing
+        case 1, 2: language.settings.athleteDetailsPartial(filledAthleteInputs)
+        default: language.settings.athleteDetailsComplete
         }
     }
 
     private var athleteMetrics: [ProfileMetric] {
         var metrics: [ProfileMetric] = []
         if let pace = thresholdPaceText {
-            metrics.append(ProfileMetric(label: "Threshold pace", value: pace))
+            metrics.append(ProfileMetric(label: language.settings.thresholdPace, value: pace))
         }
         if let rhr = readiness.first(where: { $0.rhrMean7 != nil || $0.rhrMean28 != nil })?.rhrMean7
             ?? readiness.first(where: { $0.rhrMean28 != nil })?.rhrMean28 {
-            metrics.append(ProfileMetric(label: "Resting HR", value: Formatters.heartRate(rhr)))
+            metrics.append(ProfileMetric(label: language.settings.restingHeartRate, value: language.settings.heartRateValue(rhr)))
         }
         if let weight = cleanDouble(weightKg) {
-            metrics.append(ProfileMetric(label: "Weight", value: String(format: "%.1f kg", weight)))
+            metrics.append(ProfileMetric(label: language.settings.weight, value: language.settings.weightValue(weight)))
         }
         if let vdot = fitnessProfile?.vdot, vdot.isFinite, vdot > 0 {
-            metrics.append(ProfileMetric(label: "VO₂ max", value: String(format: "%.0f", vdot)))
+            metrics.append(ProfileMetric(label: language.settings.vo2Max, value: String(format: "%.0f", locale: language.uiLocale, vdot)))
         }
         return Array(metrics.prefix(4))
     }
@@ -334,10 +336,10 @@ struct ProfileView: View {
     private var thresholdPaceText: String? {
         if let threshold = currentThresholdBand {
             let midpoint = (threshold.fastSecondsPerKm + threshold.slowSecondsPerKm) / 2
-            return Formatters.pace(midpoint).replacingOccurrences(of: " /km", with: "/km")
+            return language.settings.paceValue(midpoint)
         }
         if let goal = goals.first?.spec {
-            return Formatters.pace(goal.goalPaceSecondsPerKm).replacingOccurrences(of: " /km", with: "/km")
+            return language.settings.paceValue(goal.goalPaceSecondsPerKm)
         }
         return nil
     }
@@ -364,38 +366,52 @@ struct ProfileView: View {
         ActivePlanSummaryBuilder.build(goal: goals.first, plan: activePlan, activities: activities, calendar: calendar)
     }
 
+    private func planTitle(_ summary: ActivePlanSummary) -> String {
+        guard let distance = goals.first?.spec?.distance else { return language.settings.trainingPlan }
+        return language.settings.planTitle(distance: distance, targetTime: summary.targetTimeSeconds)
+    }
+
     private func raceLine(_ summary: ActivePlanSummary) -> String {
         if summary.isRaceDay {
-            return "\(summary.raceDate.formatted(date: .long, time: .omitted)) · Race day"
+            return language.settings.raceDay(summary.raceDate)
         }
         if summary.health.status == .completed {
-            return "\(summary.raceDate.formatted(date: .long, time: .omitted)) · Completed"
+            return language.settings.raceCompleted(summary.raceDate)
         }
         if let days = summary.daysRemaining {
-            return "\(summary.raceDate.formatted(date: .long, time: .omitted)) · \(days) days left"
+            return language.settings.raceDaysLeft(date: summary.raceDate, days: days)
         }
-        return summary.raceDate.formatted(date: .long, time: .omitted)
+        return language.settings.longDateWithYear(summary.raceDate)
     }
 
     private func thisWeekLine(_ week: ActivePlanWeekSummary) -> String {
-        "\(week.completedSessions) of \(week.plannedSessions) runs · \(distanceText(week.completedDistanceKm)) of \(distanceText(week.plannedDistanceKm))"
+        language.settings.thisWeekProgress(
+            completed: week.completedSessions,
+            planned: week.plannedSessions,
+            completedDistance: distanceText(week.completedDistanceKm),
+            plannedDistance: distanceText(week.plannedDistanceKm)
+        )
     }
 
     private func nextWorkoutLine(_ summary: ActivePlanSummary) -> String {
-        if summary.health.status == .completed { return "Plan completed" }
-        if summary.health.status == .paused { return "Plan is paused" }
-        guard let next = summary.nextWorkout else { return "No upcoming workout" }
-        return "\(next.displayName) \(distanceText(next.distanceKm)) · \(relativeDay(next.date))"
+        if summary.health.status == .completed { return language.settings.planCompleted }
+        if summary.health.status == .paused { return language.settings.planPaused }
+        guard let next = summary.nextWorkout else { return language.settings.noUpcomingWorkout }
+        return language.settings.workoutSummary(
+            name: language.settings.workoutName(kind: next.kind, raw: next.kindRaw),
+            distance: distanceText(next.distanceKm),
+            day: relativeDay(next.date)
+        )
     }
 
-    private func distanceText(_ km: Double) -> String {
-        String(format: "%.1f km", km)
+    private func distanceText(_ kilometers: Double) -> String {
+        language.settings.distanceText(kilometers)
     }
 
     private func relativeDay(_ date: Date) -> String {
-        if calendar.isDateInToday(date) { return "Today" }
-        if calendar.isDateInTomorrow(date) { return "Tomorrow" }
-        return date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+        if calendar.isDateInToday(date) { return language.todayLabel }
+        if calendar.isDateInTomorrow(date) { return language.tomorrowLabel }
+        return language.shortWeekdayDate(date)
     }
 
     private func statusColor(_ status: ActivePlanStatus) -> Color {
@@ -416,21 +432,21 @@ struct ProfileView: View {
         switch health.status {
         case .needsAttention:
             if let keys = missedKeyCount(health), keys > 0 {
-                return "Missed \(keys) key session\(keys == 1 ? "" : "s"). Nothing is broken — reschedule in the plan or ask Coach to rebalance the week."
+                return language.settings.missedKeySessions(keys)
             }
             if health.reasons.contains(.weeklyVolumeBehind) {
-                return "Behind this week's mileage. Review the remaining runs or ease back to target — the plan adapts."
+                return language.settings.weeklyVolumeBehind
             }
             if let missed = missedCount(health), missed > 0 {
-                return "Missed \(missed) run\(missed == 1 ? "" : "s") recently. Pick the next one back up when you are ready."
+                return language.settings.missedRecentRuns(missed)
             }
             if health.reasons.contains(.insufficientData) {
-                return "Not enough recent runs to read plan health yet. Sync or log your latest runs."
+                return language.settings.insufficientPlanHealthData
             }
-            return "A few sessions slipped. Open the plan to get back on track."
+            return language.settings.planSessionsSlipped
         case .active:
             if health.reasons.contains(.insufficientData) {
-                return "Log or sync a few runs so Coach can track how the plan is going."
+                return language.settings.logRunsForPlanHealth
             }
             return nil
         default:
@@ -487,21 +503,24 @@ private struct MetricChip: View {
 
 struct AthleteProfileEditView: View {
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
     @AppStorage(PersonalCoachSettings.ageKey) private var age = ""
     @AppStorage(PersonalCoachSettings.heightCmKey) private var heightCm = ""
     @AppStorage(PersonalCoachSettings.weightKgKey) private var weightKg = ""
 
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+
     var body: some View {
         Form {
-            Section("Athlete") {
-                numberField("Age", text: $age, unit: "years", allowsDecimal: false)
-                numberField("Height", text: $heightCm, unit: "cm", allowsDecimal: true)
-                numberField("Weight", text: $weightKg, unit: "kg", allowsDecimal: true)
+            Section(language.settings.athleteSection) {
+                numberField(language.settings.age, text: $age, unit: language.settings.years, allowsDecimal: false)
+                numberField(language.settings.height, text: $heightCm, unit: language.settings.centimeters, allowsDecimal: true)
+                numberField(language.settings.weight, text: $weightKg, unit: language.settings.kilograms, allowsDecimal: true)
             }
         }
-        .navigationTitle("Athlete Profile")
+        .navigationTitle(language.settings.athleteProfileTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { Button("Done") { dismiss() } }
+        .toolbar { Button(language.doneLabel) { dismiss() } }
     }
 
     private func numberField(

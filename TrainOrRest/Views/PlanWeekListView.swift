@@ -6,6 +6,7 @@ import SwiftUI
 struct PlanWeekListView: View {
     /// Bumping this value scrolls the list to the current week.
     var scrollToTodayToken: Int
+    let language: CoachLanguage
     var onReviewRunInChat: (CompletedActivity) -> Void = { _ in }
 
     @Query(sort: \PlannedWorkout.date) private var workouts: [PlannedWorkout]
@@ -123,7 +124,7 @@ struct PlanWeekListView: View {
     private func dayRail(_ date: Date) -> some View {
         let isToday = calendar.isDateInToday(date)
         return VStack(spacing: 2) {
-            Text(date.formatted(.dateTime.weekday(.abbreviated)))
+            Text(language.shortName(Weekday(rawValue: calendar.component(.weekday, from: date)) ?? .monday))
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(isToday ? Color.white : Theme.dim)
             Text("\(calendar.component(.day, from: date))")
@@ -148,9 +149,9 @@ struct PlanWeekListView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 7) {
                         Circle().fill(workout.kind?.styleColor ?? Theme.dim).frame(width: 7, height: 7)
-                        TorEyebrow(workout.kind?.displayName ?? "Session").tracking(1.5)
+                        TorEyebrow(workout.kind.map(language.name) ?? language.plan.sessionLabel).tracking(1.5)
                     }
-                    Text(workout.kind?.displayName ?? "Run")
+                    Text(workout.kind.map(language.name) ?? language.genericRunLabel)
                         .font(.torHeading(17, .bold))
                         .foregroundStyle(Theme.text)
                     Text(plannedSubtitle(workout))
@@ -159,7 +160,7 @@ struct PlanWeekListView: View {
                     if let shoe = assignedShoe(for: workout) {
                         HStack(spacing: 5) {
                             Image(systemName: "shoeprints.fill")
-                            Text(workout.shoeAssignmentSource == .auto ? "\(shoe.displayName) · Auto" : shoe.displayName)
+                            Text(workout.shoeAssignmentSource == .auto ? "\(shoe.displayName) · \(language.plan.autoLabel)" : shoe.displayName)
                         }
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.accent)
@@ -199,7 +200,7 @@ struct PlanWeekListView: View {
                     .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("\(actionTitle) \(workout.kind?.displayName ?? "workout")")
+            .accessibilityLabel(language.plan.coachActionAccessibility(actionTitle, workout: workout.kind.map(language.name) ?? language.plan.workout))
         }
     }
 
@@ -207,7 +208,7 @@ struct PlanWeekListView: View {
         NavigationLink {
             WorkoutDetailView(workout: workout)
         } label: {
-            Label("Details", systemImage: "chevron.right")
+            Label(language.detailsLabel, systemImage: "chevron.right")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(Theme.text)
                 .fixedSize(horizontal: fixedWidth, vertical: !fixedWidth)
@@ -216,16 +217,16 @@ struct PlanWeekListView: View {
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Open workout details")
+        .accessibilityLabel(language.plan.openWorkoutDetailsAccessibility)
     }
 
 
     private func contextualCoachActionTitle(for workout: PlannedWorkout) -> String? {
         switch workout.status {
         case .planned:
-            return workout.isScheduleLocked || workout.kind == .race ? "Review with Coach" : "Edit with Coach"
+            return workout.isScheduleLocked || workout.kind == .race ? language.plan.reviewWithCoach : language.plan.editWithCoach
         case .done:
-            return "Review with Coach"
+            return language.plan.reviewWithCoach
         case .skipped:
             return nil
         }
@@ -236,7 +237,7 @@ struct PlanWeekListView: View {
             .stroke(Theme.border.opacity(0.8), style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
             .frame(height: 86)
             .overlay(alignment: .leading) {
-                Text("Rest")
+                Text(language.restDayLabel)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.faint)
                     .padding(.leading, 16)
@@ -246,10 +247,10 @@ struct PlanWeekListView: View {
     @ViewBuilder
     private func statusBadge(_ workout: PlannedWorkout) -> some View {
         switch workout.status {
-        case .done: badge("DONE", Theme.good)
-        case .skipped: badge("SKIPPED", Theme.warn)
+        case .done: badge(language.name(.done).uppercased(), Theme.good)
+        case .skipped: badge(language.name(.skipped).uppercased(), Theme.warn)
         case .planned:
-            if calendar.isDateInToday(workout.date) { badge("TODAY", Theme.accent) }
+            if calendar.isDateInToday(workout.date) { badge(language.todayLabel.uppercased(), Theme.accent) }
         }
     }
 
@@ -322,12 +323,7 @@ struct PlanWeekListView: View {
 
     private func weekTitle(_ weekStart: Date) -> String {
         let end = calendar.date(byAdding: .day, value: 6, to: weekStart) ?? weekStart
-        let month1 = weekStart.formatted(.dateTime.month(.abbreviated))
-        let month2 = end.formatted(.dateTime.month(.abbreviated))
-        if month1 == month2 {
-            return "\(month1) \(calendar.component(.day, from: weekStart)) - \(calendar.component(.day, from: end))"
-        }
-        return "\(month1) \(calendar.component(.day, from: weekStart)) - \(month2) \(calendar.component(.day, from: end))"
+        return language.plan.weekRange(weekStart, end)
     }
 
     private func weekSummary(_ weekStart: Date, index: WeekIndex) -> String {
@@ -338,9 +334,19 @@ struct PlanWeekListView: View {
         let plannedLoad = workouts.compactMap { $0.expectedDurationSeconds }.reduce(0) { $0 + TrainingLoad.sessionLoad(durationSeconds: $1, avgPaceSecondsPerKm: nil, paces: nil) }
         let doneLoad = activities.reduce(0) { $0 + TrainingLoad.sessionLoad(durationSeconds: $1.durationSeconds, avgPaceSecondsPerKm: $1.avgPaceSecondsPerKm, paces: nil) }
         if doneMinutes > 0 {
-            return "\(minutes(doneMinutes)) / \(minutes(plannedMinutes))  \(Int(doneLoad.rounded())) / \(Int(plannedLoad.rounded())) Load"
+            return language.plan.weekSummary(
+                completed: minutes(doneMinutes),
+                planned: minutes(plannedMinutes),
+                completedLoad: Int(doneLoad.rounded()),
+                plannedLoad: Int(plannedLoad.rounded())
+            )
         }
-        return "\(minutes(plannedMinutes))  \(Int(plannedLoad.rounded())) Load"
+        return language.plan.weekSummary(
+            completed: nil,
+            planned: minutes(plannedMinutes),
+            completedLoad: nil,
+            plannedLoad: Int(plannedLoad.rounded())
+        )
     }
 
     private func minutes(_ value: Double) -> String {

@@ -1,27 +1,37 @@
 import SwiftUI
 
 enum CoachTodayHeaderText {
-    static func text(for readiness: DailyReadiness?) -> String {
-        guard let readiness else { return "Engine · No verdict yet" }
-        return ([readiness.verdict.bannerWord] + readiness.ruleIDs.map(\.code))
-            .reduce("Engine") { partial, item in "\(partial) · \(item)" }
+    static func text(for readiness: DailyReadiness?, language: CoachLanguage = .en) -> String {
+        guard let readiness else {
+            return "\(language.today.engine) · \(language.today.noVerdictYet)"
+        }
+        return language.today.engineText(
+            verdict: readiness.verdict,
+            ruleCodes: readiness.ruleIDs.map(\.code)
+        )
     }
 
-    static func compactText(for readiness: DailyReadiness?) -> String {
-        guard let readiness else { return "No verdict yet" }
-        return ([readiness.verdict.bannerWord] + readiness.ruleIDs.map(\.code))
-            .joined(separator: " · ")
+    static func compactText(for readiness: DailyReadiness?, language: CoachLanguage = .en) -> String {
+        guard let readiness else { return language.today.noVerdictYet }
+        return language.today.engineCompactText(
+            verdict: readiness.verdict,
+            ruleCodes: readiness.ruleIDs.map(\.code)
+        )
     }
 }
 
 struct CoachTodayEngineHeader: View {
     let readiness: DailyReadiness?
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
     @State private var showsRationale = false
+
+    private var language: CoachLanguage {
+        CoachLanguage(rawValue: languageRaw) ?? .en
+    }
 
     private var tint: Color {
         readiness?.verdict.torColor ?? Theme.dim
     }
-
     var body: some View {
         Button {
             showsRationale = true
@@ -33,11 +43,11 @@ struct CoachTodayEngineHeader: View {
                     .accessibilityHidden(true)
 
                 ViewThatFits(in: .horizontal) {
-                    Text(CoachTodayHeaderText.text(for: readiness))
+                    Text(CoachTodayHeaderText.text(for: readiness, language: language))
                         .fixedSize(horizontal: true, vertical: false)
-                    Text(CoachTodayHeaderText.compactText(for: readiness))
+                    Text(CoachTodayHeaderText.compactText(for: readiness, language: language))
                         .fixedSize(horizontal: true, vertical: false)
-                    Text(readiness?.verdict.bannerWord ?? "No verdict yet")
+                    Text(readiness.map { language.verdictWord($0.verdict) } ?? language.today.noVerdictYet)
                         .fixedSize(horizontal: true, vertical: false)
                 }
                 .font(.caption.weight(.semibold))
@@ -62,22 +72,21 @@ struct CoachTodayEngineHeader: View {
         }
         .accessibilityLabel(accessibilityLabel)
         .sheet(isPresented: $showsRationale) {
-            CoachTodayRationaleSheet(readiness: readiness)
+            CoachTodayRationaleSheet(readiness: readiness, language: language)
         }
     }
 
     private var accessibilityLabel: String {
-        guard let readiness else { return "Engine readiness. No verdict yet." }
-        let rules = readiness.ruleIDs.map(\.code).joined(separator: ", ")
-        if rules.isEmpty {
-            return "Engine readiness. \(readiness.verdict.bannerWord)."
-        }
-        return "Engine readiness. \(readiness.verdict.bannerWord). Fired rules \(rules)."
+        language.today.engineAccessibility(
+            verdict: readiness?.verdict,
+            ruleCodes: readiness?.ruleIDs.map(\.code) ?? []
+        )
     }
 }
 
 private struct CoachTodayRationaleSheet: View {
     let readiness: DailyReadiness?
+    let language: CoachLanguage
 
     var body: some View {
         NavigationStack {
@@ -94,7 +103,7 @@ private struct CoachTodayRationaleSheet: View {
                     }
 
                     if let readiness {
-                        CoachRationaleCard(rationale: ReadinessRationale(from: readiness))
+                        CoachRationaleCard(rationale: ReadinessRationale(from: readiness), language: language)
 
                         TorCard(padding: 0, cornerRadius: 16) {
                             VStack(spacing: 0) {
@@ -112,7 +121,7 @@ private struct CoachTodayRationaleSheet: View {
                     } else {
                         TorCard(padding: 14, cornerRadius: 16) {
                             Label {
-                                Text("The readiness engine has not produced a verdict for today.")
+                                Text(language.today.noReadinessOutput)
                                     .font(.subheadline)
                                     .foregroundStyle(Theme.dim)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -134,23 +143,28 @@ private struct CoachTodayRationaleSheet: View {
     }
 
     private var title: String {
-        readiness.map { "Engine · \($0.verdict.bannerWord)" } ?? "No verdict yet"
+        guard let readiness else { return language.today.noVerdictYet }
+        return "\(language.today.engine) · \(language.verdictWord(readiness.verdict))"
     }
 
     private var subtitle: String {
         guard let readiness else {
-            return "No timestamp is available until today's readiness is computed."
+            return language.today.noTimestampAvailable
         }
-        return "Computed \(readiness.computedAt.formatted(date: .abbreviated, time: .shortened))."
+        return language.today.computedAt(readiness.computedAt)
     }
 
     private var ruleRows: [ReceiptSheet.Row] {
         guard let readiness else { return [] }
         var rows = readiness.ruleIDs.map { id in
-            ReceiptSheet.Row.detail("Rule \(id.code) · \(id.title)", value: id.detail, symbol: "checkmark.seal")
+            ReceiptSheet.Row.detail(
+                language.today.ruleLabel(id),
+                value: language.today.ruleDetail(id),
+                symbol: "checkmark.seal"
+            )
         }
         if rows.isEmpty {
-            rows.append(.detail("Rules", value: "No deterministic readiness rules fired today.", symbol: "checkmark.seal"))
+            rows.append(.detail(language.today.rules, value: language.today.noRulesFired, symbol: "checkmark.seal"))
         }
         return rows
     }

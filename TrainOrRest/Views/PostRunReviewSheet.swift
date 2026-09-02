@@ -7,7 +7,12 @@ struct PostRunReviewSheet: View {
     @Bindable var activity: CompletedActivity
     let plannedWorkout: PlannedWorkout?
 
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
     @State private var showDetailedReview = false
+
+    private var language: CoachLanguage {
+        CoachLanguage(rawValue: languageRaw) ?? .en
+    }
 
     var body: some View {
         NavigationStack {
@@ -43,11 +48,11 @@ struct PostRunReviewSheet: View {
                         .frame(width: 44, height: 44)
                         .background(Theme.chip, in: Circle())
                 }
-                .accessibilityLabel("Close post-run review")
+                .accessibilityLabel(language.today.closePostRunReview)
 
                 Spacer()
 
-                Text(activity.date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().hour().minute()))
+                Text(language.today.postRunDate(activity.date))
                     .font(.torHeading(15, .bold))
                     .foregroundStyle(Theme.text)
 
@@ -57,7 +62,7 @@ struct PostRunReviewSheet: View {
             }
 
             VStack(spacing: 7) {
-                Text("Running")
+                Text(language.today.running)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.faint)
                 Text(headline)
@@ -72,11 +77,9 @@ struct PostRunReviewSheet: View {
     }
 
     private var headline: String {
-        let distance = activity.distanceMeters.map { meters in
-            String(format: meters >= 9_950 ? "%.0fkm" : "%.1fkm", meters / 1000)
-        } ?? "Run"
+        let distance = language.today.postRunDistance(activity.distanceMeters)
         let minutes = Int((activity.durationSeconds / 60).rounded())
-        return "\(distance) in \(minutes)min 🏃"
+        return language.today.postRunHeadline(distance: distance, minutes: minutes)
     }
 
     private var subheadline: String {
@@ -108,12 +111,12 @@ struct PostRunReviewSheet: View {
                 showDetailedReview = false
                 close()
             } label: {
-                Label("Edit & Share", systemImage: "square.and.arrow.up")
+                Label(language.today.editAndShare, systemImage: "square.and.arrow.up")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(PostRunActionButtonStyle())
             .overlay(alignment: .topTrailing) {
-                Text("NEW")
+                Text(language.today.new)
                     .font(.system(size: 9, weight: .black))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 7)
@@ -128,7 +131,7 @@ struct PostRunReviewSheet: View {
                     showDetailedReview.toggle()
                 }
             } label: {
-                Label(showDetailedReview ? "Hide Review" : "Review", systemImage: "message.badge")
+                Label(showDetailedReview ? language.today.hideReview : language.today.review, systemImage: "message.badge")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(PostRunActionButtonStyle())
@@ -138,7 +141,7 @@ struct PostRunReviewSheet: View {
     private var noteEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Add Note")
+                Text(language.today.addNote)
                     .font(.torHeading(18, .bold))
                     .foregroundStyle(Theme.text)
                 Spacer()
@@ -155,7 +158,7 @@ struct PostRunReviewSheet: View {
                 .background(Theme.card2, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(alignment: .topLeading) {
                     if (activity.reviewNote ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text("How did it feel? Share what the data can't, like motivation, fueling, or how hard it felt.")
+                        Text(language.today.reviewNotePlaceholder)
                             .font(.system(size: 15))
                             .foregroundStyle(Theme.faint)
                             .padding(.horizontal, 16)

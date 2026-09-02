@@ -69,6 +69,7 @@ final class CalendarRenderPerformanceTests: XCTestCase {
             NavigationStack {
                 PlanMonthView(
                     workouts: workouts,
+                    language: .en,
                     completedActivities: activities,
                     monthAnchor: $model.anchor,
                     selectedDate: $selected
@@ -87,7 +88,7 @@ final class CalendarRenderPerformanceTests: XCTestCase {
 
         var body: some View {
             NavigationStack {
-                PlanWeekListView(scrollToTodayToken: model.token)
+                PlanWeekListView(scrollToTodayToken: model.token, language: .en)
             }
         }
     }

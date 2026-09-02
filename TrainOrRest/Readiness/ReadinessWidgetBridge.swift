@@ -1,44 +1,37 @@
 import Foundation
+import SwiftData
 import WidgetKit
 
 @MainActor
 enum ReadinessWidgetBridge {
     static func publish(_ readiness: DailyReadiness?) {
+        let language = CoachLanguage.current
         let snapshot: ReadinessWidgetSnapshot
         if let readiness {
             snapshot = ReadinessWidgetSnapshot(
                 score: readiness.score,
                 verdictRaw: readiness.verdictRaw,
-                verdictText: readiness.verdict.widgetText,
-                reason: readiness.reasons.first ?? readiness.verdict.widgetReason,
+                verdictText: language.verdictWord(readiness.verdict),
+                reason: readiness.reasonCodes.first.map(language.today.reason)
+                    ?? readiness.reasons.first
+                    ?? language.today.widgetReason(readiness.verdict),
+                languageRaw: language.rawValue,
                 computedAt: readiness.computedAt,
                 updatedAt: .now
             )
         } else {
-            snapshot = .unavailable
+            snapshot = .unavailable(languageRaw: language.rawValue)
         }
 
         ReadinessWidgetSnapshot.save(snapshot)
         WidgetCenter.shared.reloadTimelines(ofKind: "ReadinessWidget")
     }
-}
 
-private extension ReadinessVerdict {
-    var widgetText: String {
-        switch self {
-        case .train: "Train"
-        case .goEasy: "Go easy"
-        case .rest: "Rest"
-        case .insufficientData: "Baseline"
-        }
-    }
-
-    var widgetReason: String {
-        switch self {
-        case .train: "Ready for the planned session"
-        case .goEasy: "Keep the effort controlled today"
-        case .rest: "Recovery comes first today"
-        case .insufficientData: "Collecting your baseline"
-        }
+    static func republishForLanguageChange(in context: ModelContext) {
+        var descriptor = FetchDescriptor<DailyReadiness>(
+            sortBy: [SortDescriptor(\.date, order: .reverse)]
+        )
+        descriptor.fetchLimit = 1
+        publish(try? context.fetch(descriptor).first)
     }
 }

@@ -10,6 +10,8 @@ final class DailyReadiness {
     var verdictRaw: String
     var score: Int?
     var reasons: [String]
+    /// JSON-encoded stable reason codes. Nil rows are legacy assessments.
+    var reasonCodesJSON: String?
     var ruleIDsRaw: [String] = []
     var hedged: Bool = false
     var primaryRuleRaw: String?
@@ -34,6 +36,7 @@ final class DailyReadiness {
         self.verdictRaw = assessment.verdict.rawValue
         self.score = assessment.score
         self.reasons = assessment.reasons
+        self.reasonCodesJSON = Self.encode(assessment.reasonCodes)
         self.ruleIDsRaw = assessment.ruleIDs.map(\.rawValue)
         self.hedged = assessment.hedged
         self.primaryRuleRaw = assessment.primaryRule?.rawValue
@@ -67,10 +70,16 @@ final class DailyReadiness {
         ruleIDsRaw.compactMap(ReadinessRuleID.init(rawValue:))
     }
 
+    /// Empty for legacy rows created before stable reason codes were persisted.
+    var reasonCodes: [ReadinessReason] {
+        get { Self.decode([ReadinessReason].self, from: reasonCodesJSON ?? "") ?? [] }
+        set { reasonCodesJSON = Self.encode(newValue) }
+    }
     func update(from assessment: ReadinessAssessment, computedAt: Date) {
         verdictRaw = assessment.verdict.rawValue
         score = assessment.score
         reasons = assessment.reasons
+        reasonCodes = assessment.reasonCodes
         ruleIDsRaw = assessment.ruleIDs.map(\.rawValue)
         hedged = assessment.hedged
         primaryRuleRaw = assessment.primaryRule?.rawValue
@@ -88,5 +97,16 @@ final class DailyReadiness {
         sleepMean14 = assessment.snapshot.sleepMean14
         acuteChronicRatio = assessment.snapshot.acuteChronicRatio
         self.computedAt = computedAt
+    }
+
+    private static func encode<T: Encodable>(_ value: T) -> String {
+        guard let data = try? JSONEncoder().encode(value),
+              let string = String(data: data, encoding: .utf8) else { return "" }
+        return string
+    }
+
+    private static func decode<T: Decodable>(_ type: T.Type, from string: String) -> T? {
+        guard let data = string.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
     }
 }

@@ -165,7 +165,7 @@ struct CoachResponseCard: View {
 
     private func metricRow(_ metric: CoachMetric) -> some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(metric.label)
+            Text(metricLabel(metric))
                 .font(.subheadline)
                 .foregroundStyle(Theme.dim)
 
@@ -176,7 +176,7 @@ struct CoachResponseCard: View {
                 .monospacedDigit()
                 .foregroundStyle(Theme.text)
 
-            if let interpretation = metric.interpretation {
+            if let interpretation = metricInterpretation(metric) {
                 Text("· \(interpretation)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(metricColor(metric.status))
@@ -187,7 +187,15 @@ struct CoachResponseCard: View {
     }
 
     private func metricAccessibilityLabel(_ metric: CoachMetric) -> String {
-        "\(metric.label): \(metric.value)\(metric.interpretation.map { " · \($0)" } ?? "")"
+        "\(metricLabel(metric)): \(metric.value)\(metricInterpretation(metric).map { " · \($0)" } ?? "")"
+    }
+
+    private func metricLabel(_ metric: CoachMetric) -> String {
+        language.metricLabel(for: metric.id, fallback: metric.label)
+    }
+
+    private func metricInterpretation(_ metric: CoachMetric) -> String? {
+        language.metricInterpretation(for: metric.status, fallback: metric.interpretation)
     }
 
     private func recommendationRow(_ number: Int, _ recommendation: CoachRecommendation) -> some View {

@@ -48,7 +48,7 @@ final class CoachRationaleCardTests: XCTestCase {
             details: "2 km easy + 5 km threshold + 2 km easy"
         )
 
-        let summary = CoachWorkoutSummary(from: spec)
+        let summary = CoachWorkoutSummary(from: spec, language: .en)
 
         XCTAssertEqual(summary.title, "Tempo")
         XCTAssertEqual(summary.targets, ["2 km easy + 5 km threshold + 2 km easy"])

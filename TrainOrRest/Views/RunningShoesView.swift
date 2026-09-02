@@ -10,6 +10,10 @@ struct RunningShoesView: View {
     @State private var showingAddShoe = false
     @State private var showingSettings = false
 
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+
     private var activeShoes: [RunningShoe] { shoes.filter { $0.status == .active } }
     private var retiredShoes: [RunningShoe] { shoes.filter { $0.status == .retired } }
 
@@ -19,9 +23,9 @@ struct RunningShoesView: View {
                 if shoes.isEmpty {
                     emptyState
                 } else {
-                    shoeSection("Active", shoes: activeShoes)
+                    shoeSection(language.integrations.active, shoes: activeShoes)
                     if !retiredShoes.isEmpty {
-                        DisclosureGroup("Retired · \(retiredShoes.count) shoes") {
+                        DisclosureGroup(language.integrations.retiredShoes(retiredShoes.count)) {
                             VStack(spacing: 10) {
                                 ForEach(retiredShoes, id: \.id) { shoe in
                                     NavigationLink { ShoeDetailView(shoe: shoe) } label: {
@@ -40,7 +44,7 @@ struct RunningShoesView: View {
                 Button {
                     showingAddShoe = true
                 } label: {
-                    Label(shoes.isEmpty ? "Add your first shoe" : "Add shoe", systemImage: "plus")
+                    Label(shoes.isEmpty ? language.integrations.addYourFirstShoe : language.integrations.addShoe, systemImage: "plus")
                         .font(.torHeading(15, .bold))
                         .frame(maxWidth: .infinity, minHeight: 48)
                 }
@@ -51,7 +55,7 @@ struct RunningShoesView: View {
             .padding(.bottom, 86)
         }
         .background(Theme.bg)
-        .navigationTitle("Running Shoes")
+        .navigationTitle(language.integrations.runningShoes)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -60,7 +64,7 @@ struct RunningShoesView: View {
                 } label: {
                     Image(systemName: "slider.horizontal.3")
                 }
-                .accessibilityLabel("Shoe assignment settings")
+                .accessibilityLabel(language.integrations.shoeAssignmentSettings)
             }
         }
         .sheet(isPresented: $showingAddShoe) {
@@ -85,7 +89,7 @@ struct RunningShoesView: View {
                 Image(systemName: "shoeprints.fill")
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(Theme.accent)
-                Text("Track shoe mileage and let TrainOrRest pick the right pair for each workout.")
+                Text(language.integrations.shoeMileageEmptyState)
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(Theme.dim)
                     .fixedSize(horizontal: false, vertical: true)
@@ -97,7 +101,7 @@ struct RunningShoesView: View {
         VStack(alignment: .leading, spacing: 10) {
             TorEyebrow(title).tracking(2)
             if shoes.isEmpty {
-                Text("No active shoes.")
+                Text(language.integrations.noActiveShoes)
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(Theme.dim)
                     .padding(.vertical, 8)
@@ -123,6 +127,10 @@ struct RunningShoeRow: View {
     let shoe: RunningShoe
     let mileageKm: Double
     let isRetired: Bool
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+
 
     private var wearStatus: ShoeWearStatus {
         ShoeWearStatusService.wearStatus(currentMileageKm: mileageKm, expectedLifespanKm: shoe.expectedLifespanKm)
@@ -140,12 +148,15 @@ struct RunningShoeRow: View {
                 Text(shoe.displayName)
                     .font(.torHeading(16, .bold))
                     .foregroundStyle(isRetired ? Theme.faint : Theme.text)
-                Text(shoe.preferredTypesText)
+                Text(language.integrations.shoeTypes(shoe.preferredWorkoutTypes))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.dim)
                     .lineLimit(1)
                 HStack(spacing: 8) {
-                    Text("\(kmText(mileageKm)) / ~\(kmText(shoe.expectedLifespanKm)) km")
+                    Text(language.integrations.mileageProgress(
+                        current: Formatters.kilometers(mileageKm * 1000),
+                        expected: Formatters.kilometers(shoe.expectedLifespanKm * 1000)
+                    ))
                         .font(.torMono(11))
                         .foregroundStyle(Theme.faint)
                     if warningText != nil {
@@ -169,8 +180,8 @@ struct RunningShoeRow: View {
     private var warningText: String? {
         switch wearStatus {
         case .normal, .approaching: nil
-        case .inspect: "Check soon"
-        case .pastRange: "Past typical range"
+        case .inspect: language.integrations.checkSoon
+        case .pastRange: language.integrations.pastTypicalRange
         }
     }
 
@@ -186,6 +197,10 @@ struct ShoeMileageIndicator: View {
     let mileageKm: Double
     let expectedKm: Double
 
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+
     private var progress: Double {
         guard expectedKm > 0 else { return 0 }
         return min(mileageKm / expectedKm, 1)
@@ -195,11 +210,11 @@ struct ShoeMileageIndicator: View {
         VStack(alignment: .leading, spacing: 8) {
             ProgressView(value: progress)
                 .tint(ShoeWearStatusService.wearStatus(currentMileageKm: mileageKm, expectedLifespanKm: expectedKm) == .normal ? Theme.accent : Theme.warn)
-            Text("\(kmText(mileageKm)) km logged")
+            Text(language.integrations.kilometersLogged(Formatters.kilometers(mileageKm * 1000)))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.text)
             if mileageKm < expectedKm {
-                Text("~\(kmText(expectedKm - mileageKm)) km until recommended range")
+                Text(language.integrations.kilometersUntilRecommendedRange(Formatters.kilometers((expectedKm - mileageKm) * 1000)))
                     .font(.caption)
                     .foregroundStyle(Theme.dim)
             }
@@ -214,6 +229,10 @@ struct ShoeDetailView: View {
     @Query(sort: \CompletedActivity.date, order: .reverse) private var activities: [CompletedActivity]
 
     @State private var showingEdit = false
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+
 
     private var entries: [ShoeMileageEntry] { mileageEntries.filter { $0.shoeID == shoe.id } }
     private var mileageKm: Double { ShoeMileageService.currentMileageKm(for: shoe, ledger: mileageEntries) }
@@ -227,48 +246,48 @@ struct ShoeDetailView: View {
             VStack(alignment: .leading, spacing: 14) {
                 TorCard {
                     VStack(alignment: .leading, spacing: 12) {
-                        TorEyebrow(shoe.brand.isEmpty ? "Running Shoe" : shoe.brand).tracking(2)
+                        TorEyebrow(shoe.brand.isEmpty ? language.integrations.runningShoe : shoe.brand).tracking(2)
                         Text(shoe.model.isEmpty ? shoe.displayName : shoe.model.uppercased())
                             .font(.torHeading(28, .bold))
                             .foregroundStyle(Theme.text)
-                        Text("\(kmText(mileageKm)) km")
+                        Text(Formatters.kilometers(mileageKm * 1000))
                             .font(.torNumber(36, .bold))
                             .foregroundStyle(Theme.text)
-                        Text(shoe.status == .active ? "Active" : "Retired")
+                        Text(language.integrations.shoeStatus(shoe.status))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(shoe.status == .active ? Theme.good : Theme.faint)
                     }
                 }
 
-                detailSection("Mileage") {
+                detailSection(language.integrations.mileage) {
                     ShoeMileageIndicator(mileageKm: mileageKm, expectedKm: shoe.expectedLifespanKm)
                     MileageWarning(shoe: shoe, mileageKm: mileageKm)
                 }
 
-                detailSection("Usage") {
-                    ShoeMetricRow(label: "Runs", value: "\(shoeActivities.count)")
-                    ShoeMetricRow(label: "Distance", value: "\(kmText(entries.map(\.distanceKm).reduce(0, +))) km")
+                detailSection(language.integrations.usage) {
+                    ShoeMetricRow(label: language.integrations.runs, value: "\(shoeActivities.count)")
+                    ShoeMetricRow(label: language.integrations.distance, value: Formatters.kilometers(entries.map(\.distanceKm).reduce(0, +) * 1000))
                     if let last = shoeActivities.first {
                         ShoeMetricRow(
-                            label: "Last run",
-                            value: "\(last.date.formatted(.dateTime.month(.abbreviated).day())) · \(Formatters.kilometers(last.distanceMeters))"
+                            label: language.integrations.lastRun,
+                            value: "\(last.date.formatted(.dateTime.month(.abbreviated).day().locale(language.uiLocale))) · \(Formatters.kilometers(last.distanceMeters))"
                         )
                     }
                 }
 
-                detailSection("Preferences") {
-                    ShoeMetricRow(label: "Preferred for", value: shoe.preferredTypesText)
-                    ShoeMetricRow(label: "Primary", value: shoe.primaryWorkoutType?.displayName ?? "Any run")
+                detailSection(language.integrations.preferences) {
+                    ShoeMetricRow(label: language.integrations.preferredFor, value: language.integrations.shoeTypes(shoe.preferredWorkoutTypes))
+                    ShoeMetricRow(label: language.integrations.primary, value: shoe.primaryWorkoutType.map(language.integrations.shoeWorkoutType) ?? language.integrations.anyRun)
                 }
 
-                detailSection("Purchase") {
-                    ShoeMetricRow(label: "Purchased", value: shoe.purchaseDate?.formatted(date: .abbreviated, time: .omitted) ?? "Not set")
-                    ShoeMetricRow(label: "Starting mileage", value: "\(kmText(shoe.initialMileageKm)) km")
+                detailSection(language.integrations.purchase) {
+                    ShoeMetricRow(label: language.integrations.purchased, value: shoe.purchaseDate?.formatted(.dateTime.month(.abbreviated).day().locale(language.uiLocale)) ?? language.integrations.notSet)
+                    ShoeMetricRow(label: language.integrations.startingMileage, value: Formatters.kilometers(shoe.initialMileageKm * 1000))
                 }
 
                 VStack(spacing: 10) {
                     Button { showingEdit = true } label: {
-                        Label("Edit shoe", systemImage: "pencil")
+                        Label(language.editLabel, systemImage: "pencil")
                             .frame(maxWidth: .infinity, minHeight: 46)
                     }
                     .buttonStyle(.bordered)
@@ -276,7 +295,7 @@ struct ShoeDetailView: View {
                     Button(role: shoe.status == .active ? .destructive : nil) {
                         toggleStatus()
                     } label: {
-                        Label(shoe.status == .active ? "Retire shoe" : "Reactivate shoe", systemImage: shoe.status == .active ? "archivebox" : "arrow.uturn.backward")
+                        Label(shoe.status == .active ? language.integrations.retireShoe : language.integrations.reactivateShoe, systemImage: shoe.status == .active ? "archivebox" : "arrow.uturn.backward")
                             .frame(maxWidth: .infinity, minHeight: 46)
                     }
                     .buttonStyle(.bordered)
@@ -335,6 +354,10 @@ private struct ShoeMetricRow: View {
 struct MileageWarning: View {
     let shoe: RunningShoe
     let mileageKm: Double
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+
 
     private var status: ShoeWearStatus {
         ShoeWearStatusService.wearStatus(currentMileageKm: mileageKm, expectedLifespanKm: shoe.expectedLifespanKm)
@@ -345,11 +368,11 @@ struct MileageWarning: View {
         case .normal:
             EmptyView()
         case .approaching:
-            warning("Approaching recommended mileage", "No action needed yet.")
+            warning(language.integrations.approachingRecommendedMileage, language.integrations.noActionNeededYet)
         case .inspect:
-            warning("Check your \(shoe.displayName)", "Consider cushioning feel, outsole wear, uneven wear, and new discomfort.")
+            warning(language.integrations.checkShoe(shoe.displayName), language.integrations.inspectShoeMessage)
         case .pastRange:
-            warning("Past typical mileage range", "You can keep using it if it still feels good, or retire it from automatic assignment.")
+            warning(language.integrations.pastTypicalRange, language.integrations.pastRangeMessage)
         }
     }
 
@@ -387,6 +410,10 @@ struct ShoeFormView: View {
     @State private var selectedTypes: Set<ShoeWorkoutType> = [.easy]
     @State private var primaryType: ShoeWorkoutType = .easy
     @State private var expectedLifespan = 600.0
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+
 
     private var editingShoe: RunningShoe? {
         if case let .edit(shoe) = mode { return shoe }
@@ -396,44 +423,45 @@ struct ShoeFormView: View {
     var body: some View {
         Form {
             if step == 0 {
-                Section("Basic information") {
-                    TextField("Brand", text: $brand)
-                    TextField("Model", text: $model)
-                    TextField("Nickname", text: $nickname)
-                    Toggle("Set purchase date", isOn: $hasPurchaseDate)
+                Section(language.integrations.basicInformation) {
+                    TextField(language.integrations.brand, text: $brand)
+                    TextField(language.integrations.model, text: $model)
+                    TextField(language.integrations.nickname, text: $nickname)
+                    Toggle(language.integrations.setPurchaseDate, isOn: $hasPurchaseDate)
                     if hasPurchaseDate {
-                        DatePicker("Purchase date", selection: $purchaseDate, displayedComponents: .date)
+                        DatePicker(language.integrations.purchaseDate, selection: $purchaseDate, displayedComponents: .date)
                     }
-                    Stepper("Starting mileage: \(kmText(startingMileage)) km", value: $startingMileage, in: 0...5000, step: 5)
+                    Stepper(language.integrations.startingMileageValue(Formatters.kilometers(startingMileage * 1000)), value: $startingMileage, in: 0...5000, step: 5)
                 }
             } else if step == 1 {
-                Section("What do you use this shoe for?") {
+                Section(language.integrations.shoeUsageQuestion) {
                     ShoeUsageTypeSelector(selectedTypes: $selectedTypes)
                 }
-                Section("Primary use") {
-                    Picker("Primary use", selection: $primaryType) {
-                        ForEach(Array(selectedTypes).sorted(by: { $0.displayName < $1.displayName }), id: \.self) { type in
-                            Text(type.displayName).tag(type)
+                Section(language.integrations.primaryUse) {
+                    Picker(language.integrations.primaryUse, selection: $primaryType) {
+                        ForEach(Array(selectedTypes).sorted(by: { language.integrations.shoeWorkoutType($0) < language.integrations.shoeWorkoutType($1) }), id: \.self) { type in
+                            Text(language.integrations.shoeWorkoutType(type)).tag(type)
                         }
                     }
                 }
             } else {
-                Section("Mileage") {
-                    Stepper("Expected lifespan: ~\(kmText(expectedLifespan)) km", value: $expectedLifespan, in: 100...1200, step: 50)
-                    Text("You can adjust this anytime.")
+                Section(language.integrations.mileage) {
+                    Stepper(language.integrations.expectedLifespanValue(Formatters.kilometers(expectedLifespan * 1000)), value: $expectedLifespan, in: 100...1200, step: 50)
+                    Text(language.integrations.adjustAnytime)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
         }
+        .environment(\.locale, language.uiLocale)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { dismiss() }
+                Button(language.cancelLabel) { dismiss() }
             }
             ToolbarItem(placement: .confirmationAction) {
-                Button(step == 2 ? "Save" : "Next") {
+                Button(step == 2 ? language.saveLabel : language.integrations.next) {
                     if step < 2 {
                         advance()
                     } else {
@@ -449,7 +477,7 @@ struct ShoeFormView: View {
                 selectedTypes = [.easy]
                 primaryType = .easy
             } else if !newValue.contains(primaryType) {
-                primaryType = newValue.sorted(by: { $0.displayName < $1.displayName }).first ?? .easy
+                primaryType = newValue.sorted(by: { language.integrations.shoeWorkoutType($0) < language.integrations.shoeWorkoutType($1) }).first ?? .easy
             } else if newValue.count == 1, let only = newValue.first {
                 primaryType = only
             }
@@ -458,8 +486,8 @@ struct ShoeFormView: View {
 
     private var title: String {
         switch mode {
-        case .add: "Add Shoe"
-        case .edit: "Edit Shoe"
+        case .add: language.integrations.addShoe
+        case .edit: language.editLabel
         }
     }
 
@@ -495,7 +523,7 @@ struct ShoeFormView: View {
         target.nickname = cleanNickname.isEmpty ? nil : cleanNickname
         target.purchaseDate = hasPurchaseDate ? purchaseDate : nil
         target.initialMileageKm = startingMileage
-        target.preferredWorkoutTypes = Array(selectedTypes).sorted { $0.displayName < $1.displayName }
+        target.preferredWorkoutTypes = Array(selectedTypes).sorted { $0.rawValue < $1.rawValue }
         target.primaryWorkoutType = primaryType
         target.expectedLifespanKm = expectedLifespan
         target.updatedAt = .now
@@ -506,6 +534,10 @@ struct ShoeFormView: View {
 
 struct ShoeUsageTypeSelector: View {
     @Binding var selectedTypes: Set<ShoeWorkoutType>
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+
 
     var body: some View {
         ForEach(ShoeWorkoutType.allCases.filter { $0 != .other }) { type in
@@ -517,7 +549,7 @@ struct ShoeUsageTypeSelector: View {
                 }
             } label: {
                 HStack {
-                    Text(type.displayName)
+                    Text(language.integrations.shoeWorkoutType(type))
                     Spacer()
                     if selectedTypes.contains(type) {
                         Image(systemName: "checkmark")
@@ -534,6 +566,10 @@ struct ShoeAssignmentSettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var storedPreferences: [RunningShoePreferences]
     @State private var createdPreferences: RunningShoePreferences?
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+
 
     private var preferences: RunningShoePreferences? {
         storedPreferences.first ?? createdPreferences
@@ -548,14 +584,14 @@ struct ShoeAssignmentSettingsView: View {
                     .task { ensurePreferences() }
             }
         }
-        .navigationTitle("Shoe Assignment")
+        .navigationTitle(language.integrations.shoeAssignment)
         .navigationBarTitleDisplayMode(.inline)
     }
 
     private func settingsForm(_ preferences: RunningShoePreferences) -> some View {
         Form {
-            Section("Automatic shoe assignment") {
-                Toggle("Auto-pick a shoe", isOn: Binding(
+            Section(language.integrations.automaticShoeAssignment) {
+                Toggle(language.integrations.autoPickShoe, isOn: Binding(
                     get: { preferences.shoeAutoAssignmentEnabled },
                     set: {
                         preferences.shoeAutoAssignmentEnabled = $0
@@ -563,13 +599,13 @@ struct ShoeAssignmentSettingsView: View {
                         reassign()
                     }
                 ))
-                Text("When a workout does not already have a shoe, TrainOrRest can choose one based on workout type and your shoe preferences.")
+                Text(language.integrations.autoPickShoeExplanation)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            Section("Selection strategy") {
-                Picker("Strategy", selection: Binding(
+            Section(language.integrations.selectionStrategy) {
+                Picker(language.integrations.strategy, selection: Binding(
                     get: { preferences.shoeAutoAssignmentStrategy },
                     set: {
                         preferences.shoeAutoAssignmentStrategy = $0
@@ -577,16 +613,16 @@ struct ShoeAssignmentSettingsView: View {
                     }
                 )) {
                     ForEach(ShoeAutoAssignmentStrategy.allCases) { strategy in
-                        Text(strategy.displayName).tag(strategy)
+                        Text(language.integrations.shoeAssignmentStrategy(strategy)).tag(strategy)
                     }
                 }
-                Text(preferences.shoeAutoAssignmentStrategy.description)
+                Text(language.integrations.shoeAssignmentStrategyDescription(preferences.shoeAutoAssignmentStrategy))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            Section("Mileage range") {
-                Toggle("Avoid shoes near mileage limit", isOn: Binding(
+            Section(language.integrations.mileageRange) {
+                Toggle(language.integrations.avoidShoesNearMileageLimit, isOn: Binding(
                     get: { preferences.avoidNearRetirementShoes },
                     set: {
                         preferences.avoidNearRetirementShoes = $0
@@ -594,7 +630,7 @@ struct ShoeAssignmentSettingsView: View {
                         reassign()
                     }
                 ))
-                Stepper("Avoid after \(Int(preferences.nearRetirementThresholdPercent.rounded()))%", value: Binding(
+                Stepper(language.integrations.avoidAfter(Int(preferences.nearRetirementThresholdPercent.rounded())), value: Binding(
                     get: { preferences.nearRetirementThresholdPercent },
                     set: {
                         preferences.nearRetirementThresholdPercent = $0
@@ -624,13 +660,17 @@ struct WorkoutShoeRow: View {
     let shoe: RunningShoe?
     let source: ShoeAssignmentSource
     let isNearMileageRange: Bool
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+
 
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "shoeprints.fill")
                 .foregroundStyle(isNearMileageRange ? Theme.warn : Theme.accent)
             VStack(alignment: .leading, spacing: 2) {
-                Text(shoe?.displayName ?? "Choose shoe")
+                Text(shoe?.displayName ?? language.integrations.chooseShoe)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.text)
                 Text(subtitle)
@@ -639,7 +679,7 @@ struct WorkoutShoeRow: View {
             }
             Spacer()
             if source == .auto {
-                Text("Auto")
+                Text(language.integrations.automatic)
                     .font(.torLabel(10, .bold))
                     .foregroundStyle(Theme.accent)
                     .padding(.horizontal, 7)
@@ -654,10 +694,10 @@ struct WorkoutShoeRow: View {
     }
 
     private var subtitle: String {
-        if isNearMileageRange { return "Near recommended mileage range" }
-        if source == .auto { return "Automatically selected" }
-        if shoe == nil { return "Add shoe" }
-        return "Running shoe"
+        if isNearMileageRange { return language.integrations.nearRecommendedMileageRange }
+        if source == .auto { return language.integrations.automaticallySelected }
+        if shoe == nil { return language.integrations.addShoe }
+        return language.integrations.runningShoe
     }
 }
 
@@ -671,6 +711,10 @@ struct ShoePickerSheet: View {
     let onAutomatic: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+
 
     private var recommended: RunningShoe? {
         recommendedShoeID.flatMap { id in shoes.first { $0.id == id } }
@@ -688,34 +732,34 @@ struct ShoePickerSheet: View {
         NavigationStack {
             List {
                 if let recommended {
-                    Section("Recommended") {
-                        shoeButton(recommended, trailing: "Recommended")
+                    Section(language.integrations.recommended) {
+                        shoeButton(recommended, trailing: language.integrations.recommended)
                     }
                 }
                 if !matches.isEmpty {
-                    Section("Other matches") {
+                    Section(language.integrations.otherMatches) {
                         ForEach(matches, id: \.id) { shoeButton($0) }
                     }
                 }
                 if !others.isEmpty {
-                    Section("Other shoes") {
+                    Section(language.integrations.otherShoes) {
                         ForEach(others, id: \.id) { shoeButton($0) }
                     }
                 }
                 Section {
                     if allowsAutomaticSelection, let onAutomatic {
-                        Button("Use automatic selection") {
+                        Button(language.integrations.useAutomaticSelection) {
                             onAutomatic()
                             dismiss()
                         }
                     }
-                    Button("No shoe") {
+                    Button(language.integrations.noShoe) {
                         onSelect(nil)
                         dismiss()
                     }
                 }
             }
-            .navigationTitle("Choose a shoe")
+            .navigationTitle(language.integrations.chooseAShoe)
             .navigationBarTitleDisplayMode(.inline)
         }
     }
@@ -729,7 +773,7 @@ struct ShoePickerSheet: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(shoe.displayName)
                         .font(.headline)
-                    Text("\(shoe.preferredTypesText) · \(kmText(ShoeMileageService.currentMileageKm(for: shoe, ledger: mileageEntries))) km")
+                    Text("\(language.integrations.shoeTypes(shoe.preferredWorkoutTypes)) · \(Formatters.kilometers(ShoeMileageService.currentMileageKm(for: shoe, ledger: mileageEntries) * 1000))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -744,13 +788,6 @@ struct ShoePickerSheet: View {
     }
 }
 
-func kmText(_ value: Double) -> String {
-    let rounded = value.rounded()
-    if abs(value - rounded) < 0.05 {
-        return "\(Int(rounded))"
-    }
-    return String(format: "%.1f", value)
-}
 
 #if DEBUG
 @MainActor

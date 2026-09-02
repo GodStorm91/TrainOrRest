@@ -4,6 +4,46 @@ enum ReadinessVerdict: String, Codable {
     case train, goEasy, rest, insufficientData
 }
 
+/// Stable, localized-at-display-time explanation for a readiness flag.
+///
+/// `englishText` deliberately preserves the persisted English reasons used by
+/// the coach prompt and existing callers; UI surfaces should render these
+/// codes through `CoachLanguage`.
+enum ReadinessReason: Codable, Equatable {
+    case illness
+    case hrvDisputed
+    case hrvBelowBaseline(ms: Double, band: Double)
+    case restingHRAbove(bpm: Int)
+    case sleptHours(h: Double)
+    case loadRamping(acwr: Double)
+    case sorenessTwoDays
+    case sorenessWatching
+    case corroboratingSignal(CheckInSignal)
+
+    var englishText: String {
+        switch self {
+        case .illness:
+            "Reported illness"
+        case .hrvDisputed:
+            "HRV disputed between sources — not counted"
+        case let .hrvBelowBaseline(ms, band):
+            String(format: "HRV %.0f ms below %.0f ms baseline band", ms, band)
+        case let .restingHRAbove(bpm):
+            "Resting HR \(bpm) bpm above baseline"
+        case let .sleptHours(h):
+            String(format: "Slept %.1f h last night", h)
+        case let .loadRamping(acwr):
+            String(format: "Training load ramping fast (%.2f× your usual)", acwr)
+        case .sorenessTwoDays:
+            "Reported soreness for 2 consecutive days"
+        case .sorenessWatching:
+            "Reported soreness; watching for a second day"
+        case let .corroboratingSignal(signal):
+            "Reported \(signal.displayName.lowercased()) (corroborates recovery signals)"
+        }
+    }
+}
+
 /// A day of wellness metrics reduced to what readiness scoring needs.
 struct WellnessSample: Equatable {
     var date: Date
@@ -16,8 +56,11 @@ struct ReadinessAssessment: Equatable {
     var verdict: ReadinessVerdict
     /// 0–100 readiness score driving the gauge; nil when insufficientData.
     var score: Int? = nil
-    /// Human-readable explanation per triggered flag, worst first.
+    /// Human-readable English explanation per triggered flag, worst first.
+    /// This is persisted for coach context and backward compatibility.
     var reasons: [String]
+    /// Stable explanations localized by UI surfaces at display time.
+    var reasonCodes: [ReadinessReason] = []
     /// Stable deterministic rule identifiers for receipts, worst first.
     var ruleIDs: [ReadinessRuleID] = []
     /// True when the evidence is soft or not persistent enough to cut volume.
@@ -74,7 +117,7 @@ enum ReadinessEngine {
 
     private struct DayEvaluation {
         var verdict: ReadinessVerdict
-        var reasons: [String]
+        var reasonCodes: [ReadinessReason]
         var hedged: Bool
         var baselineDayCount: Int
         var snapshot: ReadinessAssessment.Snapshot
@@ -149,7 +192,8 @@ enum ReadinessEngine {
         return ReadinessAssessment(
             verdict: current.verdict,
             score: score,
-            reasons: current.reasons,
+            reasons: current.reasonCodes.map(\.englishText),
+            reasonCodes: current.reasonCodes,
             ruleIDs: current.ruleIDs.uniquePreservingOrder(),
             hedged: current.hedged,
             primaryRule: primaryRule,
@@ -198,7 +242,7 @@ enum ReadinessEngine {
         if forceRest {
             return DayEvaluation(
                 verdict: .rest,
-                reasons: ["Reported illness"],
+                reasonCodes: [.illness],
                 hedged: false,
                 baselineDayCount: baselineDays,
                 snapshot: snapshot,
@@ -213,7 +257,7 @@ enum ReadinessEngine {
         guard baselineDays >= Tuning.minBaselineDays else {
             return DayEvaluation(
                 verdict: .insufficientData,
-                reasons: [],
+                reasonCodes: [],
                 hedged: false,
                 baselineDayCount: baselineDays,
                 snapshot: snapshot,
@@ -225,7 +269,7 @@ enum ReadinessEngine {
             )
         }
 
-        var reasons: [String] = []
+        var reasonCodes: [ReadinessReason] = []
         var ruleIDs: [ReadinessRuleID] = []
         var hrvLow = false
         var rhrHigh = false
@@ -238,15 +282,11 @@ enum ReadinessEngine {
            recentHRV < hrvStats.median - hrvMultiplier * hrvStats.standardDeviation {
             if disputedMetrics.contains(.hrv) {
                 hasDisputedHRV = true
-                reasons.append("HRV disputed between sources — not counted")
+                reasonCodes.append(.hrvDisputed)
                 ruleIDs.append(.sourceDispute)
             } else {
                 hrvLow = true
-                reasons.append(String(
-                    format: "HRV %.0f ms below %.0f ms baseline band",
-                    recentHRV,
-                    hrvStats.median
-                ))
+                reasonCodes.append(.hrvBelowBaseline(ms: recentHRV, band: hrvStats.median))
                 ruleIDs.append(.hrvLow)
             }
         } else if hrvMultiplier > 1.0,
@@ -263,7 +303,7 @@ enum ReadinessEngine {
            recentRHR > rhrStats.median + max(Tuning.rhrRiseBpm, rhrMultiplier * rhrStats.standardDeviation) {
             rhrHigh = true
             let rise = Int((recentRHR - rhrStats.median).rounded())
-            reasons.append("Resting HR \(rise) bpm above baseline")
+            reasonCodes.append(.restingHRAbove(bpm: rise))
             ruleIDs.append(.rhrElevated)
         } else if rhrMultiplier > 1.0,
                   let recentRHR,
@@ -279,14 +319,14 @@ enum ReadinessEngine {
             let belowMean = sleepMean14.map { sleepLastNight < Tuning.sleepDropRatio * $0 } ?? false
             if belowFloor || belowMean {
                 sleepShort = true
-                reasons.append(String(format: "Slept %.1f h last night", sleepLastNight))
+                reasonCodes.append(.sleptHours(h: sleepLastNight))
                 ruleIDs.append(.shortSleep)
             }
         }
 
         if let acwr, acwr > Tuning.acwrLimit {
             acwrHigh = true
-            reasons.append(String(format: "Training load ramping fast (%.2f× your usual)", acwr))
+            reasonCodes.append(.loadRamping(acwr: acwr))
             ruleIDs.append(.loadRamp)
         }
 
@@ -305,17 +345,17 @@ enum ReadinessEngine {
         if checkIns.contains(.sore) {
             if hasSorenessFlag {
                 corroboratedFlagCount += 1
-                reasons.append("Reported soreness for 2 consecutive days")
+                reasonCodes.append(.sorenessTwoDays)
                 ruleIDs.append(.soreness)
             } else {
-                reasons.append("Reported soreness; watching for a second day")
+                reasonCodes.append(.sorenessWatching)
             }
         }
 
         if wearableCount > 0 {
-            let corroborators = corroboratingReasons(for: checkIns)
+            let corroborators = corroboratingReasonCodes(for: checkIns)
             corroboratedFlagCount += corroborators.count
-            reasons.append(contentsOf: corroborators)
+            reasonCodes.append(contentsOf: corroborators)
         }
 
         let verdict: ReadinessVerdict
@@ -346,7 +386,7 @@ enum ReadinessEngine {
         let primaryRule = primaryRule(hrvLow: hrvLow, acwrHigh: acwrHigh, rhrHigh: rhrHigh, sleepShort: sleepShort)
         return DayEvaluation(
             verdict: verdict,
-            reasons: reasons,
+            reasonCodes: reasonCodes,
             hedged: hedged,
             baselineDayCount: baselineDays,
             snapshot: snapshot,
@@ -513,10 +553,10 @@ enum ReadinessEngine {
         return sorted[mid]
     }
 
-    private static func corroboratingReasons(for checkIns: Set<CheckInSignal>) -> [String] {
+    private static func corroboratingReasonCodes(for checkIns: Set<CheckInSignal>) -> [ReadinessReason] {
         CheckInSignal.allCases
             .filter { $0.role == .corroborator && checkIns.contains($0) }
-            .map { "Reported \($0.displayName.lowercased()) (corroborates recovery signals)" }
+            .map(ReadinessReason.corroboratingSignal)
     }
 }
 

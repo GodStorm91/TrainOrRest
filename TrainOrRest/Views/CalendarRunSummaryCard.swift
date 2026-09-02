@@ -7,6 +7,9 @@ struct CalendarRunSummaryCard: View {
     var compact: Bool = false
     var reviewDestination: ChatView? = nil
     var onReview: (() -> Void)? = nil
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
 
     private var load: Int {
         Int(TrainingLoad.sessionLoad(durationSeconds: activity.durationSeconds, avgPaceSecondsPerKm: activity.avgPaceSecondsPerKm, paces: nil).rounded())
@@ -29,7 +32,7 @@ struct CalendarRunSummaryCard: View {
                     .frame(width: 30, height: 30)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Running")
+                    Text(language.history.running)
                         .font(.torHeading(16, .bold))
                         .foregroundStyle(Theme.text)
                     Text(sourceLine)
@@ -40,7 +43,7 @@ struct CalendarRunSummaryCard: View {
                 Spacer(minLength: 8)
 
                 if activity.postRunReviewDismissedAt != nil {
-                    Text("REVIEWED")
+                    Text(language.history.reviewed)
                         .font(.torLabel(9, .bold))
                         .foregroundStyle(Theme.good)
                         .padding(.horizontal, 7)
@@ -77,20 +80,20 @@ struct CalendarRunSummaryCard: View {
                 reviewLabel
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Review run with Coach")
+            .accessibilityLabel(language.history.reviewRunWithCoach)
         } else if let onReview {
             Button(action: onReview) {
                 reviewLabel
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Review run")
+            .accessibilityLabel(language.history.reviewRun)
         }
     }
 
     private var reviewLabel: some View {
         HStack(spacing: 5) {
             Image(systemName: "message.badge")
-            Text("Review")
+            Text(language.history.review)
         }
         .font(.footnote.weight(.bold))
         .foregroundStyle(.white)
@@ -102,18 +105,18 @@ struct CalendarRunSummaryCard: View {
     private var metricSummary: some View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .bottom, spacing: 12) {
-                metric("Duration", Formatters.duration(activity.durationSeconds).replacingOccurrences(of: " ", with: ""), fixedWidth: true)
-                metric("Distance", Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " ", with: ""), fixedWidth: true)
-                metric("Pace", Formatters.pace(activity.avgPaceSecondsPerKm).replacingOccurrences(of: " /km", with: "/km"), fixedWidth: true)
-                metric("Load", "\(load)", fixedWidth: true)
+                metric(language.history.duration, Formatters.duration(activity.durationSeconds).replacingOccurrences(of: " ", with: ""), fixedWidth: true)
+                metric(language.history.distance, Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " ", with: ""), fixedWidth: true)
+                metric(language.history.pace, Formatters.pace(activity.avgPaceSecondsPerKm).replacingOccurrences(of: " /km", with: "/km"), fixedWidth: true)
+                metric(language.history.load, "\(load)", fixedWidth: true)
                 Spacer(minLength: 4)
                 reviewAction
             }
             VStack(alignment: .leading, spacing: 10) {
-                metric("Duration", Formatters.duration(activity.durationSeconds).replacingOccurrences(of: " ", with: ""))
-                metric("Distance", Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " ", with: ""))
-                metric("Pace", Formatters.pace(activity.avgPaceSecondsPerKm).replacingOccurrences(of: " /km", with: "/km"))
-                metric("Load", "\(load)")
+                metric(language.history.duration, Formatters.duration(activity.durationSeconds).replacingOccurrences(of: " ", with: ""))
+                metric(language.history.distance, Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " ", with: ""))
+                metric(language.history.pace, Formatters.pace(activity.avgPaceSecondsPerKm).replacingOccurrences(of: " /km", with: "/km"))
+                metric(language.history.load, "\(load)")
                 reviewAction
             }
         }
@@ -122,7 +125,7 @@ struct CalendarRunSummaryCard: View {
     private var sourceLine: String {
         let clean = activity.sourceName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return "Apple Health" }
-        if clean.localizedCaseInsensitiveContains("garmin") { return "\(clean) via Garmin" }
+        if clean.localizedCaseInsensitiveContains("garmin") { return language.history.viaGarmin(clean) }
         return clean
     }
 

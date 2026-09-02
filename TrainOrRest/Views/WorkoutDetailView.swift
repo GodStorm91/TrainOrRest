@@ -24,14 +24,18 @@ struct WorkoutDetailView: View {
     @State private var smartOperationKey = UUID().uuidString
     @State private var isChoosingShoe = false
 
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+
     var body: some View {
         List {
             Section {
-                LabeledContent("Date", value: workout.date.formatted(date: .complete, time: .omitted))
-                LabeledContent("Workout", value: workout.kind?.displayName ?? workout.kindRaw)
-                LabeledContent("Distance", value: Formatters.kilometers(workout.distanceKm * 1000))
+                LabeledContent(language.plan.date, value: workout.date.formatted(.dateTime.year().month(.wide).day().weekday(.wide).locale(language.uiLocale)))
+                LabeledContent(language.plan.workout, value: workout.kind.map(language.name) ?? language.genericRunLabel)
+                LabeledContent(language.plan.distance, value: Formatters.kilometers(workout.distanceKm * 1000))
                 if let band = workout.paceBand {
-                    LabeledContent("Pace", value: Formatters.paceBand(band))
+                    LabeledContent(language.plan.pace, value: Formatters.paceBand(band))
                 }
                 Text(workout.details)
                     .font(.callout)
@@ -39,38 +43,38 @@ struct WorkoutDetailView: View {
             }
 
             if let scheduleUpdatedAt = workout.scheduleUpdatedAt, workout.scheduleUpdatedFrom == "googleCalendar" {
-                Section("Schedule history") {
-                    LabeledContent("Scheduled from", value: "Google Calendar")
-                    LabeledContent("Updated", value: scheduleUpdatedAt.formatted(date: .abbreviated, time: .shortened))
+                Section(language.plan.scheduleHistory) {
+                    LabeledContent(language.plan.scheduledFrom, value: "Google Calendar")
+                    LabeledContent(language.plan.updated, value: "\(language.shortDate(scheduleUpdatedAt)) \(language.time(scheduleUpdatedAt))")
                 }
             }
 
             if isNotVisibleInGoogleCalendar {
                 Section {
-                    Label("Not shown in Google Calendar", systemImage: "calendar.badge.exclamationmark")
+                    Label(language.plan.notShownInGoogleCalendar, systemImage: "calendar.badge.exclamationmark")
                         .foregroundStyle(Theme.warn)
-                    Text("This workout still exists in your TrainOrRest plan.")
+                    Text(language.plan.workoutStillInPlan)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Button {
                         googleCalendar.addBackToGoogleCalendar(workoutID: workout.uuid)
                     } label: {
-                        Label("Add back to Google Calendar", systemImage: "calendar.badge.plus")
+                        Label(language.plan.addBackToGoogleCalendar, systemImage: "calendar.badge.plus")
                     }
                 }
             }
 
             if smartSchedulingEnabled {
-                Section("Smart Scheduling") {
+                Section(language.plan.smartScheduling) {
                     if isTimed(workout.date) {
                         scheduledSmartSchedulingSummary
                     } else if smartCandidates.isEmpty {
                         Button {
                             Task { await refreshSmartCandidates() }
                         } label: {
-                            Label(isFindingSmartTime ? "Finding a time" : "Find a time", systemImage: "sparkles")
+                            Label(isFindingSmartTime ? language.plan.findingTime : language.plan.findTime, systemImage: "sparkles")
                         }
-                        .accessibilityLabel("Find a time")
+                        .accessibilityLabel(language.plan.findTimeAccessibility)
                         .disabled(isFindingSmartTime)
                     } else {
                         bestSmartSchedulingCard
@@ -84,7 +88,7 @@ struct WorkoutDetailView: View {
             }
 
             if let matched = matchedActivity {
-                Section("Completed Run") {
+                Section(language.plan.completedRunSection) {
                     NavigationLink {
                         ActivityDetailView(activity: matched)
                     } label: {
@@ -93,7 +97,7 @@ struct WorkoutDetailView: View {
                 }
             }
 
-            Section("Gear") {
+            Section(language.plan.gear) {
                 Button {
                     isChoosingShoe = true
                 } label: {
@@ -105,24 +109,25 @@ struct WorkoutDetailView: View {
                 }
                 .buttonStyle(.plain)
                 if assignedShoe?.status == .retired {
-                    Text("This workout uses a retired shoe.")
+                    Text(language.plan.retiredShoeNotice)
                         .font(.caption)
                         .foregroundStyle(Theme.warn)
                 }
             }
 
-            Section("Status") {
+            Section(language.plan.status) {
                 statusButtons
             }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.bg)
-        .navigationTitle(workout.date.formatted(.dateTime.month(.abbreviated).day()))
+        .navigationTitle(language.shortDate(workout.date))
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $isChoosingSmartTime) {
             SmartSchedulingTimeSheet(
                 workout: workout,
                 candidates: smartCandidates,
+                language: language,
                 selectedCandidateID: $selectedCandidateID,
                 customStartTime: $customStartTime,
                 customValidation: $customValidation,
@@ -233,11 +238,11 @@ struct WorkoutDetailView: View {
 
     private var bestSmartSchedulingCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Best available slot", systemImage: "sparkles")
+            Label(language.plan.bestAvailableSlot, systemImage: "sparkles")
                 .font(.subheadline.weight(.semibold))
             if let candidate = bestSmartCandidate {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(candidate.startTime.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                    Text(language.longDate(candidate.startTime))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(timeRange(candidate.startTime, candidate.endTime))
@@ -252,7 +257,7 @@ struct WorkoutDetailView: View {
                     Button {
                         openSmartSchedulingSheet(selecting: candidate)
                     } label: {
-                        Label("Choose another time", systemImage: "clock")
+                        Label(language.plan.chooseAnotherTime, systemImage: "clock")
                             .frame(minHeight: 44)
                     }
                     .buttonStyle(.bordered)
@@ -260,7 +265,7 @@ struct WorkoutDetailView: View {
                     Button {
                         Task { await applySmartCandidate(candidate) }
                     } label: {
-                        Label("Use \(timeText(candidate.startTime))", systemImage: "checkmark.circle.fill")
+                        Label(language.plan.useTime(timeText(candidate.startTime)), systemImage: "checkmark.circle.fill")
                             .frame(minHeight: 44)
                     }
                     .buttonStyle(.borderedProminent)
@@ -272,7 +277,7 @@ struct WorkoutDetailView: View {
 
     private var scheduledSmartSchedulingSummary: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Scheduled", systemImage: "clock.badge.checkmark")
+            Label(language.plan.scheduled, systemImage: "clock.badge.checkmark")
                 .font(.subheadline.weight(.semibold))
             let end = Calendar.current.date(
                 byAdding: .second,
@@ -281,14 +286,14 @@ struct WorkoutDetailView: View {
             ) ?? workout.date
             Text(timeRange(workout.date, end))
                 .font(.headline)
-            Label("Synced with Google Calendar when connection is available", systemImage: "checkmark")
+            Label(language.plan.syncedWhenAvailable, systemImage: "checkmark")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Button {
                 Task { await refreshSmartCandidates() }
                 openSmartSchedulingSheet(selecting: nil)
             } label: {
-                Label("Change time", systemImage: "clock.arrow.circlepath")
+                Label(language.plan.changeTime, systemImage: "clock.arrow.circlepath")
                     .frame(minHeight: 44)
             }
             .buttonStyle(.bordered)
@@ -303,7 +308,7 @@ struct WorkoutDetailView: View {
         defer { isFindingSmartTime = false }
         smartCandidates = await googleCalendar.refreshedSmartSchedulingCandidates(for: workout, sameDayOnly: true, allowLockedWorkoutUpdate: true)
         if smartCandidates.isEmpty {
-            smartSchedulingMessage = "No suitable time found on \(workout.date.formatted(.dateTime.weekday(.wide)))."
+            smartSchedulingMessage = language.plan.noSuitableTime(workout.date)
         } else {
             smartSchedulingMessage = nil
         }
@@ -350,10 +355,10 @@ struct WorkoutDetailView: View {
         smartApplyResult = result
         if case .completed = result.status {
             smartCandidates = []
-            smartSchedulingMessage = "Workout scheduled for \(timeText(start))."
+            smartSchedulingMessage = language.plan.workoutScheduledFor(timeText(start))
         } else if case .queued = result.status {
             smartCandidates = []
-            smartSchedulingMessage = "Workout scheduled. Google Calendar will update when online."
+            smartSchedulingMessage = language.plan.workoutScheduledPendingSync
         }
     }
 
@@ -380,10 +385,10 @@ struct WorkoutDetailView: View {
         smartApplyResult = result
         if case .completed = result.status {
             smartCandidates = []
-            smartSchedulingMessage = "Workout scheduled for \(timeText(candidate.startTime))."
+            smartSchedulingMessage = language.plan.workoutScheduledFor(timeText(candidate.startTime))
         } else if case .queued = result.status {
             smartCandidates = []
-            smartSchedulingMessage = "Workout scheduled. Google Calendar will update when online."
+            smartSchedulingMessage = language.plan.workoutScheduledPendingSync
         }
     }
 
@@ -405,7 +410,7 @@ struct WorkoutDetailView: View {
     }
 
     private func timeText(_ date: Date) -> String {
-        date.formatted(date: .omitted, time: .shortened)
+        language.time(date)
     }
 
     private func timeRange(_ start: Date, _ end: Date) -> String {
@@ -414,21 +419,21 @@ struct WorkoutDetailView: View {
 
     private func userFacingReasons(for candidate: SchedulingCandidate) -> [String] {
         let natural = candidate.reasons.filter { !$0.localizedCaseInsensitiveContains("minute window") }
-        return Array((natural.isEmpty ? ["No calendar conflicts"] : natural).prefix(3))
+        return Array((natural.isEmpty ? [language.plan.noCalendarConflicts] : natural.map(language.plan.schedulingMessage)).prefix(3))
     }
 
     private var statusButtons: some View {
         VStack(alignment: .leading, spacing: 8) {
             ViewThatFits(in: .horizontal) {
                 HStack {
-                    statusButton("Done", status: .done, tint: Theme.good)
-                    statusButton("Skipped", status: .skipped, tint: Theme.warn)
-                    statusButton("Planned", status: .planned, tint: Theme.accent)
+                    statusButton(status: .done, tint: Theme.good)
+                    statusButton(status: .skipped, tint: Theme.warn)
+                    statusButton(status: .planned, tint: Theme.accent)
                 }
                 VStack(alignment: .leading, spacing: 8) {
-                    statusButton("Done", status: .done, tint: Theme.good)
-                    statusButton("Skipped", status: .skipped, tint: Theme.warn)
-                    statusButton("Planned", status: .planned, tint: Theme.accent)
+                    statusButton(status: .done, tint: Theme.good)
+                    statusButton(status: .skipped, tint: Theme.warn)
+                    statusButton(status: .planned, tint: Theme.accent)
                 }
             }
             .buttonStyle(.bordered)
@@ -439,8 +444,8 @@ struct WorkoutDetailView: View {
         }
     }
 
-    private func statusButton(_ label: String, status: WorkoutStatus, tint: Color) -> some View {
-        Button(label) {
+    private func statusButton(status: WorkoutStatus, tint: Color) -> some View {
+        Button(language.name(status)) {
             workout.status = status
             // Resetting to planned withdraws the manual decision, so auto-
             // matching may apply again; done/skip stays user-owned.
@@ -456,20 +461,14 @@ struct WorkoutDetailView: View {
     }
 
     private var statusHelpText: String {
-        switch workout.status {
-        case .done:
-            "Done is a manual completion and stays linked to this workout."
-        case .skipped:
-            "Skipped is a manual decision; the planner will not auto-match this workout."
-        case .planned:
-            "Planned clears the manual decision so future sync matching can apply again."
-        }
+        language.plan.statusHelp(workout.status)
     }
 }
 
 private struct SmartSchedulingTimeSheet: View {
     @Bindable var workout: PlannedWorkout
     let candidates: [SchedulingCandidate]
+    let language: CoachLanguage
     @Binding var selectedCandidateID: String?
     @Binding var customStartTime: Date?
     @Binding var customValidation: CustomTimeValidation?
@@ -520,7 +519,7 @@ private struct SmartSchedulingTimeSheet: View {
                             Button {
                                 openCustomTime()
                             } label: {
-                                Label("Choose a custom time", systemImage: "slider.horizontal.3")
+                                Label(language.plan.chooseCustomTime, systemImage: "slider.horizontal.3")
                                     .frame(maxWidth: .infinity, minHeight: 44)
                             }
                             .buttonStyle(.bordered)
@@ -533,7 +532,7 @@ private struct SmartSchedulingTimeSheet: View {
                 .torReadableColumn()
             }
             .background(Theme.bg)
-            .navigationTitle(applyResult == nil ? "Choose start time" : "Workout scheduled")
+            .navigationTitle(applyResult == nil ? language.plan.chooseStartTime : language.plan.workoutScheduledTitle)
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom) {
                 if applyResult == nil {
@@ -548,12 +547,12 @@ private struct SmartSchedulingTimeSheet: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text("\(workout.kind?.displayName ?? workout.kindRaw) · \(String(format: "%.1f", workout.distanceKm)) km")
+            Text("\(workout.kind.map(language.name) ?? language.plan.workout) · \(String(format: "%.1f", workout.distanceKm)) km")
                 .font(.headline)
-            Text(workout.date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+            Text(language.longDate(workout.date))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            Text("Estimated duration: \(durationMinutes) min")
+            Text(language.plan.estimatedDuration(durationMinutes))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -561,17 +560,17 @@ private struct SmartSchedulingTimeSheet: View {
 
     private var candidateList: some View {
         VStack(alignment: .leading, spacing: 10) {
-            TorEyebrow("Available times").tracking(1.6)
+            TorEyebrow(language.plan.availableTimes).tracking(1.6)
             if candidates.isEmpty {
                 ContentUnavailableView(
-                    "No suitable time found",
+                    language.plan.noSuitableTimeFound,
                     systemImage: "clock.badge.exclamationmark",
-                    description: Text("This workout needs a clear window plus buffers.")
+                    description: Text(language.plan.needsClearWindow)
                 )
                 Button {
                     onCancel()
                 } label: {
-                    Label("Choose another day", systemImage: "calendar")
+                    Label(language.plan.chooseAnotherDay, systemImage: "calendar")
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.bordered)
@@ -600,22 +599,22 @@ private struct SmartSchedulingTimeSheet: View {
                         Text(timeRange(candidate.startTime, candidate.endTime))
                             .font(.headline)
                         if selected {
-                            Text("Selected")
+                            Text(language.plan.selected)
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(Theme.accent)
                         } else if candidate.isRecommended {
-                            Text("Recommended")
+                            Text(language.plan.recommended)
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(Theme.good)
                         }
                     }
                     ForEach(candidate.reasons.prefix(2), id: \.self) { reason in
-                        Text(reason)
+                        Text(language.plan.schedulingMessage(reason))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     ForEach(candidate.warnings.prefix(1), id: \.self) { warning in
-                        Text(warning)
+                        Text(language.plan.schedulingMessage(warning))
                             .font(.caption)
                             .foregroundStyle(Theme.warn)
                     }
@@ -631,9 +630,9 @@ private struct SmartSchedulingTimeSheet: View {
 
     private var customTimePicker: some View {
         VStack(alignment: .leading, spacing: 14) {
-            TorEyebrow("Custom start time").tracking(1.6)
+            TorEyebrow(language.plan.customStartTime).tracking(1.6)
             DatePicker(
-                "Start time",
+                language.plan.startTime,
                 selection: $pickerDate,
                 displayedComponents: .hourAndMinute
             )
@@ -644,9 +643,9 @@ private struct SmartSchedulingTimeSheet: View {
                 onValidateCustomTime(start)
             }
             if let activeEnd {
-                LabeledContent("Estimated end", value: timeText(activeEnd))
+                LabeledContent(language.plan.estimatedEnd, value: timeText(activeEnd))
             }
-            Text("Required window: \(durationMinutes) min workout + buffers")
+            Text(language.plan.requiredWindow(durationMinutes))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -657,15 +656,15 @@ private struct SmartSchedulingTimeSheet: View {
             if let customValidation {
                 validationBlock(customValidation)
             } else if let selectedCandidate {
-                Text("\(timeText(selectedCandidate.startTime)) is available")
+                Text(language.plan.timeAvailability(timeText(selectedCandidate.startTime), available: true))
                     .font(.headline)
                 ForEach(selectedCandidate.reasons.prefix(3), id: \.self) { reason in
-                    Label(reason, systemImage: "checkmark")
+                    Label(language.plan.schedulingMessage(reason), systemImage: "checkmark")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 ForEach(selectedCandidate.warnings.prefix(2), id: \.self) { warning in
-                    Text(warning)
+                    Text(language.plan.schedulingMessage(warning))
                         .font(.caption)
                         .foregroundStyle(Theme.warn)
                 }
@@ -675,30 +674,30 @@ private struct SmartSchedulingTimeSheet: View {
 
     private func validationBlock(_ validation: CustomTimeValidation) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(validation.allowsScheduling ? "\(timeText(validation.requestedStart)) is available" : "\(timeText(validation.requestedStart)) is not available")
+            Text(language.plan.timeAvailability(timeText(validation.requestedStart), available: validation.allowsScheduling))
                 .font(.headline)
                 .foregroundStyle(validation.allowsScheduling ? Theme.good : Theme.warn)
             if validation.allowsScheduling {
-                Text("Workout \(timeRange(validation.requestedStart, validation.calculatedEnd))")
+                Text(language.plan.workoutTimeRange(timeRange(validation.requestedStart, validation.calculatedEnd)))
                     .font(.subheadline.weight(.semibold))
                 ForEach(validation.reasons.prefix(3), id: \.self) { reason in
-                    Label(reason, systemImage: "checkmark")
+                    Label(language.plan.schedulingMessage(reason), systemImage: "checkmark")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 ForEach(validation.warnings.prefix(2), id: \.self) { warning in
-                    Text(warning)
+                    Text(language.plan.schedulingMessage(warning))
                         .font(.caption)
                         .foregroundStyle(Theme.warn)
                 }
             } else {
                 ForEach(validation.conflicts.prefix(2), id: \.self) { conflict in
-                    Text(conflict)
+                    Text(language.plan.schedulingMessage(conflict))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 if !validation.nearestAlternatives.isEmpty {
-                    Text("Nearest available options")
+                    Text(language.plan.nearestAvailableOptions)
                         .font(.subheadline.weight(.semibold))
                     ForEach(validation.nearestAlternatives.prefix(2)) { candidate in
                         Button(timeRange(candidate.startTime, candidate.endTime)) {
@@ -716,10 +715,10 @@ private struct SmartSchedulingTimeSheet: View {
 
     private var fixedToggle: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Toggle("Keep this time fixed", isOn: $keepSelectedTimeFixed)
+            Toggle(language.plan.keepTimeFixed, isOn: $keepSelectedTimeFixed)
                 .font(.subheadline.weight(.semibold))
-                .accessibilityLabel("Keep this scheduled time fixed")
-            Text("Smart Scheduling will not suggest moving this workout during future schedule optimization.")
+                .accessibilityLabel(language.plan.keepTimeFixedAccessibility)
+            Text(language.plan.keepTimeFixedDescription)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -743,7 +742,7 @@ private struct SmartSchedulingTimeSheet: View {
     }
 
     private var cancelAction: some View {
-        Button(isChoosingCustomTime ? "Back" : "Cancel") {
+        Button(isChoosingCustomTime ? language.backLabel : language.plan.cancel) {
             if isChoosingCustomTime {
                 isChoosingCustomTime = false
             } else {
@@ -763,11 +762,11 @@ private struct SmartSchedulingTimeSheet: View {
             }
         } label: {
             if isApplying {
-                Label("Scheduling workout", systemImage: "hourglass")
+                Label(language.plan.schedulingWorkout, systemImage: "hourglass")
             } else if isChoosingCustomTime, customValidation == nil {
-                Label("Check \(timeText(time(onWorkoutDateMatching: pickerDate)))", systemImage: "checkmark.shield")
+                Label(language.plan.checkTime(timeText(time(onWorkoutDateMatching: pickerDate))), systemImage: "checkmark.shield")
             } else {
-                Label(activeStart.map { "Schedule at \(timeText($0))" } ?? "Schedule", systemImage: "checkmark.circle.fill")
+                Label(activeStart.map { language.plan.scheduleAt(timeText($0)) } ?? language.plan.schedule, systemImage: "checkmark.circle.fill")
             }
         }
         .buttonStyle(.borderedProminent)
@@ -779,47 +778,47 @@ private struct SmartSchedulingTimeSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             switch result.status {
             case .completed, .queued:
-                Label("Workout scheduled", systemImage: "checkmark.circle.fill")
+                Label(language.plan.workoutScheduledTitle, systemImage: "checkmark.circle.fill")
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(Theme.good)
                 if let start = result.scheduledStart, let end = result.scheduledEnd {
-                    Text("\(workout.kind?.displayName ?? "Workout")\n\(workout.date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))\n\(timeRange(start, end))")
+                    Text("\(workout.kind.map(language.name) ?? language.plan.workout)\n\(language.longDate(workout.date))\n\(timeRange(start, end))")
                         .font(.headline)
                 }
-                Text(result.googleCalendarMessage)
+                Text(language.plan.schedulingMessage(result.googleCalendarMessage))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 12) {
-                        Button("Undo") { onUndo() }
+                        Button(language.plan.undo) { onUndo() }
                             .buttonStyle(.bordered)
                             .frame(maxWidth: .infinity, minHeight: 44)
-                        Button("Done") { onDone() }
+                        Button(language.plan.done) { onDone() }
                             .buttonStyle(.borderedProminent)
                             .frame(maxWidth: .infinity, minHeight: 44)
                     }
                     VStack(alignment: .leading, spacing: 8) {
-                        Button("Undo") { onUndo() }
+                        Button(language.plan.undo) { onUndo() }
                             .buttonStyle(.bordered)
                             .frame(maxWidth: .infinity, minHeight: 44)
-                        Button("Done") { onDone() }
+                        Button(language.plan.done) { onDone() }
                             .buttonStyle(.borderedProminent)
                             .frame(maxWidth: .infinity, minHeight: 44)
                     }
                 }
             case .stale(let validation):
                 validationBlock(validation)
-                Button("Refresh options") { onCancel() }
+                Button(language.plan.refreshOptions) { onCancel() }
                     .buttonStyle(.borderedProminent)
                     .frame(maxWidth: .infinity, minHeight: 44)
             case .failed(let message):
-                Label("Could not schedule the workout", systemImage: "exclamationmark.triangle")
+                Label(language.plan.couldNotScheduleWorkout, systemImage: "exclamationmark.triangle")
                     .font(.headline)
                     .foregroundStyle(Theme.warn)
-                Text(message)
+                Text(language.plan.schedulingMessage(message))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Button("Keep current") { onDone() }
+                Button(language.plan.keepCurrent) { onDone() }
                     .buttonStyle(.borderedProminent)
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
@@ -851,7 +850,7 @@ private struct SmartSchedulingTimeSheet: View {
     }
 
     private func timeText(_ date: Date) -> String {
-        date.formatted(date: .omitted, time: .shortened)
+        language.time(date)
     }
 
     private func timeRange(_ start: Date, _ end: Date) -> String {
@@ -859,11 +858,10 @@ private struct SmartSchedulingTimeSheet: View {
     }
 
     private func accessibilityLabel(for candidate: SchedulingCandidate, selected: Bool) -> String {
-        [
-            timeRange(candidate.startTime, candidate.endTime),
-            "available",
-            candidate.isRecommended ? "recommended" : nil,
-            selected ? "selected" : nil
-        ].compactMap { $0 }.joined(separator: ", ")
+        language.plan.candidateAccessibility(
+            range: timeRange(candidate.startTime, candidate.endTime),
+            recommended: candidate.isRecommended,
+            selected: selected
+        )
     }
 }

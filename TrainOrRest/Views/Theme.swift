@@ -9,21 +9,6 @@ enum AppAppearance: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
-        switch self {
-        case .system: "Use System"
-        case .light: "Light"
-        case .dark: "Dark"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .system: "Follows your device appearance."
-        case .light: "Always uses the bright TrainOrRest interface."
-        case .dark: "Always uses the low-glare TrainOrRest interface."
-        }
-    }
 
     var symbolName: String {
         switch self {
@@ -334,11 +319,14 @@ extension Color {
 struct AppAppearanceSelector: View {
     var compact = false
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.system.rawValue
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
 
     private var selection: AppAppearance {
         get { AppAppearance(rawValue: appearanceRaw) ?? .system }
         nonmutating set { appearanceRaw = newValue.rawValue }
     }
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 10 : 12) {
@@ -348,8 +336,8 @@ struct AppAppearanceSelector: View {
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(Theme.accent)
                     VStack(alignment: .leading, spacing: 2) {
-                        TorEyebrow("Appearance")
-                        Text("Adaptive theme")
+                        TorEyebrow(language.onboarding.appearanceEyebrow)
+                        Text(language.onboarding.adaptiveThemeTitle)
                             .font(.torHeading(18, .bold))
                             .foregroundStyle(Theme.text)
                     }
@@ -363,8 +351,8 @@ struct AppAppearanceSelector: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Use System follows your device appearance.")
-                Text("Choose Light or Dark anytime.")
+                Text(language.onboarding.appearanceDescription)
+                Text(language.onboarding.appearanceChangeHint)
             }
             .font(.caption)
             .foregroundStyle(Theme.dim)
@@ -382,7 +370,7 @@ struct AppAppearanceSelector: View {
             VStack(spacing: 6) {
                 Image(systemName: option.symbolName)
                     .font(.system(size: 15, weight: .semibold))
-                Text(option.title)
+                Text(language.onboarding.appearanceTitle(option))
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
@@ -401,7 +389,9 @@ struct AppAppearanceSelector: View {
             .shadow(color: selected ? Theme.accent.opacity(0.20) : .clear, radius: 10, x: 0, y: 4)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(option.title)
-        .accessibilityValue(selected ? "Selected" : option.subtitle)
+        .accessibilityLabel(language.onboarding.appearanceTitle(option))
+        .accessibilityValue(
+            selected ? language.onboarding.selected : language.onboarding.appearanceSubtitle(option)
+        )
     }
 }

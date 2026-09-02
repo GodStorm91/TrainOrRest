@@ -6,8 +6,12 @@ struct ReadinessWidgetSnapshot: Codable, Equatable {
 
     var score: Int?
     var verdictRaw: String
+    /// Retained for snapshot wire compatibility; the widget localizes from `verdictRaw`.
     var verdictText: String
     var reason: String
+    /// Language copied from the app's standard defaults when the snapshot is published.
+    /// Optional keeps snapshots written by older app versions decodable.
+    var languageRaw: String? = nil
     var computedAt: Date?
     var updatedAt: Date
 
@@ -15,29 +19,26 @@ struct ReadinessWidgetSnapshot: Codable, Equatable {
         score: 78,
         verdictRaw: "train",
         verdictText: "Train",
-        reason: "Ready for the planned session",
+        reason: "",
+        languageRaw: "en",
         computedAt: Date(timeIntervalSinceReferenceDate: 0),
         updatedAt: Date(timeIntervalSinceReferenceDate: 0)
     )
 
-    static let unavailable = ReadinessWidgetSnapshot(
-        score: nil,
-        verdictRaw: "insufficientData",
-        verdictText: "Baseline",
-        reason: "Open the app to compute readiness",
-        computedAt: nil,
-        updatedAt: .now
-    )
+    static func unavailable(languageRaw: String? = nil) -> ReadinessWidgetSnapshot {
+        ReadinessWidgetSnapshot(
+            score: nil,
+            verdictRaw: "insufficientData",
+            verdictText: "Baseline",
+            reason: "",
+            languageRaw: languageRaw,
+            computedAt: nil,
+            updatedAt: .now
+        )
+    }
 
     var scoreText: String {
         score.map(String.init) ?? "--"
-    }
-
-    var footerText: String {
-        guard let computedAt else { return "No fresh data" }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return "Updated \(formatter.localizedString(for: computedAt, relativeTo: .now))"
     }
 
     static func load(
@@ -46,7 +47,7 @@ struct ReadinessWidgetSnapshot: Codable, Equatable {
     ) -> ReadinessWidgetSnapshot {
         guard let data = defaults.data(forKey: storageKey),
               let snapshot = try? decoder.decode(ReadinessWidgetSnapshot.self, from: data)
-        else { return .unavailable }
+        else { return .unavailable() }
         return snapshot
     }
 

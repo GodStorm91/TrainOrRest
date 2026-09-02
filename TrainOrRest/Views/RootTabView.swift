@@ -5,11 +5,14 @@ import UIKit
 struct RootTabView: View {
     enum Tab: Hashable { case calendar, chat, profile }
 
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
     @State private var selection: Tab = RootTabView.initialTab
     @State private var isKeyboardVisible = false
     @State private var isBottomDockHiddenByChild = false
     @State private var pendingReviewChatRequest: CalendarReviewChatRequest?
     @Namespace private var dockNamespace
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -22,7 +25,7 @@ struct RootTabView: View {
                 ))
 
             if shouldShowDock {
-                TorTabDock(selection: $selection, namespace: dockNamespace)
+                TorTabDock(selection: $selection, namespace: dockNamespace, language: language)
                     .padding(.bottom, 8)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .zIndex(10)
@@ -111,12 +114,13 @@ enum TorTabDockMetrics {
 private struct TorTabDock: View {
     @Binding var selection: RootTabView.Tab
     let namespace: Namespace.ID
+    let language: CoachLanguage
 
     var body: some View {
         HStack(spacing: 4) {
-            item(.calendar, "Calendar", "calendar")
-            item(.chat, "Chat", "message")
-            item(.profile, "Profile", "person.crop.circle")
+            item(.calendar, language.onboarding.tabTitle(.calendar), "calendar")
+            item(.chat, language.onboarding.tabTitle(.chat), "message")
+            item(.profile, language.onboarding.tabTitle(.profile), "person.crop.circle")
         }
         .padding(4)
         .frame(maxWidth: 292)

@@ -42,6 +42,15 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Coach name used in chat headers.
+    var coachTitle: String {
+        switch self {
+        case .en: "Coach"
+        case .ja: "コーチ"
+        case .vi: "Coach"
+        }
+    }
+
     /// Coach header subtitle.
     var coachStatus: String {
         switch self {
@@ -1284,5 +1293,295 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         let compact = (hours * 10).rounded() / 10
         let number = compact.rounded() == compact ? String(Int(compact)) : String(format: "%.1f", compact)
         return self == .vi ? "\(number) giờ" : self == .ja ? "\(number)時間" : "\(number)h"
+    }
+
+    // MARK: - Chat cards and evidence tray
+
+    var coachEngineLabel: String {
+        switch self {
+        case .en: "Engine"
+        case .ja: "エンジン"
+        case .vi: "Bộ máy"
+        }
+    }
+
+    func readinessScoreLabel(_ score: Int) -> String {
+        switch self {
+        case .en: "Readiness \(score)"
+        case .ja: "コンディション \(score)"
+        case .vi: "Thể trạng \(score)"
+        }
+    }
+
+    func readinessSignalLabel(for id: String, fallback: String) -> String {
+        switch id {
+        case "score":
+            metricReadinessLabel
+        case "sleep":
+            metricSleepLabel
+        case "rhr":
+            metricRestingHRLabel
+        case "hrv":
+            metricHRVLabel
+        case "load":
+            metricLoadLabel
+        default:
+            fallback
+        }
+    }
+
+    func readinessSignalValue(id: String, rawValue: String) -> String {
+        switch (self, id) {
+        case (.en, _), (_, "score"):
+            return rawValue
+        case (.ja, "hrv"), (.ja, "rhr"):
+            let parts = rawValue.components(separatedBy: " vs baseline ")
+            let average = parts[0].replacingOccurrences(of: "7-day ", with: "")
+            return parts.count > 1 ? "7日平均 \(average)・ベースライン \(parts[1])" : "7日平均 \(average)"
+        case (.vi, "hrv"), (.vi, "rhr"):
+            let parts = rawValue.components(separatedBy: " vs baseline ")
+            let average = parts[0].replacingOccurrences(of: "7-day ", with: "")
+            return parts.count > 1 ? "Trung bình 7 ngày \(average) so với mức cơ sở \(parts[1])" : "Trung bình 7 ngày \(average)"
+        case (.ja, "sleep"):
+            let parts = rawValue.components(separatedBy: " last night vs ")
+            guard parts.count > 1 else {
+                return "昨夜 \(rawValue.replacingOccurrences(of: " last night", with: ""))"
+            }
+            return "昨夜 \(parts[0])・14日平均 \(parts[1].replacingOccurrences(of: " 14-day mean", with: ""))"
+        case (.vi, "sleep"):
+            let parts = rawValue.components(separatedBy: " last night vs ")
+            guard parts.count > 1 else {
+                return "Đêm qua \(rawValue.replacingOccurrences(of: " last night", with: ""))"
+            }
+            return "Đêm qua \(parts[0]) so với trung bình 14 ngày \(parts[1].replacingOccurrences(of: " 14-day mean", with: ""))"
+        case (.ja, "load"):
+            return "急性:慢性負荷 \(rawValue.replacingOccurrences(of: " acute:chronic load", with: ""))"
+        case (.vi, "load"):
+            return "Tỷ lệ tải cấp tính:mạn tính \(rawValue.replacingOccurrences(of: " acute:chronic load", with: ""))"
+        default:
+            return rawValue
+        }
+    }
+
+    func metricLabel(for id: String, fallback: String) -> String {
+        readinessSignalLabel(for: id, fallback: fallback)
+    }
+
+    func metricInterpretation(for status: CoachMetric.Status, fallback: String?) -> String? {
+        switch status {
+        case .positive:
+            metricGoodNote
+        case .neutral:
+            metricStableNote
+        case .attention:
+            metricAttentionNote
+        case .unknown:
+            fallback
+        }
+    }
+
+    func sourceLabel(for kind: CoachDataSource.Kind) -> String {
+        switch kind {
+        case .healthData:
+            sourceHealthDataLabel
+        case .completedWorkout:
+            sourceCompletedWorkoutLabel
+        case .trainingPlan:
+            sourceTrainingPlanLabel
+        case .upcomingWorkouts:
+            sourceUpcomingWorkoutsLabel
+        case .raceGoal:
+            sourceRaceGoalLabel
+        }
+    }
+
+
+    var contextIncludedLabel: String {
+        switch self {
+        case .en: "Included"
+        case .ja: "追加済み"
+        case .vi: "Đã thêm"
+        }
+    }
+
+    var contextNotIncludedLabel: String {
+        switch self {
+        case .en: "Off"
+        case .ja: "オフ"
+        case .vi: "Tắt"
+        }
+    }
+
+    var contextReviewLabel: String {
+        switch self {
+        case .en: "Review"
+        case .ja: "確認"
+        case .vi: "Xem lại"
+        }
+    }
+
+    var contextAddLabel: String {
+        switch self {
+        case .en: "Add"
+        case .ja: "追加"
+        case .vi: "Thêm"
+        }
+    }
+
+    var contextReadyLabel: String {
+        switch self {
+        case .en: "Ready"
+        case .ja: "準備完了"
+        case .vi: "Sẵn sàng"
+        }
+    }
+
+    var contextSelectedLabel: String {
+        switch self {
+        case .en: "Selected"
+        case .ja: "選択済み"
+        case .vi: "Đã chọn"
+        }
+    }
+
+    var plannedWorkoutsLabel: String {
+        switch self {
+        case .en: "Planned workouts"
+        case .ja: "予定ワークアウト"
+        case .vi: "Buổi tập dự kiến"
+        }
+    }
+
+    var recentRunsLabel: String {
+        switch self {
+        case .en: "Recent runs"
+        case .ja: "最近のラン"
+        case .vi: "Buổi chạy gần đây"
+        }
+    }
+
+    var imageAttachedLabel: String {
+        switch self {
+        case .en: "Image attached"
+        case .ja: "画像を添付しました"
+        case .vi: "Đã đính kèm ảnh"
+        }
+    }
+
+    func imageAttachmentDetail(_ kilobytes: Int) -> String {
+        switch self {
+        case .en: "\(kilobytes) KB, sent with this message"
+        case .ja: "\(kilobytes) KB、このメッセージに添付"
+        case .vi: "\(kilobytes) KB, đã gửi kèm tin nhắn này"
+        }
+    }
+
+    var removeWorkoutContextLabel: String {
+        switch self {
+        case .en: "Remove workout context"
+        case .ja: "ワークアウトの文脈を削除"
+        case .vi: "Xóa ngữ cảnh buổi tập"
+        }
+    }
+
+    func contextWorkoutListItem(date: String, title: String, distance: String) -> String {
+        switch self {
+        case .en: "\(date): \(title), \(distance)"
+        case .ja: "\(date)：\(title)、\(distance)"
+        case .vi: "\(date): \(title), \(distance)"
+        }
+    }
+
+    func workoutTarget(for kind: WorkoutKind?) -> String {
+        switch (self, kind) {
+        case (.en, nil): "Planned run"
+        case (.en, .easy): "Aerobic"
+        case (.en, .long): "Endurance"
+        case (.en, .tempo), (.en, .threshold): "Threshold"
+        case (.en, .intervals): "Speed"
+        case (.en, .race): "Race effort"
+        case (.ja, nil): "予定ラン"
+        case (.ja, .easy): "有酸素"
+        case (.ja, .long): "持久力"
+        case (.ja, .tempo), (.ja, .threshold): "閾値"
+        case (.ja, .intervals): "スピード"
+        case (.ja, .race): "レースペース"
+        case (.vi, nil): "Buổi chạy dự kiến"
+        case (.vi, .easy): "Aerobic"
+        case (.vi, .long): "Sức bền"
+        case (.vi, .tempo), (.vi, .threshold): "Ngưỡng"
+        case (.vi, .intervals): "Tốc độ"
+        case (.vi, .race): "Nỗ lực thi đấu"
+        }
+    }
+
+    func ruleTitle(_ ruleID: ReadinessRuleID) -> String {
+        switch (self, ruleID) {
+        case (.en, _):
+            ruleID.title
+        case (.ja, .rhrElevated): "安静時心拍数の上昇"
+        case (.ja, .shortSleep): "睡眠不足"
+        case (.ja, .loadRamp): "トレーニング負荷の急増"
+        case (.ja, .hrvLow): "HRVがベースラインを下回る"
+        case (.ja, .overreaching): "HRVと負荷の両方に負担"
+        case (.ja, .soreness): "筋肉痛が継続"
+        case (.ja, .illness): "体調不良を報告"
+        case (.ja, .persistenceHold): "継続性ゲートで保留"
+        case (.ja, .sourceDispute): "データソースの不一致を抑制"
+        case (.ja, .overrideWidened): "上書きで閾値を拡大"
+        case (.vi, .rhrElevated): "Nhịp tim nghỉ tăng"
+        case (.vi, .shortSleep): "Ngủ ít"
+        case (.vi, .loadRamp): "Khối lượng tập tăng nhanh"
+        case (.vi, .hrvLow): "HRV dưới mức cơ sở"
+        case (.vi, .overreaching): "HRV và tải tập đều căng thẳng"
+        case (.vi, .soreness): "Đau nhức kéo dài"
+        case (.vi, .illness): "Đã báo ốm"
+        case (.vi, .persistenceHold): "Giữ lại bởi ngưỡng duy trì"
+        case (.vi, .sourceDispute): "Đã chặn do nguồn dữ liệu mâu thuẫn"
+        case (.vi, .overrideWidened): "Ghi đè đã nới ngưỡng"
+        }
+    }
+
+    func ruleDetail(_ ruleID: ReadinessRuleID) -> String {
+        switch (self, ruleID) {
+        case (.en, _):
+            ruleID.detail
+        case (.ja, .rhrElevated): "最近の安静時心拍数が個人のベースライン範囲を上回ると、回復の負担を検知します。"
+        case (.ja, .shortSleep): "昨夜の睡眠が短い、または最近の標準を大きく下回ると、回復の負担を検知します。"
+        case (.ja, .loadRamp): "最近のトレーニング負荷が長期的な負荷と比べて高い場合にリスクを検知します。"
+        case (.ja, .hrvLow): "最近のHRVが個人のベースライン範囲を下回ると、回復の負担を検知します。"
+        case (.ja, .overreaching): "低いHRVと急なトレーニング負荷増加が同時にある場合、より多くの回復を勧めます。"
+        case (.ja, .soreness): "筋肉痛が2日連続で報告された場合にのみ、強度を抑えます。"
+        case (.ja, .illness): "センサーの確認なしでも、体調不良の報告があれば休養を勧めます。"
+        case (.ja, .persistenceHold): "シグナルが3日のうち2日で続くまで、1日の急変だけで距離を減らさないようにします。"
+        case (.ja, .sourceDispute): "信頼できるデータソースの差が大きく、指標が不確かな場合はフラグを抑制します。"
+        case (.ja, .overrideWidened): "最近の予定維持の上書きを反映し、この実行ではルールの閾値を広げます。"
+        case (.vi, .rhrElevated): "Đánh dấu căng thẳng hồi phục khi nhịp tim nghỉ gần đây cao hơn vùng mức cơ sở cá nhân."
+        case (.vi, .shortSleep): "Đánh dấu căng thẳng hồi phục khi giấc ngủ đêm qua ngắn hoặc thấp hơn nhiều so với mức gần đây."
+        case (.vi, .loadRamp): "Đánh dấu rủi ro khi khối lượng tập gần đây cao so với khối lượng dài hạn."
+        case (.vi, .hrvLow): "Đánh dấu căng thẳng hồi phục khi HRV gần đây thấp hơn vùng mức cơ sở cá nhân."
+        case (.vi, .overreaching): "Khuyến nghị hồi phục nhiều hơn khi HRV thấp xuất hiện cùng lúc với khối lượng tập tăng nhanh."
+        case (.vi, .soreness): "Chỉ giới hạn cường độ khi đau nhức được báo trong hai ngày liên tiếp."
+        case (.vi, .illness): "Khuyến nghị nghỉ khi bạn báo ốm, không cần xác nhận từ cảm biến."
+        case (.vi, .persistenceHold): "Tránh cắt giảm khối lượng chỉ vì một ngày tăng đột biến, cho đến khi tín hiệu kéo dài hai trong ba ngày."
+        case (.vi, .sourceDispute): "Chặn cờ chỉ số khi các nguồn đáng tin cậy mâu thuẫn đủ nhiều khiến chỉ số đó không chắc chắn."
+        case (.vi, .overrideWidened): "Áp dụng các ghi đè giữ kế hoạch gần đây bằng cách nới ngưỡng quy tắc cho lần chạy này."
+        }
+    }
+
+    func ruleSheetTitle(_ code: String) -> String {
+        switch self {
+        case .en: "Rule \(code)"
+        case .ja: "ルール \(code)"
+        case .vi: "Quy tắc \(code)"
+        }
+    }
+
+    var ruleDefinitionLabel: String {
+        switch self {
+        case .en: "Definition"
+        case .ja: "定義"
+        case .vi: "Định nghĩa"
+        }
     }
 }

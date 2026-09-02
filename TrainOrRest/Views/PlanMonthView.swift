@@ -6,6 +6,7 @@ import SwiftUI
 /// dots and detail come from the planned workouts passed in.
 struct PlanMonthView: View {
     let workouts: [PlannedWorkout]
+    let language: CoachLanguage
     let completedActivities: [CompletedActivity]
     @Binding var monthAnchor: Date
     @Binding var selectedDate: Date
@@ -79,7 +80,7 @@ struct PlanMonthView: View {
     }
 
     private var monthTitle: String {
-        monthAnchor.formatted(.dateTime.month(.wide).year())
+        language.monthYear(monthAnchor)
     }
 
     private func shiftMonth(_ delta: Int) {
@@ -91,8 +92,8 @@ struct PlanMonthView: View {
 
     private var weekdayRow: some View {
         HStack(spacing: 3) {
-            ForEach(Array(MonthGrid.weekdaySymbols(calendar).enumerated()), id: \.offset) { _, symbol in
-                Text(symbol)
+            ForEach(MonthGrid.weekdays(calendar), id: \.self) { weekday in
+                Text(language.shortName(weekday))
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(Theme.faint)
                     .frame(maxWidth: .infinity)
@@ -181,9 +182,7 @@ struct PlanMonthView: View {
     }
 
     private func accessibilityLabel(_ date: Date, kind: WorkoutKind?, isToday: Bool) -> String {
-        let day = date.formatted(.dateTime.month().day())
-        let session = kind?.displayName ?? "Rest"
-        return "\(day)\(isToday ? ", today" : ""), \(session)"
+        language.plan.dayAccessibility(date: date, kind: kind, isToday: isToday)
     }
 
     // MARK: - Weekly rhythm
@@ -242,7 +241,7 @@ struct PlanMonthView: View {
             .frame(width: railWidth, alignment: .leading)
             .frame(maxHeight: .infinity, alignment: .center)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Week volume \(Int(km.rounded())) kilometers")
+            .accessibilityLabel(language.plan.weekVolumeAccessibility(Int(km.rounded())))
         } else {
             Color.clear.frame(width: railWidth)
         }
@@ -265,7 +264,7 @@ struct PlanMonthView: View {
             compactTodaysCall(activity: activity, workout: dayWorkouts.first)
         } else {
             VStack(alignment: .leading, spacing: 10) {
-                TorEyebrow("Today's call").tracking(2)
+                TorEyebrow(language.plan.todayCall).tracking(2)
                 if let activity {
                     CalendarRunSummaryCard(
                         activity: activity,
@@ -295,34 +294,34 @@ struct PlanMonthView: View {
             } label: {
                 compactTodaysCallRow(
                     symbol: "figure.run",
-                    title: "Completed run",
+                    title: language.plan.completedRun,
                     metrics: completedSubtitle(activity),
                     compactMetrics: completedCompactSubtitle(activity),
                     tint: Theme.good
                 )
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Review completed run with Coach")
+            .accessibilityLabel(language.plan.reviewCompletedRunAccessibility)
         } else if let workout {
             NavigationLink {
                 WorkoutDetailView(workout: workout)
             } label: {
                 compactTodaysCallRow(
                     symbol: workout.kind?.symbolName ?? "figure.run",
-                    title: workout.kind?.displayName ?? "Run",
+                    title: workout.kind.map(language.name) ?? language.genericRunLabel,
                     metrics: subtitle(workout),
                     compactMetrics: compactSubtitle(workout),
                     tint: workout.kind?.styleColor ?? Theme.accent
                 )
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Open today’s \(workout.kind?.displayName ?? "workout")")
+            .accessibilityLabel(language.plan.openTodayWorkoutAccessibility(workout.kind.map(language.name) ?? language.plan.workout))
         } else {
             compactTodaysCallRow(
                 symbol: "moon.zzz.fill",
-                title: "Rest day",
-                metrics: "Recovery and adaptation",
-                compactMetrics: "Recovery",
+                title: language.restDayLabel,
+                metrics: language.plan.recoveryAndAdaptation,
+                compactMetrics: language.recoveryLabel,
                 tint: Theme.dim,
                 showsChevron: false
             )
@@ -381,7 +380,7 @@ struct PlanMonthView: View {
                         .frame(width: 52, height: 52)
                         .background(Theme.chip, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(workout.kind?.displayName ?? "Run")
+                        Text(workout.kind.map(language.name) ?? language.genericRunLabel)
                             .font(.torHeading(30, .bold))
                             .foregroundStyle(Theme.text)
                             .fixedSize(horizontal: false, vertical: true)
@@ -409,11 +408,10 @@ struct PlanMonthView: View {
                     .frame(width: 52, height: 52)
                     .background(Theme.chip, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Rest day")
+                    Text(language.restDayLabel)
                         .font(.torHeading(30, .bold))
                         .foregroundStyle(Theme.text)
-                    Text("Recovery and adaptation")
-                        .font(.footnote.weight(.medium))
+                    Text(language.plan.recoveryAndAdaptation)
                         .foregroundStyle(Theme.dim)
                 }
                 Spacer(minLength: 8)
@@ -424,14 +422,14 @@ struct PlanMonthView: View {
     }
 
     private func planReceipt(_ workout: PlannedWorkout) -> (symbol: String, tint: Color, text: String) {
-        let phase = TrainingPhase(rawValue: workout.phaseRaw)?.displayName ?? "Plan"
+        let phase = TrainingPhase(rawValue: workout.phaseRaw).map(language.name) ?? language.plan.trainingPlanTitle
         switch workout.scheduleUpdatedFrom {
         case "googleCalendar"?:
-            return ("calendar.badge.clock", Theme.dim, "\(phase) phase · synced from calendar")
+            return ("calendar.badge.clock", Theme.dim, language.plan.planReceipt(phase: phase, source: .calendar))
         case .some(let source) where source != "smartSchedulingUndo":
-            return ("arrow.turn.up.right", Theme.dim, "\(phase) phase · moved to fit your week")
+            return ("arrow.turn.up.right", Theme.dim, language.plan.planReceipt(phase: phase, source: .moved))
         default:
-            return ("checkmark.seal.fill", Theme.good, "\(phase) phase · on plan")
+            return ("checkmark.seal.fill", Theme.good, language.plan.planReceipt(phase: phase, source: .onPlan))
         }
     }
 
@@ -453,15 +451,7 @@ struct PlanMonthView: View {
     /// The plain-language reason this session sits on today's plan - the "why"
     /// behind the prescription, from the workout's role in the training block.
     private func purpose(_ workout: PlannedWorkout) -> String? {
-        switch workout.kind {
-        case .easy: return "Aerobic base at an easy, conversational effort."
-        case .long: return "Extends endurance for race distance."
-        case .tempo: return "Sustained, comfortably-hard race effort."
-        case .threshold: return "Raises your lactate threshold."
-        case .intervals: return "Short, fast reps that sharpen speed."
-        case .race: return "Your goal race. The plan builds to this."
-        case nil: return nil
-        }
+        workout.kind.map(language.plan.workoutPurpose)
     }
 
     @ViewBuilder
@@ -492,7 +482,7 @@ struct PlanMonthView: View {
     }
 
     private var selectedDayEyebrow: String {
-        selectedDate.formatted(.dateTime.weekday(.wide).month(.wide).day())
+        language.longDate(selectedDate)
     }
 
     private func detailCard(_ workout: PlannedWorkout) -> some View {
@@ -507,7 +497,7 @@ struct PlanMonthView: View {
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                     )
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(workout.kind?.displayName ?? "Run")
+                    Text(workout.kind.map(language.name) ?? language.genericRunLabel)
                         .font(.torHeading(17, .bold))
                         .foregroundStyle(Theme.text)
                     Text(subtitle(workout))
@@ -516,7 +506,7 @@ struct PlanMonthView: View {
                     if let shoe = assignedShoe(for: workout) {
                         HStack(spacing: 5) {
                             Image(systemName: "shoeprints.fill")
-                            Text(workout.shoeAssignmentSource == .auto ? "\(shoe.displayName) · Auto" : shoe.displayName)
+                            Text(workout.shoeAssignmentSource == .auto ? "\(shoe.displayName) · \(language.plan.autoLabel)" : shoe.displayName)
                         }
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.accent)
@@ -572,7 +562,7 @@ struct PlanMonthView: View {
         NavigationLink {
             WorkoutDetailView(workout: workout)
         } label: {
-            Label("Details", systemImage: "chevron.right")
+            Label(language.detailsLabel, systemImage: "chevron.right")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(Theme.text)
                 .fixedSize(horizontal: fixedWidth, vertical: !fixedWidth)
@@ -581,32 +571,32 @@ struct PlanMonthView: View {
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Open workout details")
+        .accessibilityLabel(language.plan.openWorkoutDetailsAccessibility)
     }
 
     private func contextualCoachActionTitle(for workout: PlannedWorkout) -> String? {
         switch workout.status {
         case .planned:
-            return workout.isScheduleLocked || workout.kind == .race ? "Review with Coach" : "Edit with Coach"
+            return workout.isScheduleLocked || workout.kind == .race ? language.plan.reviewWithCoach : language.plan.editWithCoach
         case .done:
-            return "Review with Coach"
+            return language.plan.reviewWithCoach
         case .skipped:
             return nil
         }
     }
 
     private func contextualCoachAccessibilityLabel(for workout: PlannedWorkout) -> String {
-        let name = workout.kind?.displayName ?? "workout"
-        return "\(contextualCoachActionTitle(for: workout) ?? "Ask Coach") \(name)"
+        let name = workout.kind.map(language.name) ?? language.plan.workout
+        return language.plan.coachActionAccessibility(contextualCoachActionTitle(for: workout) ?? language.plan.askCoach, workout: name)
     }
 
     @ViewBuilder
     private func statusBadge(_ workout: PlannedWorkout, isToday: Bool) -> some View {
         switch workout.status {
-        case .done: badge("DONE", Theme.good)
-        case .skipped: badge("SKIPPED", Theme.warn)
+        case .done: badge(language.name(.done).uppercased(), Theme.good)
+        case .skipped: badge(language.name(.skipped).uppercased(), Theme.warn)
         case .planned:
-            if !isToday { badge("PLANNED", Theme.dim) }
+            if !isToday { badge(language.name(.planned).uppercased(), Theme.dim) }
         }
     }
 
@@ -628,11 +618,10 @@ struct PlanMonthView: View {
                 .frame(width: 46, height: 46)
                 .background(Theme.chip, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
-                Text("Rest day")
+                Text(language.restDayLabel)
                     .font(.torHeading(17, .bold))
                     .foregroundStyle(Theme.text)
-                Text("Recovery and adaptation")
-                    .font(.caption.weight(.medium))
+                Text(language.plan.recoveryAndAdaptation)
                     .foregroundStyle(Theme.dim)
             }
             Spacer()
@@ -683,7 +672,7 @@ struct PlanMonthView: View {
     }
 
     private func compactSubtitle(_ workout: PlannedWorkout) -> String {
-        subtitleParts(workout).first ?? "Run"
+        subtitleParts(workout).first ?? language.genericRunLabel
     }
 
     private func completedCompactSubtitle(_ activity: CompletedActivity) -> String {

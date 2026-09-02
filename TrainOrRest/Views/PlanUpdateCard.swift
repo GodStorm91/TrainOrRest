@@ -59,7 +59,8 @@ struct PlanUpdateCard: View {
     let onAskWhy: () -> Void
 
     private var weekday: String {
-        pending.date.formatted(.dateTime.weekday(.abbreviated)).uppercased()
+        let day = Weekday(rawValue: Calendar.current.component(.weekday, from: pending.date)) ?? .monday
+        return language.shortName(day).uppercased()
     }
 
     private var applyLabel: String {
@@ -327,7 +328,9 @@ struct PlanProposalCard: View {
 
     private func changeDescription(_ change: PlanAdjustmentProposal.Change) -> String {
         if let detail = change.detail, !detail.isEmpty { return detail }
-        if let kind = change.workout?.kind, !kind.isEmpty { return kind.capitalized }
+        if let kind = change.workout?.kind, !kind.isEmpty {
+            return WorkoutKind(rawValue: kind).map(language.name) ?? language.genericRunLabel
+        }
         return change.date
     }
 

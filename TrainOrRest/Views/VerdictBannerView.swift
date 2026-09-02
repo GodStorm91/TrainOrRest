@@ -5,6 +5,7 @@ struct VerdictBannerView: View {
     let readiness: DailyReadiness?
     let workout: PlannedWorkout?
     let lastSyncAt: Date?
+    let language: CoachLanguage
     let onKeepPlanned: (ReadinessRule) -> Void
 
     @State private var showsDrivers = false
@@ -15,11 +16,13 @@ struct VerdictBannerView: View {
         readiness: DailyReadiness?,
         workout: PlannedWorkout?,
         lastSyncAt: Date?,
+        language: CoachLanguage = .en,
         onKeepPlanned: @escaping (ReadinessRule) -> Void = { _ in }
     ) {
         self.readiness = readiness
         self.workout = workout
         self.lastSyncAt = lastSyncAt
+        self.language = language
         self.onKeepPlanned = onKeepPlanned
     }
 
@@ -66,7 +69,7 @@ struct VerdictBannerView: View {
                         }
                     } label: {
                         HStack(spacing: 6) {
-                            Text("Why?")
+                            Text(language.today.why)
                                 .font(.subheadline.weight(.semibold))
                             Image(systemName: showsDrivers ? "chevron.down" : "chevron.right")
                                 .font(.caption.weight(.semibold))
@@ -76,7 +79,7 @@ struct VerdictBannerView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(showsDrivers ? "Hide readiness drivers" : "Show readiness drivers")
+                    .accessibilityLabel(showsDrivers ? language.today.hideReadinessDrivers : language.today.showReadinessDrivers)
 
                     Spacer()
 
@@ -108,22 +111,22 @@ struct VerdictBannerView: View {
                             onKeepPlanned(rule)
                         }
                     } label: {
-                        Text("Keep planned session")
+                        Text(language.today.keepPlannedSession)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Theme.accent)
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Keep planned session")
+                    .accessibilityLabel(language.today.keepPlannedSession)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .sheet(isPresented: $showsRuleReceipt) {
             ReceiptSheet(
-                title: "Adjusted by rule",
-                subtitle: "Deterministic training rule — no AI involved.",
+                title: language.today.adjustedByRule,
+                subtitle: language.today.deterministicRuleSubtitle,
                 rows: ruleAdjustmentRows
             )
         }
@@ -151,13 +154,13 @@ struct VerdictBannerView: View {
                         .background(Theme.soft(Theme.warn), in: Capsule())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Show rule adjustment receipt")
+                .accessibilityLabel(language.today.showRuleAdjustmentReceipt)
             }
             .font(.subheadline.weight(.medium))
             .lineLimit(1)
             .minimumScaleFactor(0.78)
         } else {
-            Text("Planned: \(sessionText(for: workout))")
+            Text(language.today.plannedSession(sessionText(for: workout)))
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(Theme.text)
                 .lineLimit(1)
@@ -167,24 +170,30 @@ struct VerdictBannerView: View {
 
     private var displayWord: String {
         if (readiness?.hedged == true || isStale), verdict != .insufficientData {
-            return "Likely \(verdict.bannerWord.lowercased())"
+            return language.today.likely(verdict)
         }
-        return verdict.bannerWord
+        return language.verdictWord(verdict)
     }
 
     private var rationale: String {
         if let workout, hasPlanConflict {
-            let reason = readiness?.reasons.first ?? "recovery signals are mixed"
-            return "Plan calls for \(sessionText(for: workout)), but \(reason)."
+            return language.today.planCallsFor(
+                sessionText(for: workout),
+                but: firstReason ?? language.today.recoverySignalsMixed
+            )
         }
-        if let reason = readiness?.reasons.first {
+        if let reason = firstReason {
             return reason
         }
         if verdict == .insufficientData {
             let days = min(readiness?.baselineDayCount ?? 0, ReadinessEngine.Tuning.minBaselineDays)
-            return "Collecting baseline, day \(days) of \(ReadinessEngine.Tuning.minBaselineDays)."
+            return language.today.collectingBaseline(day: days, total: ReadinessEngine.Tuning.minBaselineDays)
         }
-        return "HRV normal · sleep steady · load balanced"
+        return language.today.normalDrivers
+    }
+
+    private var firstReason: String? {
+        readiness?.reasonCodes.first.map(language.today.reason) ?? readiness?.reasons.first
     }
 
     private var driverRows: [String] {
@@ -194,21 +203,21 @@ struct VerdictBannerView: View {
     private var ruleAdjustmentRows: [ReceiptSheet.Row] {
         var rows = readiness?.ruleIDs.map { id in
             ReceiptSheet.Row.detail(
-                "Rule \(id.code) · \(id.title)",
-                value: id.detail,
+                language.today.ruleLabel(id),
+                value: language.today.ruleDetail(id),
                 symbol: "checkmark.seal"
             )
         } ?? []
 
         rows.append(contentsOf: [
-            .detail("HRV band", value: hrvDriver, symbol: "waveform.path.ecg"),
-            .detail("Load", value: loadDriver, symbol: "chart.line.uptrend.xyaxis")
+            .detail(language.today.hrvBand, value: hrvDriver, symbol: "waveform.path.ecg"),
+            .detail(language.today.load, value: loadDriver, symbol: "chart.line.uptrend.xyaxis")
         ])
 
         if let workout, hasPlanConflict {
             rows.append(
                 .detail(
-                    "Adjustment",
+                    language.today.adjustment,
                     value: "\(sessionText(for: workout)) -> \(adjustedSessionText(for: workout))",
                     symbol: "arrow.triangle.2.circlepath"
                 )
@@ -216,16 +225,13 @@ struct VerdictBannerView: View {
         }
 
         rows.append(
-            .detail("Source", value: "Adjusted by a deterministic local training rule.", symbol: "checkmark.shield")
+            .detail(language.today.source, value: language.today.localRuleSource, symbol: "checkmark.shield")
         )
         return rows
     }
 
     private var adjustedRuleTagText: String {
-        guard let code = primaryRuleID?.code ?? readiness?.ruleIDs.first?.code else {
-            return "Adjusted · rule"
-        }
-        return "Adjusted · rule \(code)"
+        language.today.adjustedRuleTag(primaryRuleID?.code ?? readiness?.ruleIDs.first?.code)
     }
 
     private var primaryRuleID: ReadinessRuleID? {
@@ -246,43 +252,37 @@ struct VerdictBannerView: View {
         guard let readiness, let hrv7 = readiness.hrvMean7,
               let baseline = readiness.hrvBaseline ?? readiness.hrvMean28
         else {
-            return "HRV: baseline building"
+            return language.today.hrvBaselineBuilding
         }
-        if baseline > 0 {
-            let percent = Int(((hrv7 / baseline - 1) * 100).rounded())
-            let band = percent >= 0 ? "\(percent)% above baseline" : "\(abs(percent))% below baseline"
-            return "HRV: \(Int(hrv7.rounded())) ms, \(band)"
-        }
-        return "HRV: \(Int(hrv7.rounded())) ms"
+        let percent = baseline > 0
+            ? Int(((hrv7 / baseline - 1) * 100).rounded())
+            : nil
+        return language.today.hrvDriver(value: hrv7, percent: percent)
     }
 
     private var sleepDriver: String {
         guard let sleep = readiness?.sleepLastNight else {
-            return "Sleep: no sleep sample last night"
+            return language.today.sleepNoSample
         }
-        return "Sleep: \(Formatters.sleep(sleep)) last night"
+        return language.today.sleepDriver(language.today.sleepDuration(sleep))
     }
 
     private var loadDriver: String {
         guard let acwr = readiness?.acuteChronicRatio else {
-            return "Load: building training history"
+            return language.today.loadBuildingHistory
         }
         let caption = acwr > ReadinessEngine.Tuning.acwrLimit
-            ? "ramping fast"
-            : acwr < 0.8 ? "light" : "balanced"
-        return String(format: "Load: %.2f ACWR, %@", acwr, caption)
+            ? language.today.rampingFast
+            : acwr < 0.8 ? language.today.detraining : language.today.balancedTraining
+        return language.today.loadDriver(acwr: acwr, status: caption)
     }
 
     private var scoreText: String {
-        guard let score = readiness?.score else { return "readiness --" }
-        return "readiness \(score)"
+        language.today.readinessScore(readiness?.score)
     }
 
     private var accessibilityLabel: String {
-        guard let score = readiness?.score else {
-            return "Readiness not yet available, \(displayWord)"
-        }
-        return "Readiness \(score) out of 100, \(displayWord)"
+        language.today.readinessAccessibility(score: readiness?.score, verdict: displayWord)
     }
 
     private var isStale: Bool {
@@ -300,34 +300,23 @@ struct VerdictBannerView: View {
     }
 
     private var syncText: String {
-        guard let lastSyncAt else { return "never synced" }
+        guard let lastSyncAt else { return language.today.neverSynced }
         let hours = max(1, Int(Date.now.timeIntervalSince(lastSyncAt) / 3600))
-        return "sync \(hours)h ago"
+        return language.today.syncAgo(hours: hours)
     }
 
     private func sessionText(for workout: PlannedWorkout) -> String {
-        var parts: [String] = []
         let details = workout.details.trimmingCharacters(in: .whitespacesAndNewlines)
-        parts.append(details.isEmpty ? (workout.kind?.displayName ?? "Run") : compactSession(details))
-        if let seconds = workout.expectedDurationSeconds {
-            parts.append("\(Int((seconds / 60).rounded())) min")
-        }
-        return parts.joined(separator: " · ")
+        let durationMinutes = workout.expectedDurationSeconds.map { Int(($0 / 60).rounded()) }
+        return language.today.sessionText(
+            fallbackKind: workout.kind,
+            details: details,
+            durationMinutes: durationMinutes
+        )
     }
 
     private func adjustedSessionText(for workout: PlannedWorkout) -> String {
-        if workout.kind == .intervals {
-            return "shorter reps or easy 40 min"
-        }
-        if workout.kind == .tempo {
-            return "easy 40 min"
-        }
-        return "easy 30 min"
-    }
-
-    private func compactSession(_ details: String) -> String {
-        details
-            .replacingOccurrences(of: " at ", with: " @ ")
+        language.today.adjustedSession(kind: workout.kind)
     }
 }
 

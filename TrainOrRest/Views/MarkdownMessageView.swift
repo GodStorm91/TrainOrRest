@@ -144,7 +144,7 @@ private struct MarkdownInlineText: View {
                 return .handled
             })
             .sheet(item: $selectedRuleID) { ruleID in
-                RuleDefinitionSheet(ruleID: ruleID)
+                RuleDefinitionSheet(ruleID: ruleID, language: language)
             }
             .sheet(item: $selectedGlossaryTerm) { selectedTerm in
                 CoachGlossarySheet(termId: selectedTerm.id, language: language)
@@ -276,13 +276,14 @@ private enum RuleAttributedStringBuilder {
 
 private struct RuleDefinitionSheet: View {
     let ruleID: ReadinessRuleID
+    let language: CoachLanguage
 
     var body: some View {
         ReceiptSheet(
-            title: "Rule \(ruleID.code)",
-            subtitle: ruleID.title,
+            title: language.ruleSheetTitle(ruleID.code),
+            subtitle: language.ruleTitle(ruleID),
             rows: [
-                .detail("Definition", value: ruleID.detail, symbol: "checkmark.seal")
+                .detail(language.ruleDefinitionLabel, value: language.ruleDetail(ruleID), symbol: "checkmark.seal")
             ]
         )
     }

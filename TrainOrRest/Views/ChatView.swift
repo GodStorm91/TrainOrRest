@@ -309,7 +309,7 @@ struct ChatView: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 7) {
                     if !usesCompactHeader { CoachAvatar(size: 24).accessibilityHidden(true) }
-                    Text("Coach")
+                    Text(language.coachTitle)
                         .font(.torHeading(usesCompactHeader ? 16 : 18, .bold))
                         .foregroundStyle(Theme.text)
                 }
@@ -351,7 +351,7 @@ struct ChatView: View {
     private var headerSubtitle: String? {
         if let workout = contextualWorkout {
             let verb = workout.status == .planned && !workout.isScheduleLocked && workout.kind != .race ? language.editingWorkoutStatus : language.reviewWithCoachStatus
-            return "\(verb) · \(workout.kind?.displayName ?? "Run") · \(workout.date.formatted(.dateTime.month(.abbreviated).day().locale(language.uiLocale)))"
+            return "\(verb) · \(workout.kind.map { language.name($0) } ?? language.genericRunLabel) · \(workout.date.formatted(.dateTime.month(.abbreviated).day().locale(language.uiLocale)))"
         }
         if let activity = contextualActivity {
             let distance = Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " ", with: "")
@@ -367,10 +367,10 @@ struct ChatView: View {
         HStack(spacing: 9) {
             CoachAvatar(size: 30)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Coach")
+                Text(language.coachTitle)
                     .font(.torHeading(17, .bold))
                     .foregroundStyle(Theme.text)
-                Text("Explains & proposes · never edits your plan.")
+                Text(language.coachRoleLine)
                     .font(.caption)
                     .foregroundStyle(Theme.dim)
                     .lineLimit(1)
@@ -895,7 +895,7 @@ struct ChatView: View {
             return [language.noTomorrowWorkoutSuggestion]
         }
 
-        let workoutText = "\(workout.kind?.displayName ?? "Workout") · \(kmText(workout.distanceKm))"
+        let workoutText = "\(workout.kind.map { language.name($0) } ?? language.genericRunLabel) · \(kmText(workout.distanceKm))"
         if let requestedKm = clean.requestedDistanceKmText {
             return [language.changeTomorrowDistanceSuggestion(workout: workoutText, distance: requestedKm)]
         }
@@ -1072,6 +1072,7 @@ struct ChatView: View {
                         selectedPhotoItem: $selectedPhotoItem,
                         selectedImageAttachment: $selectedImageAttachment,
                         selectedImage: $selectedImage,
+                        language: language,
                         plannedWorkouts: plannedWorkouts,
                         completedActivities: completedActivities,
                         onReviewEvidence: { showsContextSheet = false }
@@ -1155,8 +1156,11 @@ struct ChatView: View {
 
     private var todayReadinessSubtitle: String {
         guard let readiness = todayReadiness else { return language.noReadinessSubtitle }
+        if !readiness.reasonCodes.isEmpty {
+            return readiness.reasonCodes.prefix(2).map { language.today.reason($0) }.joined(separator: " · ")
+        }
         if readiness.reasons.isEmpty {
-            return readiness.verdict == .train ? language.goodRecoverySubtitle : readiness.verdict.torSubtitle
+            return readiness.verdict == .train ? language.goodRecoverySubtitle : language.verdictSubtitle(readiness.verdict)
         }
         return Array(readiness.reasons.prefix(2)).joined(separator: " · ")
     }
@@ -1164,7 +1168,7 @@ struct ChatView: View {
     private var todayPlannedWorkoutText: String {
         guard let workout = todayWorkout else { return language.noPlannedWorkoutTodayText }
         var parts: [String] = []
-        parts.append(workout.kind?.displayName ?? "Run")
+        parts.append(workout.kind.map { language.name($0) } ?? language.genericRunLabel)
         parts.append(kmText(workout.distanceKm))
         if let band = workout.paceBand {
             parts.append(Formatters.paceBand(band).replacingOccurrences(of: " /km", with: "/km"))
@@ -1173,7 +1177,10 @@ struct ChatView: View {
     }
 
     private func kmText(_ km: Double) -> String {
-        abs(km.rounded() - km) < 0.05 ? "\(Int(km.rounded())) km" : String(format: "%.1f km", km)
+        let value = abs(km.rounded() - km) < 0.05
+            ? String(Int(km.rounded()))
+            : String(format: "%.1f", locale: language.uiLocale, km)
+        return "\(value) km"
     }
 
     private func send() {
@@ -1651,7 +1658,7 @@ struct ChatView: View {
                 calendarDate: workout.date,
                 workoutStatus: contextualStatus(for: workout),
                 workoutType: workout.kindRaw,
-                workoutTitle: workout.kind?.displayName ?? "Run",
+                workoutTitle: workout.kind.map { language.name($0) } ?? language.genericRunLabel,
                 plannedDistanceKm: workout.distanceKm,
                 plannedDurationSeconds: workout.expectedDurationSeconds,
                 plannedPaceFastSecondsPerKm: workout.paceFastSecondsPerKm,
@@ -1660,7 +1667,7 @@ struct ChatView: View {
                 workoutStructureSummary: workout.details,
                 isKeyWorkout: workout.kind?.isQuality == true,
                 phaseId: workout.phaseRaw,
-                phaseName: TrainingPhase(rawValue: workout.phaseRaw)?.displayName ?? workout.phaseRaw,
+                phaseName: TrainingPhase(rawValue: workout.phaseRaw).map { language.name($0) } ?? workout.phaseRaw,
                 planWeek: workout.weekIndex,
                 nearbyWorkoutIds: nearby,
                 sourceScreen: "trainingCalendar"
@@ -1674,7 +1681,7 @@ struct ChatView: View {
                 calendarDate: activity.date,
                 workoutStatus: .completed,
                 workoutType: "completedRun",
-                workoutTitle: "Completed run",
+                workoutTitle: language.completedRunTitle,
                 plannedDistanceKm: nil,
                 actualDistanceMeters: activity.distanceMeters,
                 plannedDurationSeconds: nil,
@@ -1762,7 +1769,7 @@ struct ChatView: View {
     }
 
     private var contextualTitle: String {
-        if let workout = contextualWorkout { return workout.kind?.displayName ?? "Run" }
+        if let workout = contextualWorkout { return workout.kind.map { language.name($0) } ?? language.genericRunLabel }
         if contextualActivity != nil {
             return language.completedRunTitle
         }

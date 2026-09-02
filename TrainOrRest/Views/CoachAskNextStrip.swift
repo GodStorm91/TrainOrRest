@@ -4,7 +4,7 @@ import SwiftUI
 /// P1 keeps it quiet: at most two full-width rows, no horizontal clipping.
 struct CoachAskNextStrip: View {
     let prompts: [String]
-    var label: String = "ASK NEXT"
+    let label: String
     let onTap: (String) -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 

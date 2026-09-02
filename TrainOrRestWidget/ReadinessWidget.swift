@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import WidgetKit
 
@@ -30,12 +31,38 @@ struct ReadinessWidgetView: View {
         entry.snapshot
     }
 
+    private var language: WidgetCoachLanguage {
+        WidgetCoachLanguage(rawValue: snapshot.languageRaw ?? "en") ?? .en
+    }
+
+    private var verdictText: String {
+        language.today.verdictWord(rawValue: snapshot.verdictRaw)
+    }
+
+    private var reasonText: String {
+        snapshot.reason.isEmpty
+            ? language.today.widgetReason(rawVerdict: snapshot.verdictRaw)
+            : snapshot.reason
+    }
+
+    private var footerText: String {
+        guard let computedAt = snapshot.computedAt else {
+            return language.today.noFreshData
+        }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = language.uiLocale
+        formatter.unitsStyle = .abbreviated
+        return language.today.updated(
+            formatter.localizedString(for: computedAt, relativeTo: snapshot.updatedAt)
+        )
+    }
+
     var body: some View {
         ZStack {
             background
             VStack(alignment: .leading, spacing: family == .systemSmall ? 8 : 12) {
                 HStack(alignment: .top) {
-                    Text("READINESS")
+                    Text(language.today.readinessLabel)
                         .font(.system(size: 11, weight: .semibold, design: .rounded).width(.condensed))
                         .foregroundStyle(.white.opacity(0.64))
                     Spacer(minLength: 8)
@@ -50,20 +77,20 @@ struct ReadinessWidgetView: View {
                         .font(.system(size: family == .systemSmall ? 54 : 64, weight: .bold).width(.condensed))
                         .foregroundStyle(.white)
                         .minimumScaleFactor(0.72)
-                    Text(snapshot.verdictText)
+                    Text(verdictText)
                         .font(.system(size: 17, weight: .semibold, design: .rounded))
                         .foregroundStyle(verdictColor)
                         .lineLimit(1)
                         .minimumScaleFactor(0.78)
                 }
 
-                Text(snapshot.reason)
+                Text(reasonText)
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.76))
                     .lineLimit(family == .systemSmall ? 2 : 3)
                     .minimumScaleFactor(0.82)
 
-                Text(snapshot.footerText)
+                Text(footerText)
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.46))
                     .lineLimit(1)
@@ -129,12 +156,17 @@ private struct ReadinessGaugeMark: View {
 struct ReadinessWidget: Widget {
     let kind = "ReadinessWidget"
 
+    private var configurationLanguage: WidgetCoachLanguage {
+        WidgetCoachLanguage(rawValue: ReadinessWidgetSnapshot.load().languageRaw ?? "en") ?? .en
+    }
+
     var body: some WidgetConfiguration {
+
         StaticConfiguration(kind: kind, provider: ReadinessProvider()) { entry in
             ReadinessWidgetView(entry: entry)
         }
-        .configurationDisplayName("TrainOrRest Readiness")
-        .description("Shows today's readiness score and verdict.")
+        .configurationDisplayName(configurationLanguage.today.configurationDisplayName)
+        .description(configurationLanguage.today.configurationDescription)
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }

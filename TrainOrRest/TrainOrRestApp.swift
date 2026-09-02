@@ -122,11 +122,14 @@ struct RootView: View {
     @EnvironmentObject private var engine: SyncEngine
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.system.rawValue
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
     @AppStorage(OnboardingGate.completedKey) private var onboardingCompleted = false
 
     private var appearance: AppAppearance {
         AppAppearance(rawValue: appearanceRaw) ?? .system
     }
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
 
     private enum LaunchStage {
         case checking
@@ -145,9 +148,9 @@ struct RootView: View {
                 ProgressView()
             case .unavailable:
                 ContentUnavailableView(
-                    "Health Data Unavailable",
+                    language.onboarding.healthDataUnavailableTitle,
                     systemImage: "heart.slash",
-                    description: Text("This device does not provide Apple Health data.")
+                    description: Text(language.onboarding.healthDataUnavailableDescription)
                 )
             case .firstRun:
                 FirstRunFlowView(health: health, onFinished: activate)

@@ -194,7 +194,7 @@ struct ChatBubble: View {
     @ViewBuilder
     private var messageBody: some View {
         if isUser {
-            MarkdownMessageView(text: displayText, tone: .onAccent, allowsRuleTokens: false)
+            MarkdownMessageView(text: displayText, tone: .onAccent, allowsRuleTokens: false, language: language)
         } else {
             CoachProgressiveResponseView(text: displayText, language: language)
                 .textSelection(.enabled)

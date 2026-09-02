@@ -16,18 +16,12 @@ struct ActivityListView: View {
 
     private var calendar: Calendar { Calendar.current }
     private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
-    private var locale: Locale {
-        switch language {
-        case .en: Locale(identifier: "en_US")
-        case .ja: Locale(identifier: "ja_JP")
-        case .vi: Locale(identifier: "vi_VN")
-        }
-    }
+    private var locale: Locale { language.uiLocale }
 
-    enum Period: String, CaseIterable, Identifiable {
-        case rolling30 = "30d"
-        case calendarMonth = "Month"
-        case calendarYear = "Year"
+    enum Period: CaseIterable, Identifiable {
+        case rolling30
+        case calendarMonth
+        case calendarYear
         var id: Self { self }
     }
 
@@ -70,8 +64,12 @@ struct ActivityListView: View {
                     } else if filtered.isEmpty {
                         emptyState
                     } else {
-                        OverviewCard(summary: RunHistorySummary(activities: filtered), eyebrow: summaryTitle)
-                        TorEyebrow("Activities").tracking(2)
+                        OverviewCard(
+                            summary: RunHistorySummary(activities: filtered),
+                            eyebrow: summaryTitle,
+                            language: language
+                        )
+                        TorEyebrow(language.history.activities).tracking(2)
                         LazyVStack(spacing: 10) {
                             ForEach(filtered) { activity in
                                 NavigationLink {
@@ -95,12 +93,12 @@ struct ActivityListView: View {
             Color.clear.frame(height: 82)
         }
         .scrollIndicators(.hidden)
-        .navigationTitle("Run History")
+        .navigationTitle(language.history.runHistory)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingMonthPicker) {
             MonthYearPickerSheet(
                 selectedMonth: $selectedMonth,
-                locale: locale,
+                language: language,
                 calendar: calendar,
                 onSelect: { announcePeriodChange() }
             )
@@ -122,7 +120,7 @@ struct ActivityListView: View {
                         selectPeriod(option)
                     } label: {
                         let selected = option == period
-                        Text(option.rawValue)
+                        Text(periodLabel(option))
                             .font(.torHeading(12, selected ? .bold : .semibold))
                             .foregroundStyle(selected ? Color.white : Theme.faint)
                             .padding(.horizontal, 11)
@@ -138,7 +136,7 @@ struct ActivityListView: View {
                             )
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(option.accessibilityLabel)
+                    .accessibilityLabel(periodLabel(option))
                     .accessibilityAddTraits(option == period ? [.isSelected] : [])
                 }
             }
@@ -171,7 +169,7 @@ struct ActivityListView: View {
                         .frame(minHeight: 44)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Select month and year. Current selection \(monthYearTitle)")
+                .accessibilityLabel(language.history.selectMonthAndYearAccessibility(monthYearTitle))
             } else {
                 Text(String(selectedYear))
                     .font(.torHeading(17, .bold))
@@ -213,7 +211,7 @@ struct ActivityListView: View {
         }
         .redacted(reason: .placeholder)
         .transition(.opacity)
-        .accessibilityLabel("Loading selected run history period")
+        .accessibilityLabel(language.history.loadingSelectedRunHistory)
     }
 
     private var emptyState: some View {
@@ -228,7 +226,7 @@ struct ActivityListView: View {
                     selectedMonth = calendar.startOfMonth(for: .now)
                     announcePeriodChange()
                 } label: {
-                    Text("Go to current month")
+                    Text(language.history.goToCurrentMonth)
                         .font(.callout.weight(.semibold))
                         .frame(minHeight: 44)
                 }
@@ -301,7 +299,7 @@ struct ActivityListView: View {
     private var summaryTitle: String {
         switch period {
         case .rolling30:
-            "LAST 30 DAYS"
+            language.history.rollingThirtyDays.uppercased(with: locale)
         case .calendarMonth:
             monthYearTitle.uppercased(with: locale)
         case .calendarYear:
@@ -312,22 +310,23 @@ struct ActivityListView: View {
     private var emptyTitle: String {
         switch period {
         case .rolling30:
-            "No runs in the last 30 days"
+            language.history.noRunsInLastThirtyDays()
         case .calendarMonth:
-            "No runs in \(monthYearTitle)"
+            language.history.noRuns(in: monthYearTitle)
         case .calendarYear:
-            "No runs in \(selectedYear)"
+            language.history.noRuns(in: String(selectedYear))
         }
     }
 
     private var emptyDescription: String {
+        language.history.completedRunsWillAppear(for: periodDescription)
+    }
+
+    private var periodDescription: HistoryPeriodDescription {
         switch period {
-        case .rolling30:
-            "Your completed runs for this period will appear here."
-        case .calendarMonth:
-            "Your completed runs for this month will appear here."
-        case .calendarYear:
-            "Your completed runs for this year will appear here."
+        case .rolling30: .lastThirtyDays
+        case .calendarMonth: .month
+        case .calendarYear: .year
         }
     }
 
@@ -335,32 +334,40 @@ struct ActivityListView: View {
 
     private func monthYear(_ date: Date) -> String {
         date.formatted(
-            Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+            Date.FormatStyle(locale: language.uiLocale, calendar: calendar, timeZone: calendar.timeZone)
                 .month(.wide).year()
         )
+    }
+
+    private func periodLabel(_ period: Period) -> String {
+        switch period {
+        case .rolling30: language.history.rollingThirtyDays
+        case .calendarMonth: language.history.month
+        case .calendarYear: language.history.year
+        }
     }
 
     private var previousAccessibilityLabel: String {
         switch period {
         case .rolling30:
-            return "Previous period"
+            return language.history.previousPeriod
         case .calendarMonth:
             let destination = calendar.date(byAdding: .month, value: -1, to: selectedMonth) ?? selectedMonth
-            return "Previous month, \(monthYear(destination))"
+            return language.history.previousMonth(monthYear(destination))
         case .calendarYear:
-            return "Previous year, \(selectedYear - 1)"
+            return language.history.previousYear(selectedYear - 1)
         }
     }
 
     private var nextAccessibilityLabel: String {
         switch period {
         case .rolling30:
-            return "Next period"
+            return language.history.nextPeriod
         case .calendarMonth:
             let destination = calendar.date(byAdding: .month, value: 1, to: selectedMonth) ?? selectedMonth
-            return canNavigateForward ? "Next month, \(monthYear(destination))" : "Next month unavailable"
+            return canNavigateForward ? language.history.nextMonth(monthYear(destination)) : language.history.nextMonthUnavailable
         case .calendarYear:
-            return canNavigateForward ? "Next year, \(selectedYear + 1)" : "Next year unavailable"
+            return canNavigateForward ? language.history.nextYear(selectedYear + 1) : language.history.nextYearUnavailable
         }
     }
 
@@ -371,7 +378,7 @@ struct ActivityListView: View {
 
 private struct MonthYearPickerSheet: View {
     @Binding var selectedMonth: Date
-    let locale: Locale
+    let language: CoachLanguage
     let calendar: Calendar
     let onSelect: () -> Void
 
@@ -395,14 +402,14 @@ private struct MonthYearPickerSheet: View {
             .padding(20)
             .torReadableColumn()
             .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle("Select Month")
+            .navigationTitle(language.history.selectMonth)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(language.cancelLabel) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button(language.doneLabel) { dismiss() }
                 }
             }
             .onAppear {
@@ -423,7 +430,7 @@ private struct MonthYearPickerSheet: View {
                     .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Previous year, \(visibleYear - 1)")
+            .accessibilityLabel(language.history.previousYear(visibleYear - 1))
 
             Text(String(visibleYear))
                 .font(.torHeading(22, .bold))
@@ -441,7 +448,11 @@ private struct MonthYearPickerSheet: View {
             .buttonStyle(.plain)
             .disabled(visibleYear >= currentYear)
             .foregroundStyle(visibleYear >= currentYear ? Theme.faint.opacity(0.5) : Theme.text)
-            .accessibilityLabel(visibleYear >= currentYear ? "Next year unavailable" : "Next year, \(visibleYear + 1)")
+            .accessibilityLabel(
+                visibleYear >= currentYear
+                    ? language.history.nextYearUnavailable
+                    : language.history.nextYear(visibleYear + 1)
+            )
         }
     }
 
@@ -478,9 +489,9 @@ private struct MonthYearPickerSheet: View {
 
     private func monthName(_ date: Date) -> String {
         date.formatted(
-            Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+            Date.FormatStyle(locale: language.uiLocale, calendar: calendar, timeZone: calendar.timeZone)
                 .month(.wide)
-        ).capitalized(with: locale)
+        )
     }
 }
 
@@ -488,6 +499,7 @@ private struct MonthYearPickerSheet: View {
 private struct OverviewCard: View {
     let summary: RunHistorySummary
     let eyebrow: String
+    let language: CoachLanguage
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
 
@@ -496,14 +508,14 @@ private struct OverviewCard: View {
             TorEyebrow(eyebrow).tracking(1.6).foregroundStyle(Theme.dim)
 
             HStack(alignment: .lastTextBaseline, spacing: 6) {
-                Text(String(format: "%.1f", summary.totalDistanceMeters / 1000))
+                Text(String(format: "%.1f", locale: language.uiLocale, summary.totalDistanceMeters / 1000))
                     .font(.torNumber(44, .bold))
                     .foregroundStyle(Theme.text)
                 Text("km")
                     .font(.torHeading(16, .semibold))
                     .foregroundStyle(Theme.dim)
             }
-            Text("total distance · \(summary.runCount) \(summary.runCount == 1 ? "run" : "runs")")
+            Text(language.history.totalDistance(runCount: summary.runCount))
                 .font(.system(size: 12.5, weight: .medium))
                 .foregroundStyle(Theme.faint)
 
@@ -523,21 +535,21 @@ private struct OverviewCard: View {
                 alignment: .leading,
                 spacing: 10
             ) {
-                stat(paceText, "AVG PACE", Theme.text)
-                stat(Formatters.duration(summary.totalDurationSeconds), "TOTAL TIME", Theme.text)
-                stat(longestText, "LONGEST km", Theme.good)
+                stat(paceText, language.history.averagePace, Theme.text)
+                stat(Formatters.duration(summary.totalDurationSeconds), language.history.totalTime, Theme.text)
+                stat(longestText, language.history.longestDistance, Theme.good)
             }
         } else {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 10) {
-                    stat(paceText, "AVG PACE", Theme.text)
-                    stat(Formatters.duration(summary.totalDurationSeconds), "TOTAL TIME", Theme.text)
-                    stat(longestText, "LONGEST km", Theme.good)
+                    stat(paceText, language.history.averagePace, Theme.text)
+                    stat(Formatters.duration(summary.totalDurationSeconds), language.history.totalTime, Theme.text)
+                    stat(longestText, language.history.longestDistance, Theme.good)
                 }
                 VStack(alignment: .leading, spacing: 10) {
-                    stat(paceText, "AVG PACE", Theme.text)
-                    stat(Formatters.duration(summary.totalDurationSeconds), "TOTAL TIME", Theme.text)
-                    stat(longestText, "LONGEST km", Theme.good)
+                    stat(paceText, language.history.averagePace, Theme.text)
+                    stat(Formatters.duration(summary.totalDurationSeconds), language.history.totalTime, Theme.text)
+                    stat(longestText, language.history.longestDistance, Theme.good)
                 }
             }
         }
@@ -550,7 +562,7 @@ private struct OverviewCard: View {
 
     private var longestText: String {
         guard let meters = summary.longestDistanceMeters else { return "–" }
-        return String(format: "%.1f", meters / 1000)
+        return String(format: "%.1f", locale: language.uiLocale, meters / 1000)
     }
 
     private func stat(_ value: String, _ label: String, _ color: Color) -> some View {
@@ -561,16 +573,6 @@ private struct OverviewCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12).padding(.vertical, 11)
         .background(Theme.chip, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-    }
-}
-
-private extension ActivityListView.Period {
-    var accessibilityLabel: String {
-        switch self {
-        case .rolling30: "Last 30 days"
-        case .calendarMonth: "Month"
-        case .calendarYear: "Year"
-        }
     }
 }
 

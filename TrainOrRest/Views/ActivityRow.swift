@@ -2,6 +2,9 @@ import SwiftUI
 
 struct ActivityRow: View {
     let activity: CompletedActivity
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
 
     var body: some View {
         HStack(spacing: 13) {
@@ -13,7 +16,7 @@ struct ActivityRow: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 dateTime
-                Text(activity.effortLabel.uppercased())
+                Text(language.name(activity.effort).uppercased(with: language.uiLocale))
                     .font(.torLabel(10, .bold))
                     .tracking(0.4)
                     .foregroundStyle(activity.effortColor)
@@ -34,18 +37,18 @@ struct ActivityRow: View {
     private var dateTime: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
-                Text(activity.date.formatted(.dateTime.month(.abbreviated).day()))
+                Text(language.shortDate(activity.date))
                     .font(.torHeading(15, .bold))
                     .foregroundStyle(Theme.text)
-                Text(activity.date.formatted(date: .omitted, time: .shortened))
+                Text(language.time(activity.date))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.faint)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(activity.date.formatted(.dateTime.month(.abbreviated).day()))
+                Text(language.shortDate(activity.date))
                     .font(.torHeading(15, .bold))
                     .foregroundStyle(Theme.text)
-                Text(activity.date.formatted(date: .omitted, time: .shortened))
+                Text(language.time(activity.date))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.faint)
             }

@@ -10,6 +10,9 @@ struct TrendsView: View {
     @Query(sort: \DailyWellness.date, order: .reverse) private var wellness: [DailyWellness]
     @Query(sort: \CompletedActivity.date, order: .reverse) private var activities: [CompletedActivity]
     private let calendar = Calendar.current
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
 
     var body: some View {
         ScrollView {
@@ -17,11 +20,11 @@ struct TrendsView: View {
                 header
                 statChips
                 readinessBars
-                trendLine(title: "Heart Rate Variability", unit: "ms", color: Theme.data, series: hrvSeries)
-                trendLine(title: "Resting Heart Rate", unit: "bpm", color: Theme.data, series: rhrSeries)
+                trendLine(title: language.history.heartRateVariability, unit: "ms", color: Theme.data, series: hrvSeries)
+                trendLine(title: language.history.restingHeartRate, unit: "bpm", color: Theme.data, series: rhrSeries)
                 sleepStagesCard
                 if readiness.isEmpty {
-                    Text("Trends appear once a few days of readiness are recorded.")
+                    Text(language.history.trendsEmpty)
                         .font(.system(size: 13)).foregroundStyle(Theme.dim)
                         .padding(.top, 8)
                 }
@@ -39,8 +42,8 @@ struct TrendsView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 3) {
-            TorEyebrow("Last 28 days").tracking(2)
-            Text("Trends").font(.torHeading(28, .bold)).foregroundStyle(Theme.text)
+            TorEyebrow(language.history.lastTwentyEightDays).tracking(2)
+            Text(language.history.trends).font(.torHeading(28, .bold)).foregroundStyle(Theme.text)
         }
     }
 
@@ -50,10 +53,10 @@ struct TrendsView: View {
         let trained = last28.filter { $0.verdict == .train }.count
         let rested = last28.filter { $0.verdict == .rest }.count
         return HStack(spacing: 8) {
-            statChip("\(avg)", "AVG READY", Theme.text)
-            statChip("\(trained)", "TRAINED", Theme.verdictTrain)
-            statChip("\(rested)", "RESTED", Theme.verdictRest)
-            statChip("\(currentStreak)", currentStreak == 1 ? "STREAK DAY" : "STREAK DAYS", Theme.data)
+            statChip("\(avg)", language.history.averageReadiness, Theme.text)
+            statChip("\(trained)", language.history.trained, Theme.verdictTrain)
+            statChip("\(rested)", language.history.rested, Theme.verdictRest)
+            statChip("\(currentStreak)", language.history.streakDays(currentStreak), Theme.data)
         }
     }
 
@@ -76,7 +79,7 @@ struct TrendsView: View {
         let week = lastSevenScores
         return TorCard {
             VStack(alignment: .leading, spacing: 14) {
-                TorEyebrow("Readiness · this week").tracking(1.5)
+                TorEyebrow(language.history.readinessThisWeek).tracking(1.5)
                 HStack(alignment: .bottom, spacing: 8) {
                     ForEach(week, id: \.date) { day in
                         VStack(spacing: 6) {
@@ -106,7 +109,8 @@ struct TrendsView: View {
     }
 
     private func weekdayInitial(_ date: Date) -> String {
-        String(date.formatted(.dateTime.weekday(.abbreviated)).prefix(1))
+        let weekday = Weekday(rawValue: calendar.component(.weekday, from: date)) ?? .monday
+        return language.shortName(weekday)
     }
 
     private func barColor(_ score: Int?) -> Color {
@@ -148,9 +152,9 @@ struct TrendsView: View {
                         }
                     }
                     Chart(series) { point in
-                        AreaMark(x: .value("Day", point.date), y: .value(unit, point.value))
+                        AreaMark(x: .value(language.history.dayAxis, point.date), y: .value(unit, point.value))
                             .foregroundStyle(LinearGradient(colors: [color.opacity(0.28), .clear], startPoint: .top, endPoint: .bottom))
-                        LineMark(x: .value("Day", point.date), y: .value(unit, point.value))
+                        LineMark(x: .value(language.history.dayAxis, point.date), y: .value(unit, point.value))
                             .foregroundStyle(color)
                             .interpolationMethod(.catmullRom)
                     }
@@ -170,11 +174,11 @@ struct TrendsView: View {
         (0..<7).reversed().flatMap { back -> [StageBar] in
             let day = calendar.date(byAdding: .day, value: -back, to: calendar.startOfDay(for: .now))!
             guard let row = wellness.first(where: { calendar.isDate($0.date, inSameDayAs: day) }) else { return [] }
-            let label = String(day.formatted(.dateTime.weekday(.abbreviated)).prefix(1))
+            let label = weekdayInitial(day)
             return [
-                StageBar(label: label, stage: "Deep", hours: row.deepSleepHours ?? 0),
-                StageBar(label: label, stage: "REM", hours: row.remSleepHours ?? 0),
-                StageBar(label: label, stage: "Light", hours: row.lightSleepHours ?? 0),
+                StageBar(label: label, stage: language.history.deepSleep, hours: row.deepSleepHours ?? 0),
+                StageBar(label: label, stage: language.history.remSleep, hours: row.remSleepHours ?? 0),
+                StageBar(label: label, stage: language.history.lightSleep, hours: row.lightSleepHours ?? 0),
             ]
         }
     }
@@ -184,15 +188,19 @@ struct TrendsView: View {
         if sleepStageData.contains(where: { $0.hours > 0 }) {
             TorCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    TorEyebrow("Sleep · 7 nights").tracking(1.5)
+                    TorEyebrow(language.history.sleepSevenNights).tracking(1.5)
                     Chart(sleepStageData) { bar in
                         BarMark(
-                            x: .value("Night", bar.label),
-                            y: .value("Hours", bar.hours)
+                            x: .value(language.history.nightAxis, bar.label),
+                            y: .value(language.history.hoursAxis, bar.hours)
                         )
-                        .foregroundStyle(by: .value("Stage", bar.stage))
+                        .foregroundStyle(by: .value(language.history.sleepStage, bar.stage))
                     }
-                    .chartForegroundStyleScale(["Deep": Theme.data, "REM": Theme.data.opacity(0.72), "Light": Theme.data.opacity(0.44)])
+                    .chartForegroundStyleScale([
+                        language.history.deepSleep: Theme.data,
+                        language.history.remSleep: Theme.data.opacity(0.72),
+                        language.history.lightSleep: Theme.data.opacity(0.44)
+                    ])
                     .chartYAxis { AxisMarks(position: .leading) }
                     .frame(height: 120)
                 }

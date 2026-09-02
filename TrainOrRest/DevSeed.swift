@@ -85,6 +85,14 @@ enum DevSeed {
         return "Give me a brief read on my recent recovery and readiness."
     }
 
+    /// `TOR_DEV_LANG=en|ja|vi` pins the coach language for a seeded launch so
+    /// every screen can be screenshotted in each supported language.
+    private static func applyRequestedLanguage() {
+        guard let raw = ProcessInfo.processInfo.environment["TOR_DEV_LANG"],
+              CoachLanguage(rawValue: raw) != nil else { return }
+        UserDefaults.standard.set(raw, forKey: CoachLanguage.storageKey)
+    }
+
     /// Seeds when requested and returns the thread the coach tab should open.
     /// Returns `nil` when seeding is off so the normal launch is untouched.
     @discardableResult
@@ -94,6 +102,7 @@ enum DevSeed {
 
         OnboardingGate.markCompleted()
         preloadAPIKey()
+        applyRequestedLanguage()
         seedPlanIfRequested(context)
         seedHistoryIfRequested(context)
         if isLiveRequested { return seedLiveThread(context) }

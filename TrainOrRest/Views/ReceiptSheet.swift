@@ -21,7 +21,7 @@ struct ReceiptSheet: View {
             self.symbol = symbol
         }
 
-        static func check(_ label: String, value: String = "Passed", symbol: String? = "checkmark.circle") -> Row {
+        static func check(_ label: String, value: String, symbol: String? = "checkmark.circle") -> Row {
             Row(kind: .check, label: label, value: value, symbol: symbol)
         }
 

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CoachRationaleCard: View {
     let rationale: ReadinessRationale
+    let language: CoachLanguage
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -9,9 +10,9 @@ struct CoachRationaleCard: View {
             VStack(alignment: .leading, spacing: 14) {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        CoachVerdictChip(verdict: rationale.verdict, prefix: "Engine")
+                        CoachVerdictChip(verdict: rationale.verdict, language: language, prefix: language.coachEngineLabel)
                         if let score = rationale.score {
-                            Text("readiness \(score)")
+                            Text(language.readinessScoreLabel(score))
                                 .font(.torMono(11, .medium))
                                 .foregroundStyle(Theme.dim)
                         }
@@ -19,9 +20,9 @@ struct CoachRationaleCard: View {
                     .fixedSize(horizontal: dynamicTypeSize.isAccessibilitySize, vertical: false)
 
                     VStack(alignment: .leading, spacing: 4) {
-                        CoachVerdictChip(verdict: rationale.verdict, prefix: "Engine")
+                        CoachVerdictChip(verdict: rationale.verdict, language: language, prefix: language.coachEngineLabel)
                         if let score = rationale.score {
-                            Text("readiness \(score)")
+                            Text(language.readinessScoreLabel(score))
                                 .font(.torMono(11, .medium))
                                 .foregroundStyle(Theme.dim)
                         }
@@ -38,10 +39,10 @@ struct CoachRationaleCard: View {
                                     .frame(width: 18, height: 18)
                                     .accessibilityHidden(true)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(signal.label)
+                                    Text(language.readinessSignalLabel(for: signal.id, fallback: signal.label))
                                         .font(.caption.weight(.semibold))
                                         .foregroundStyle(Theme.text)
-                                    Text(signal.value)
+                                    Text(language.readinessSignalValue(id: signal.id, rawValue: signal.value))
                                         .font(.caption)
                                         .foregroundStyle(Theme.dim)
                                         .fixedSize(horizontal: false, vertical: true)
@@ -54,7 +55,7 @@ struct CoachRationaleCard: View {
                 if !rationale.ruleIDs.isEmpty {
                     FlowLayout(spacing: 6, lineSpacing: 6) {
                         ForEach(rationale.ruleIDs) { ruleID in
-                            RuleCodeChip(ruleID: ruleID, tint: rationale.verdict.torColor)
+                            RuleCodeChip(ruleID: ruleID, language: language, tint: rationale.verdict.torColor)
                         }
                     }
                 }
@@ -66,17 +67,21 @@ struct CoachRationaleCard: View {
 
 struct CoachWorkoutCard: View {
     let workout: CoachWorkoutSummary
+    let language: CoachLanguage
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    init(workout: PlannedWorkout) {
-        self.workout = CoachWorkoutSummary(from: workout)
+    init(workout: PlannedWorkout, language: CoachLanguage) {
+        self.language = language
+        self.workout = CoachWorkoutSummary(from: workout, language: language)
     }
 
-    init(spec: PlannedWorkoutSpec) {
-        self.workout = CoachWorkoutSummary(from: spec)
+    init(spec: PlannedWorkoutSpec, language: CoachLanguage) {
+        self.language = language
+        self.workout = CoachWorkoutSummary(from: spec, language: language)
     }
 
-    init(workout: CoachWorkoutSummary) {
+    init(workout: CoachWorkoutSummary, language: CoachLanguage) {
+        self.language = language
         self.workout = workout
     }
 
@@ -119,12 +124,12 @@ struct CoachWorkoutCard: View {
 
     @ViewBuilder
     private var metricChips: some View {
-        WorkoutMetricChip(label: "Distance", value: workout.distance)
+        WorkoutMetricChip(label: language.distanceLabel, value: workout.distance)
         if let duration = workout.duration {
-            WorkoutMetricChip(label: "Duration", value: duration)
+            WorkoutMetricChip(label: language.durationLabel, value: duration)
         }
         if let paceBand = workout.paceBand {
-            WorkoutMetricChip(label: "Pace", value: paceBand)
+            WorkoutMetricChip(label: language.paceLabel, value: paceBand)
         }
     }
 }
@@ -137,54 +142,39 @@ struct CoachWorkoutSummary: Equatable {
     var paceBand: String?
     var symbolName: String
 
-    init(from workout: PlannedWorkout) {
+    init(from workout: PlannedWorkout, language: CoachLanguage) {
         self.init(
             kind: workout.kind,
-            kindRaw: workout.kindRaw,
             distanceKm: workout.distanceKm,
             paceBand: workout.paceBand,
-            details: workout.details
+            details: workout.details,
+            language: language
         )
     }
 
-    init(from spec: PlannedWorkoutSpec) {
+    init(from spec: PlannedWorkoutSpec, language: CoachLanguage) {
         self.init(
             kind: spec.kind,
-            kindRaw: spec.kind.rawValue,
             distanceKm: spec.distanceKm,
             paceBand: spec.paceBand,
-            details: spec.details
+            details: spec.details,
+            language: language
         )
     }
 
-    private init(kind: WorkoutKind?, kindRaw: String, distanceKm: Double, paceBand: PaceBand?, details: String) {
-        let displayName = kind?.displayName ?? kindRaw.capitalized
-        title = displayName
-        targets = Self.targets(kind: kind, details: details)
+    private init(kind: WorkoutKind?, distanceKm: Double, paceBand: PaceBand?, details: String, language: CoachLanguage) {
+        title = kind.map { language.name($0) } ?? language.genericRunLabel
+        targets = Self.targets(kind: kind, details: details, language: language)
         distance = Formatters.kilometers(distanceKm * 1000)
         self.paceBand = paceBand.map(Formatters.paceBand)
         duration = Self.duration(distanceKm: distanceKm, paceBand: paceBand)
         symbolName = kind?.symbolName ?? "figure.run"
     }
 
-    private static func targets(kind: WorkoutKind?, details: String) -> [String] {
+    private static func targets(kind: WorkoutKind?, details: String, language: CoachLanguage) -> [String] {
         let trimmed = details.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { return [trimmed] }
-        guard let kind else { return ["Planned run"] }
-        switch kind {
-        case .easy:
-            return ["Aerobic"]
-        case .long:
-            return ["Endurance"]
-        case .tempo:
-            return ["Threshold"]
-        case .threshold:
-            return ["Threshold"]
-        case .intervals:
-            return ["Speed"]
-        case .race:
-            return ["Race effort"]
-        }
+        return [language.workoutTarget(for: kind)]
     }
 
     private static func duration(distanceKm: Double, paceBand: PaceBand?) -> String? {
@@ -196,6 +186,7 @@ struct CoachWorkoutSummary: Equatable {
 
 struct CoachVerdictChip: View {
     let verdict: ReadinessVerdict
+    let language: CoachLanguage
     var prefix: String? = nil
 
     var body: some View {
@@ -215,14 +206,15 @@ struct CoachVerdictChip: View {
 
     private var text: String {
         if let prefix {
-            return "\(prefix) · \(verdict.bannerWord)"
+            return "\(prefix) · \(language.verdictWord(verdict))"
         }
-        return verdict.bannerWord
+        return language.verdictWord(verdict)
     }
 }
 
 struct RuleCodeChip: View {
     let ruleID: ReadinessRuleID
+    let language: CoachLanguage
     var tint: Color = Theme.accent
 
     var body: some View {
@@ -232,7 +224,7 @@ struct RuleCodeChip: View {
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
             .background(Theme.soft(tint), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .accessibilityLabel("Rule \(ruleID.code), \(ruleID.title)")
+            .accessibilityLabel("\(language.ruleSheetTitle(ruleID.code)), \(language.ruleTitle(ruleID))")
     }
 }
 
@@ -333,10 +325,9 @@ struct FlowLayout: Layout {
             ruleIDs: [.hrvLow, .illness],
             summary: "Recovery signals are strained.",
             computedAt: .now
-        )
+        ),
+        language: .en
     )
-    .padding()
-    .background(Theme.bg)
 }
 
 #Preview("Coach workout card") {
@@ -347,8 +338,7 @@ struct FlowLayout: Layout {
             distanceKm: 9,
             paceBand: PaceBand(fastSecondsPerKm: 265, slowSecondsPerKm: 285),
             details: "2 km easy + 5 km threshold + 2 km easy"
-        )
+        ),
+        language: .en
     )
-    .padding()
-    .background(Theme.bg)
 }

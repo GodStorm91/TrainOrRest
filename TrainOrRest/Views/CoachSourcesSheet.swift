@@ -9,8 +9,8 @@ struct CoachSourcesSheet: View {
     var body: some View {
         NavigationStack {
             List(sources) { source in
-                Label(source.label, systemImage: Self.symbol(for: source.type))
-                    .accessibilityLabel(source.label)
+                Label(language.sourceLabel(for: source.type), systemImage: Self.symbol(for: source.type))
+                    .accessibilityLabel(language.sourceLabel(for: source.type))
             }
             .navigationTitle(language.contextSourcesSheetTitle)
             .navigationBarTitleDisplayMode(.inline)

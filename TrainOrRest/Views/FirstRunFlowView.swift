@@ -3,14 +3,17 @@ import SwiftUI
 
 struct FirstRunFlowView: View {
     enum Step: Int {
-        case welcome, health, race, hub, intervals, calendar, coach
+        case language, welcome, health, race, hub, intervals, calendar, coach
     }
 
     let health: HealthKitService
     let onFinished: () -> Void
 
-    @State private var step: Step = .welcome
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+    @State private var step: Step = .language
     @State private var isRequestingHealth = false
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
 
     var body: some View {
         NavigationStack {
@@ -28,26 +31,28 @@ struct FirstRunFlowView: View {
             .toolbar(.hidden, for: .navigationBar)
         }
         .tint(Theme.accent)
+        .environment(\.locale, language.uiLocale)
     }
 
     private var progress: some View {
         HStack(spacing: 6) {
-            ForEach(0..<4, id: \.self) { index in
+            ForEach(0..<5, id: \.self) { index in
                 Capsule()
                     .fill(barColor(index))
                     .frame(height: 3)
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Step \(barIndex + 1) of 4")
+        .accessibilityLabel(language.onboarding.progressStep(barIndex + 1, of: 5))
     }
 
     private var barIndex: Int {
         switch step {
-        case .welcome: 0
-        case .health: 1
-        case .race: 2
-        case .hub, .intervals, .calendar, .coach: 3
+        case .language: 0
+        case .welcome: 1
+        case .health: 2
+        case .race: 3
+        case .hub, .intervals, .calendar, .coach: 4
         }
     }
 
@@ -60,12 +65,15 @@ struct FirstRunFlowView: View {
     @ViewBuilder
     private var screen: some View {
         switch step {
+        case .language:
+            languageStep
         case .welcome:
             welcome
         case .health:
             healthStep
         case .race:
             FirstRunRaceStep(
+                language: language,
                 onCreated: { step = .hub },
                 onLater: finish
             )
@@ -80,9 +88,68 @@ struct FirstRunFlowView: View {
                 GoogleCalendarSettingsView()
             }
         case .coach:
-            setupHost(title: "Coach", back: .hub) {
+            setupHost(title: language.onboarding.coachSetupTitle, back: .hub) {
                 CoachProviderSettingsView()
             }
+        }
+    }
+
+    private var languageStep: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("TrainOrRest")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.faint)
+                .padding(.bottom, 8)
+            Text(language.onboarding.languageChoiceTitle)
+                .font(.torHeading(28, .bold))
+                .foregroundStyle(Theme.text)
+                .padding(.bottom, 12)
+            Text(language.onboarding.languageChoiceSubtitle)
+                .font(.system(size: 16))
+                .foregroundStyle(Theme.dim)
+                .padding(.bottom, 20)
+            VStack(spacing: 8) {
+                ForEach(CoachLanguage.allCases) { option in
+                    Button {
+                        languageRaw = option.rawValue
+                    } label: {
+                        HStack(spacing: 12) {
+                            Text(option.flag)
+                                .font(.system(size: 22))
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(option.nativeName)
+                                    .foregroundStyle(Theme.text)
+                                Text(option.englishName)
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.dim)
+                            }
+                            Spacer()
+                            if option == language {
+                                Image(systemName: "checkmark")
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(Theme.accent)
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 52)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(
+                                    option == language ? Theme.accent : Theme.border,
+                                    lineWidth: 1
+                                )
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(option.nativeName)
+                    .accessibilityValue(option == language ? language.onboarding.selected : option.englishName)
+                    .accessibilityAddTraits(option == language ? [.isSelected] : [])
+                }
+            }
+            Spacer()
+            primaryButton(language.onboarding.startSetupLabel) { step = .welcome }
         }
     }
 
@@ -92,38 +159,38 @@ struct FirstRunFlowView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.faint)
                 .padding(.bottom, 8)
-            Text("What should I do in the next 12 hours?")
+            Text(language.onboarding.welcomeHeadline)
                 .font(.torHeading(28, .bold))
                 .foregroundStyle(Theme.text)
                 .padding(.bottom, 12)
-            Text("Enter the race you signed up for. Get a plan, then a daily call to train, go easy, or rest. Health data stays on this iPhone.")
+            Text(language.onboarding.welcomeDescription)
                 .font(.system(size: 16))
                 .foregroundStyle(Theme.dim)
                 .padding(.bottom, 12)
-            Text("About 3 minutes to a plan. Watch, calendar, and Coach can wait.")
+            Text(language.onboarding.welcomeDuration)
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.faint)
             Spacer()
-            primaryButton("Connect Apple Health") { step = .health }
-            textButton("Explore first", action: finish)
+            primaryButton(language.onboarding.connectAppleHealth) { step = .health }
+            textButton(language.onboarding.exploreFirst, action: finish)
         }
     }
 
     private var healthStep: some View {
         VStack(alignment: .leading, spacing: 0) {
             backButton { step = .welcome }
-            Text("Connect Apple Health")
+            Text(language.onboarding.connectAppleHealth)
                 .font(.torHeading(28, .bold))
                 .foregroundStyle(Theme.text)
                 .padding(.bottom, 12)
-            Text("Garmin runs, sleep, HRV, and resting heart rate arrive through Apple Health. TrainOrRest only reads. It does not write back.")
+            Text(language.onboarding.healthDescription)
                 .font(.system(size: 16))
                 .foregroundStyle(Theme.dim)
                 .padding(.bottom, 16)
             VStack(alignment: .leading, spacing: 10) {
-                permitRow("Workouts, heart rate, HRV, sleep, resting HR", allowed: true)
-                permitRow("No writes to Apple Health or Garmin", allowed: false)
-                permitRow("No account. Later connections stay optional.", allowed: false)
+                permitRow(language.onboarding.healthReadPermission, allowed: true)
+                permitRow(language.onboarding.healthNoWritePermission, allowed: false)
+                permitRow(language.onboarding.healthNoAccountPermission, allowed: false)
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -132,47 +199,47 @@ struct FirstRunFlowView: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(Theme.border, lineWidth: 1)
             )
-            Text("Without Health, Today can still name a session but cannot show readiness receipts.")
+            Text(language.onboarding.healthWithoutData)
                 .font(.system(size: 14))
                 .foregroundStyle(Theme.dim)
                 .padding(.top, 12)
             Spacer()
-            primaryButton(isRequestingHealth ? nil : "Allow Health access") {
+            primaryButton(isRequestingHealth ? nil : language.onboarding.allowHealthAccess) {
                 requestHealth()
             }
-            textButton("Continue without it") { step = .race }
+            textButton(language.onboarding.continueWithoutHealth) { step = .race }
         }
     }
 
     private var hub: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Today already has a session")
+            Text(language.onboarding.hubTitle)
                 .font(.torHeading(28, .bold))
                 .foregroundStyle(Theme.text)
                 .padding(.bottom, 12)
-            Text("Watch, Google Calendar, and Coach are optional. Open a card or go to Calendar.")
+            Text(language.onboarding.hubDescription)
                 .font(.system(size: 16))
                 .foregroundStyle(Theme.dim)
                 .padding(.bottom, 16)
             VStack(spacing: 12) {
                 setupCard(
-                    title: "Watch workouts",
-                    subtitle: "Send sessions to Garmin through intervals.icu",
+                    title: language.onboarding.watchWorkoutsTitle,
+                    subtitle: language.onboarding.watchWorkoutsSubtitle,
                     symbol: "applewatch"
                 ) { step = .intervals }
                 setupCard(
                     title: "Google Calendar",
-                    subtitle: "See workouts next to work and life",
+                    subtitle: language.onboarding.googleCalendarSubtitle,
                     symbol: "calendar"
                 ) { step = .calendar }
                 setupCard(
-                    title: "Coach",
-                    subtitle: "Explains today and proposes edits you approve.",
+                    title: language.onboarding.coachSetupTitle,
+                    subtitle: language.onboarding.coachSetupSubtitle,
                     symbol: "sparkles"
                 ) { step = .coach }
             }
             Spacer()
-            primaryButton("Open Calendar", action: finish)
+            primaryButton(language.onboarding.openCalendar, action: finish)
         }
     }
 
@@ -240,7 +307,7 @@ struct FirstRunFlowView: View {
     }
 
     private func backButton(_ action: @escaping () -> Void) -> some View {
-        Button("Back", action: action)
+        Button(language.backLabel, action: action)
             .font(.system(size: 16, weight: .semibold))
             .foregroundStyle(Theme.accent)
             .frame(minHeight: 44, alignment: .leading)
@@ -288,6 +355,7 @@ struct FirstRunFlowView: View {
 }
 
 private struct FirstRunRaceStep: View {
+    let language: CoachLanguage
     let onCreated: () -> Void
     let onLater: () -> Void
 
@@ -323,16 +391,16 @@ private struct FirstRunRaceStep: View {
     private var raceForm: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Set the race you entered")
+                Text(language.onboarding.raceSetupTitle)
                     .font(.torHeading(28, .bold))
                     .foregroundStyle(Theme.text)
-                Text("Your plan is built backward from race day: distance, date, and target time.")
+                Text(language.onboarding.raceSetupDescription)
                     .font(.system(size: 16))
                     .foregroundStyle(Theme.dim)
 
-                labeled("Distance") {
-                    Picker("Distance", selection: $distance) {
-                        ForEach(RaceDistance.allCases) { Text($0.displayName).tag($0) }
+                labeled(language.onboarding.distance) {
+                    Picker(language.onboarding.distance, selection: $distance) {
+                        ForEach(RaceDistance.allCases) { Text(language.name($0)).tag($0) }
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
@@ -342,22 +410,22 @@ private struct FirstRunRaceStep: View {
                 }
 
                 DatePicker(
-                    "Race date",
+                    language.onboarding.raceDate,
                     selection: $raceDate,
                     in: calendar.date(byAdding: .day, value: 1, to: .now)!...,
                     displayedComponents: .date
                 )
                 .frame(minHeight: 48)
 
-                labeled("Target time (h:mm)") {
+                labeled(language.onboarding.targetTime) {
                     HStack {
-                        Picker("Hours", selection: $targetHours) {
-                            ForEach(0..<8, id: \.self) { Text("\($0) h").tag($0) }
+                        Picker(language.onboarding.hours, selection: $targetHours) {
+                            ForEach(0..<8, id: \.self) { Text(language.onboarding.targetHour($0)).tag($0) }
                         }
                         .labelsHidden()
                         .pickerStyle(.menu)
-                        Picker("Minutes", selection: $targetMinutes) {
-                            ForEach(0..<60, id: \.self) { Text(String(format: "%02d m", $0)).tag($0) }
+                        Picker(language.onboarding.minutes, selection: $targetMinutes) {
+                            ForEach(0..<60, id: \.self) { Text(language.onboarding.targetMinute($0)).tag($0) }
                         }
                         .labelsHidden()
                         .pickerStyle(.menu)
@@ -366,7 +434,7 @@ private struct FirstRunRaceStep: View {
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Running days")
+                    Text(language.onboarding.runningDays)
                         .font(.system(size: 13))
                         .foregroundStyle(Theme.dim)
                     HStack(spacing: 6) {
@@ -374,14 +442,14 @@ private struct FirstRunRaceStep: View {
                             dayToggle(day)
                         }
                     }
-                    Text("Hard sessions are spaced across these days.")
+                    Text(language.onboarding.runningDaysHint)
                         .font(.system(size: 13))
                         .foregroundStyle(Theme.dim)
                 }
 
-                labeled("Long run day") {
-                    Picker("Long run day", selection: $longRunDay) {
-                        ForEach(selectedDays.sorted(), id: \.self) { Text($0.shortName).tag($0) }
+                labeled(language.onboarding.longRunDay) {
+                    Picker(language.onboarding.longRunDay, selection: $longRunDay) {
+                        ForEach(selectedDays.sorted(), id: \.self) { Text(language.shortName($0)).tag($0) }
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
@@ -389,16 +457,18 @@ private struct FirstRunRaceStep: View {
                 }
 
                 if fitness == nil {
-                    labeled("Comfortable pace /km") {
+                    labeled(language.onboarding.comfortablePace) {
                         HStack {
-                            Picker("Min", selection: $comfortablePaceMinutes) {
-                                ForEach(3..<10, id: \.self) { Text("\($0)").tag($0) }
+                            Picker(language.onboarding.minutesAbbreviation, selection: $comfortablePaceMinutes) {
+                                ForEach(3..<10, id: \.self) { Text($0.formatted(.number.locale(language.uiLocale))).tag($0) }
                             }
                             .labelsHidden()
                             .pickerStyle(.menu)
                             Text(":")
-                            Picker("Sec", selection: $comfortablePaceSeconds) {
-                                ForEach([0, 15, 30, 45], id: \.self) { Text(String(format: "%02d", $0)).tag($0) }
+                            Picker(language.onboarding.secondsAbbreviation, selection: $comfortablePaceSeconds) {
+                                ForEach([0, 15, 30, 45], id: \.self) {
+                                    Text($0.formatted(.number.precision(.integerLength(2)).locale(language.uiLocale))).tag($0)
+                                }
                             }
                             .labelsHidden()
                             .pickerStyle(.menu)
@@ -406,7 +476,7 @@ private struct FirstRunRaceStep: View {
                         .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     }
                     Stepper(
-                        "Weekly volume: \(Int(manualWeeklyKm)) km",
+                        language.onboarding.weeklyVolume(manualWeeklyKm),
                         value: $manualWeeklyKm,
                         in: 10...80,
                         step: 5
@@ -418,14 +488,14 @@ private struct FirstRunRaceStep: View {
                     Text(saveError).foregroundStyle(Theme.bad)
                 }
 
-                Button("Check this race") { didCheck = true }
+                Button(language.onboarding.checkRace) { didCheck = true }
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.text)
                     .frame(maxWidth: .infinity, minHeight: 48)
                     .background(Theme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .disabled(!isValid)
                     .padding(.top, 8)
-                Button("Later", action: onLater)
+                Button(language.onboarding.later, action: onLater)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.dim)
                     .frame(maxWidth: .infinity, minHeight: 48)
@@ -436,26 +506,36 @@ private struct FirstRunRaceStep: View {
 
     private func feasibility(_ assessment: FeasibilityCheck.Assessment) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            Button("Back") { didCheck = false }
+            Button(language.backLabel) { didCheck = false }
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Theme.accent)
                 .frame(minHeight: 44, alignment: .leading)
-            Text(assessment.verdict == .unrealistic ? "This date is tight" : "This race looks realistic")
-                .font(.torHeading(28, .bold))
-                .foregroundStyle(Theme.text)
+            Text(
+                assessment.verdict == .unrealistic
+                    ? language.onboarding.tightDateTitle
+                    : language.onboarding.realisticRaceTitle
+            )
+            .font(.torHeading(28, .bold))
+            .foregroundStyle(Theme.text)
             Text(summaryLine)
                 .font(.system(size: 16))
                 .foregroundStyle(Theme.dim)
             VStack(alignment: .leading, spacing: 6) {
-                Text("Feasibility")
+                Text(language.onboarding.feasibility)
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.dim)
-                Text(assessment.verdict.firstRunTitle)
+                Text(language.onboarding.feasibilityVerdict(assessment.verdict))
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(assessment.verdict.firstRunColor)
-                Text(assessment.firstRunHint)
-                    .font(.system(size: 14))
-                    .foregroundStyle(Theme.dim)
+                Text(
+                    language.onboarding.feasibilityHint(
+                        assessment.verdict,
+                        goal: Int(assessment.goalVDOT.rounded()),
+                        projected: Int(assessment.projectedVDOT.rounded())
+                    )
+                )
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.dim)
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -465,7 +545,11 @@ private struct FirstRunRaceStep: View {
                     .strokeBorder(Theme.border, lineWidth: 1)
             )
             Spacer()
-            Button(assessment.verdict == .unrealistic ? "Edit race" : "Create plan") {
+            Button(
+                assessment.verdict == .unrealistic
+                    ? language.onboarding.editRace
+                    : language.onboarding.createPlan
+            ) {
                 if assessment.verdict == .unrealistic {
                     didCheck = false
                 } else {
@@ -477,12 +561,12 @@ private struct FirstRunRaceStep: View {
             .frame(maxWidth: .infinity, minHeight: 48)
             .background(Theme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             if assessment.verdict == .unrealistic {
-                Button("Create plan anyway", action: save)
+                Button(language.onboarding.createPlanAnyway, action: save)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.dim)
                     .frame(maxWidth: .infinity, minHeight: 48)
             } else {
-                Button("Edit race") { didCheck = false }
+                Button(language.onboarding.editRace) { didCheck = false }
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.text)
                     .frame(maxWidth: .infinity, minHeight: 48)
@@ -496,7 +580,7 @@ private struct FirstRunRaceStep: View {
 
     private func dayToggle(_ day: Weekday) -> some View {
         let on = selectedDays.contains(day)
-        return Button(String(day.shortName.prefix(1))) {
+        return Button(language.shortName(day)) {
             if on {
                 if selectedDays.count > 3 { selectedDays.remove(day) }
             } else {
@@ -513,7 +597,7 @@ private struct FirstRunRaceStep: View {
             on ? Theme.accentSoft : Theme.card2,
             in: RoundedRectangle(cornerRadius: 10, style: .continuous)
         )
-        .accessibilityLabel(day.shortName)
+        .accessibilityLabel(language.shortName(day))
         .accessibilityAddTraits(on ? [.isSelected] : [])
     }
 
@@ -562,8 +646,13 @@ private struct FirstRunRaceStep: View {
     }
 
     private var summaryLine: String {
-        let days = selectedDays.count
-        return "\(distance.displayName) on \(raceDate.formatted(date: .abbreviated, time: .omitted)) at \(Formatters.duration(targetTimeSeconds)). \(days) run days. Long run \(longRunDay.shortName)."
+        language.onboarding.raceSummary(
+            distance: language.name(distance),
+            date: language.shortDate(raceDate),
+            targetTime: Formatters.duration(targetTimeSeconds),
+            runningDays: selectedDays.count,
+            longRunDay: language.shortName(longRunDay)
+        )
     }
 
     private func save() {
@@ -578,41 +667,18 @@ private struct FirstRunRaceStep: View {
             NotificationCenter.default.post(name: .planDidChange, object: nil)
             onCreated()
         } catch {
-            saveError = "Could not save goal: \(error.localizedDescription)"
+            saveError = language.onboarding.goalSaveError
             didCheck = false
         }
     }
 }
 
 private extension FeasibilityVerdict {
-    var firstRunTitle: String {
-        switch self {
-        case .ok: "On track"
-        case .stretch: "Stretch"
-        case .unrealistic: "Too soon"
-        }
-    }
-
     var firstRunColor: Color {
         switch self {
         case .ok: Theme.verdictTrain
         case .stretch: Theme.verdictEasy
         case .unrealistic: Theme.verdictRest
-        }
-    }
-}
-
-private extension FeasibilityCheck.Assessment {
-    var firstRunHint: String {
-        let goal = Int(goalVDOT.rounded())
-        let projected = Int(projectedVDOT.rounded())
-        switch verdict {
-        case .ok:
-            return "Target needs about VDOT \(goal). You project \(projected). The plan keeps hard sessions to two a week."
-        case .stretch:
-            return "Target needs about VDOT \(goal). You project \(projected). The plan can try, with more easy volume and fewer quality days."
-        case .unrealistic:
-            return "This date is too close for that time. Edit the race or pick a later event."
         }
     }
 }

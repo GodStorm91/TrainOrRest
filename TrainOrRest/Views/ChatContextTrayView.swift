@@ -15,6 +15,7 @@ struct ChatContextTrayView: View {
     @Binding var selectedImageAttachment: CoachImageAttachment?
     @Binding var selectedImage: UIImage?
 
+    let language: CoachLanguage
     let plannedWorkouts: [PlannedWorkout]
     let completedActivities: [CompletedActivity]
     let onReviewEvidence: () -> Void
@@ -27,16 +28,16 @@ struct ChatContextTrayView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ContextChip(
-                        title: "Thể trạng hiện tại",
-                        detail: evidence.readinessSnapshot ? "on" : "off",
+                        title: language.readinessSourceTitle,
+                        detail: evidence.readinessSnapshot ? language.contextIncludedLabel : language.contextNotIncludedLabel,
                         systemImage: "heart.text.square",
                         isSelected: evidence.readinessSnapshot
                     ) {
                         evidence.readinessSnapshot.toggle()
                     }
                     ContextChip(
-                        title: "Kế hoạch tuần này",
-                        detail: evidence.weekPlan ? "on" : "off",
+                        title: language.planSourceTitle,
+                        detail: evidence.weekPlan ? language.contextIncludedLabel : language.contextNotIncludedLabel,
                         systemImage: "calendar",
                         isSelected: evidence.weekPlan
                     ) {
@@ -45,8 +46,8 @@ struct ChatContextTrayView: View {
                     workoutMenu
                     imagePicker
                     ContextChip(
-                        title: "Nguồn dữ liệu",
-                        detail: "review",
+                        title: language.genericSourceTitle,
+                        detail: language.contextReviewLabel,
                         systemImage: "doc.text.magnifyingglass",
                         isSelected: true,
                         action: onReviewEvidence
@@ -60,11 +61,11 @@ struct ChatContextTrayView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Label("Nguồn dữ liệu", systemImage: "paperclip")
+            Label(language.genericSourceTitle, systemImage: "paperclip")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.dim)
             Spacer()
-            Label("Đã kiểm tra dữ liệu", systemImage: "checkmark.shield")
+            Label(language.checkedDataRowTitle, systemImage: "checkmark.shield")
                 .font(.caption2)
                 .foregroundStyle(Theme.faint)
         }
@@ -73,12 +74,12 @@ struct ChatContextTrayView: View {
     private var workoutMenu: some View {
         Menu {
             if evidence.workout != nil {
-                Button("Remove workout context", role: .destructive) {
+                Button(language.removeWorkoutContextLabel, role: .destructive) {
                     evidence.workout = nil
                 }
             }
             if !upcomingWorkouts.isEmpty {
-                Section("Planned Workouts") {
+                Section(language.plannedWorkoutsLabel) {
                     ForEach(upcomingWorkouts, id: \.uuid) { workout in
                         Button(workoutLabel(workout)) {
                             evidence.workout = .planned(workout.uuid)
@@ -87,7 +88,7 @@ struct ChatContextTrayView: View {
                 }
             }
             if !completedActivities.isEmpty {
-                Section("Recent Runs") {
+                Section(language.recentRunsLabel) {
                     ForEach(Array(completedActivities.prefix(6)), id: \.hkUUID) { activity in
                         Button(activityLabel(activity)) {
                             evidence.workout = .completed(activity.hkUUID)
@@ -97,7 +98,7 @@ struct ChatContextTrayView: View {
             }
         } label: {
             ContextChipLabel(
-                title: "Workout",
+                title: language.workoutMenuLabel,
                 detail: workoutContextDetail,
                 systemImage: "figure.run",
                 isSelected: evidence.workout != nil
@@ -108,8 +109,8 @@ struct ChatContextTrayView: View {
     private var imagePicker: some View {
         PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
             ContextChipLabel(
-                title: "Image",
-                detail: selectedImageAttachment == nil ? "add" : "ready",
+                title: language.imageChipLabel,
+                detail: selectedImageAttachment == nil ? language.contextAddLabel : language.contextReadyLabel,
                 systemImage: "photo",
                 isSelected: evidence.hasPhoto
             )
@@ -129,10 +130,10 @@ struct ChatContextTrayView: View {
                     .frame(width: 44, height: 44)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Image attached")
+                    Text(language.imageAttachedLabel)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.text)
-                    Text("\((selectedImageAttachment?.data.count ?? 0) / 1024) KB, sent with this message")
+                    Text(language.imageAttachmentDetail((selectedImageAttachment?.data.count ?? 0) / 1024))
                         .font(.caption2)
                         .foregroundStyle(Theme.faint)
                 }
@@ -143,6 +144,7 @@ struct ChatContextTrayView: View {
                     Image(systemName: "xmark.circle.fill")
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(language.removeImageLabel)
                 .foregroundStyle(Theme.dim)
             }
             .padding(8)
@@ -162,24 +164,39 @@ struct ChatContextTrayView: View {
     private var workoutContextDetail: String {
         switch evidence.workout {
         case .planned(let uuid):
-            guard let workout = plannedWorkouts.first(where: { $0.uuid == uuid }) else { return "selected" }
-            return workout.kind?.displayName ?? "planned"
+            guard let workout = plannedWorkouts.first(where: { $0.uuid == uuid }) else { return language.contextSelectedLabel }
+            return workout.kind.map { language.name($0) } ?? language.genericRunLabel
         case .completed(let uuid):
-            guard let activity = completedActivities.first(where: { $0.hkUUID == uuid }) else { return "selected" }
-            return Formatters.kilometers(activity.distanceMeters)
+            guard let activity = completedActivities.first(where: { $0.hkUUID == uuid }) else { return language.contextSelectedLabel }
+            return localizedDistance(meters: activity.distanceMeters)
         case nil:
-            return "add"
+            return language.contextAddLabel
         }
     }
 
     private func workoutLabel(_ workout: PlannedWorkout) -> String {
-        let date = workout.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
-        return "\(date): \(workout.kind?.displayName ?? workout.kindRaw), \(String(format: "%.1f", workout.distanceKm)) km"
+        language.contextWorkoutListItem(
+            date: language.shortWeekdayDate(workout.date),
+            title: workout.kind.map { language.name($0) } ?? language.genericRunLabel,
+            distance: localizedKilometers(workout.distanceKm)
+        )
     }
 
     private func activityLabel(_ activity: CompletedActivity) -> String {
-        let date = activity.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
-        return "\(date): \(Formatters.kilometers(activity.distanceMeters)), \(Formatters.pace(activity.avgPaceSecondsPerKm))"
+        language.contextWorkoutListItem(
+            date: language.shortWeekdayDate(activity.date),
+            title: localizedDistance(meters: activity.distanceMeters),
+            distance: Formatters.pace(activity.avgPaceSecondsPerKm)
+        )
+    }
+
+    private func localizedKilometers(_ kilometers: Double) -> String {
+        "\(String(format: "%.1f", locale: language.uiLocale, kilometers)) km"
+    }
+
+    private func localizedDistance(meters: Double?) -> String {
+        guard let meters else { return "–" }
+        return localizedKilometers(meters / 1_000)
     }
 
     private func loadImageAttachment(from item: PhotosPickerItem?) {

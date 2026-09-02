@@ -78,9 +78,9 @@ struct TrainingPlanDetailView: View {
                 .torReadableColumn()
             } else {
                 ContentUnavailableView(
-                    "Could not load plan details",
+                    language.plan.couldNotLoadDetails,
                     systemImage: "exclamationmark.triangle",
-                    description: Text("Try again from Profile or create a training plan.")
+                    description: Text(language.plan.loadDetailsRecovery)
                 )
                 .frame(maxWidth: .infinity, minHeight: 420)
                 .torReadableColumn()
@@ -88,7 +88,7 @@ struct TrainingPlanDetailView: View {
         }
         .background(Theme.bg)
         .scrollIndicators(.hidden)
-        .navigationTitle("Training Plan")
+        .navigationTitle(language.plan.trainingPlanTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -99,7 +99,7 @@ struct TrainingPlanDetailView: View {
                         Image(systemName: plan.pausedAt == nil ? "pause.circle" : "play.circle")
                             .frame(width: 44, height: 44)
                     }
-                    .accessibilityLabel(plan.pausedAt == nil ? "Pause training plan" : "Resume training plan")
+                    .accessibilityLabel(plan.pausedAt == nil ? language.plan.pausePlanAccessibility : language.plan.resumePlanAccessibility)
                 }
                 if !goals.isEmpty {
                     Button {
@@ -108,7 +108,7 @@ struct TrainingPlanDetailView: View {
                         Image(systemName: "target")
                             .frame(width: 44, height: 44)
                     }
-                    .accessibilityLabel("Adjust training plan")
+                    .accessibilityLabel(language.plan.adjustPlanAccessibility)
                 }
             }
         }
@@ -155,16 +155,16 @@ struct TrainingPlanDetailView: View {
                 .presentationDetents([.medium, .large])
             }
         }
-        .alert("Plan adjustment failed", isPresented: Binding(
+        .alert(language.plan.planAdjustmentFailed, isPresented: Binding(
             get: { planAdjustmentError != nil },
             set: { if !$0 { planAdjustmentError = nil } }
         )) {
-            Button("OK", role: .cancel) { planAdjustmentError = nil }
+            Button(language.plan.ok, role: .cancel) { planAdjustmentError = nil }
         } message: {
             Text(planAdjustmentError ?? "")
         }
         .sheet(isPresented: $isShowingWeeklyScheduleReview) {
-            WeeklySmartSchedulingReviewView(suggestions: weeklySuggestions) { suggestions in
+            WeeklySmartSchedulingReviewView(suggestions: weeklySuggestions, language: language) { suggestions in
                 suggestions.forEach { googleCalendar.acceptSmartSchedulingCandidate($0.candidate) }
                 isShowingWeeklyScheduleReview = false
             }
@@ -181,91 +181,91 @@ struct TrainingPlanDetailView: View {
         TorCard(padding: 18, cornerRadius: 22) {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 5) {
-                    TorEyebrow(summary.health.status.displayName.uppercased())
+                    TorEyebrow(language.plan.activePlanStatus(summary.health.status).uppercased())
                         .foregroundStyle(statusColor(summary.health.status))
                     Text(summary.title)
                         .font(.torHeading(25, .bold))
                         .foregroundStyle(Theme.text)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(summary.raceDate.formatted(date: .long, time: .omitted))
+                    Text(summary.raceDate.formatted(.dateTime.year().month(.wide).day().locale(language.uiLocale)))
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(Theme.dim)
                 }
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 10)], alignment: .leading, spacing: 10) {
-                    detailMetric("Target", Formatters.duration(summary.targetTimeSeconds))
-                    detailMetric("Running days", "\(summary.runningDaysPerWeek)/week")
+                    detailMetric(language.plan.target, Formatters.duration(summary.targetTimeSeconds))
+                    detailMetric(language.plan.runningDays, language.plan.runningDaysPerWeek(summary.runningDaysPerWeek))
                     if let days = summary.daysRemaining {
-                        detailMetric("Time remaining", summary.isRaceDay ? "Race day" : "\(days) days")
+                        detailMetric(language.plan.timeRemaining, summary.isRaceDay ? language.plan.raceDay : language.plan.daysRemaining(days))
                     }
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
                     ViewThatFits(in: .horizontal) {
                         HStack {
-                            Text("Week \(summary.currentWeek) of \(summary.totalWeeks)")
+                            Text(language.plan.weekOfTotal(summary.currentWeek, total: summary.totalWeeks))
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Theme.text)
                             Spacer()
-                            Text("Timeline")
+                            Text(language.plan.timeline)
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(Theme.faint)
                         }
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Week \(summary.currentWeek) of \(summary.totalWeeks)")
+                            Text(language.plan.weekOfTotal(summary.currentWeek, total: summary.totalWeeks))
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Theme.text)
-                            Text("Timeline")
+                            Text(language.plan.timeline)
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(Theme.faint)
                         }
                     }
                     ProgressView(value: summary.timelineProgress)
                         .tint(Theme.accent)
-                        .accessibilityLabel("Week \(summary.currentWeek) of \(summary.totalWeeks)")
+                        .accessibilityLabel(language.plan.weekOfTotal(summary.currentWeek, total: summary.totalWeeks))
                 }
             }
         }
     }
 
     private func currentPhase(_ phase: ActivePlanPhaseSummary) -> some View {
-        section("CURRENT PHASE") {
+        section(language.plan.currentPhase) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(phase.displayName)
+                    Text(language.name(phase.phase))
                         .font(.torHeading(21, .bold))
                         .foregroundStyle(Theme.text)
                     Spacer(minLength: 8)
                     if let week = phase.currentWeekInPhase {
-                        Text("Week \(week) of \(phase.totalWeeks)")
+                        Text(language.plan.weekOfTotal(week, total: phase.totalWeeks))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(Theme.faint)
                     }
                 }
-                Text("\(phase.startDate.formatted(.dateTime.month(.abbreviated).day())) - \(phase.endDate.formatted(.dateTime.month(.abbreviated).day()))")
+                Text(language.plan.phaseDateRange(phase.startDate, phase.endDate))
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Theme.dim)
-                Text(phase.phase.summaryPurpose)
+                Text(language.plan.phaseSummary(phase.phase))
                     .font(.subheadline)
                     .foregroundStyle(Theme.dim)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
                 if let range = phase.targetVolumeRangeKm {
-                    detailRow("Weekly target", "\(distanceText(range.lowerBound))-\(distanceText(range.upperBound))")
+                    detailRow(language.plan.weeklyTarget, "\(distanceText(range.lowerBound))-\(distanceText(range.upperBound))")
                 }
                 if let week = phase.currentWeekInPhase {
                     ProgressView(value: Double(week), total: Double(max(phase.totalWeeks, 1)))
                         .tint(phase.phase.styleColor)
-                        .accessibilityLabel("Phase progress week \(week) of \(phase.totalWeeks)")
+                        .accessibilityLabel(language.plan.phaseProgress(week: week, total: phase.totalWeeks))
                 }
             }
         }
     }
 
     private func weekAdherence(_ week: ActivePlanWeekSummary) -> some View {
-        section("THIS WEEK") {
+        section(language.plan.thisWeek) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("\(week.completedSessions) of \(week.plannedSessions) sessions completed")
+                Text(language.plan.sessionsCompleted(week.completedSessions, of: week.plannedSessions))
                     .font(.torHeading(20, .bold))
                     .foregroundStyle(Theme.text)
                 Text("\(distanceText(week.completedDistanceKm)) of \(distanceText(week.plannedDistanceKm))")
@@ -273,7 +273,7 @@ struct TrainingPlanDetailView: View {
                     .foregroundStyle(Theme.dim)
                 ProgressView(value: week.volumeCompliance.map { min($0, 1) } ?? 0)
                     .tint(Theme.accent)
-                    .accessibilityLabel("Weekly distance \(distanceText(week.completedDistanceKm)) of \(distanceText(week.plannedDistanceKm))")
+                    .accessibilityLabel(language.plan.weeklyDistanceAccessibility(completed: distanceText(week.completedDistanceKm), planned: distanceText(week.plannedDistanceKm)))
             }
         }
     }
@@ -305,7 +305,7 @@ struct TrainingPlanDetailView: View {
                     goal: goal
                 )
             }
-            section("SCHEDULE FIT") {
+            section(language.plan.scheduleFit) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(scheduleFitTitle(fit))
                         .font(.torHeading(20, .bold))
@@ -318,21 +318,21 @@ struct TrainingPlanDetailView: View {
                         weeklySuggestions = buildWeeklySuggestions(weekWorkouts: weekWorkouts)
                         isShowingWeeklyScheduleReview = true
                     } label: {
-                        Label("Review schedule", systemImage: "calendar")
+                        Label(language.plan.reviewSchedule, systemImage: "calendar")
                             .frame(minHeight: 44)
                     }
                     .disabled(fit.availableValidSlots == 0)
-                    .accessibilityLabel("Review weekly schedule")
+                    .accessibilityLabel(language.plan.reviewWeeklyScheduleAccessibility)
                 }
             }
         }
     }
 
     private func upcoming(_ summary: ActivePlanSummary) -> some View {
-        section("UP NEXT") {
+        section(language.plan.upNext) {
             VStack(spacing: 10) {
                 if summary.upcomingWorkouts.isEmpty {
-                    Text(summary.health.status == .completed ? "Plan completed" : "No upcoming workout")
+                    Text(summary.health.status == .completed ? language.plan.planCompleted : language.plan.noUpcomingWorkout)
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Theme.dim)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -353,7 +353,7 @@ struct TrainingPlanDetailView: View {
                         PlanCalendarView()
                     } label: {
                         HStack {
-                            Text("View in Calendar")
+                            Text(language.plan.viewInCalendar)
                             Spacer()
                             Image(systemName: "calendar")
                         }
@@ -362,14 +362,14 @@ struct TrainingPlanDetailView: View {
                         .frame(minHeight: 44)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("View training plan in Calendar")
+                    .accessibilityLabel(language.plan.viewPlanInCalendarAccessibility)
                 }
             }
         }
     }
 
     private func progress(_ summary: ActivePlanSummary) -> some View {
-        section("PLANNED VS COMPLETED") {
+        section(language.plan.plannedVsCompleted) {
             VStack(alignment: .leading, spacing: 12) {
                 if let text = progressSummary(summary) {
                     Text(text)
@@ -379,25 +379,25 @@ struct TrainingPlanDetailView: View {
                 }
                 Chart(summary.weeklyProgress) { week in
                     BarMark(
-                        x: .value("Week", week.weekIndex + 1),
-                        y: .value("Planned", week.plannedDistanceKm)
+                        x: .value(language.weekLabel, week.weekIndex + 1),
+                        y: .value(language.plan.plannedVsCompleted, week.plannedDistanceKm)
                     )
                     .foregroundStyle(Theme.faint.opacity(0.28))
-                    .position(by: .value("Metric", "Planned"))
+                    .position(by: .value(language.plan.plannedVsCompleted, language.plan.plannedVsCompleted))
 
                     BarMark(
-                        x: .value("Week", week.weekIndex + 1),
-                        y: .value("Completed", week.completedDistanceKm)
+                        x: .value(language.weekLabel, week.weekIndex + 1),
+                        y: .value(language.plan.completedRun, week.completedDistanceKm)
                     )
                     .foregroundStyle(Theme.accent)
-                    .position(by: .value("Metric", "Completed"))
+                    .position(by: .value(language.plan.plannedVsCompleted, language.plan.completedRun))
                 }
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: 5)) { value in
                         AxisGridLine()
                         AxisValueLabel {
                             if let intValue = value.as(Int.self) {
-                                Text("W\(intValue)")
+                                Text(language.weekNumber(intValue))
                             }
                         }
                     }
@@ -410,7 +410,7 @@ struct TrainingPlanDetailView: View {
     }
 
     private func phaseTimeline(_ summary: ActivePlanSummary) -> some View {
-        section("PLAN PHASES") {
+        section(language.plan.planPhases) {
             VStack(alignment: .leading, spacing: 11) {
                 ForEach(summary.phases) { phase in
                     HStack(spacing: 10) {
@@ -419,10 +419,10 @@ struct TrainingPlanDetailView: View {
                             .foregroundStyle(phaseColor(phase, currentWeek: summary.currentWeek - 1))
                             .frame(width: 24, height: 24)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(phase.displayName)
+                            Text(language.name(phase.phase))
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(Theme.text)
-                            Text("Weeks \(phase.startWeekIndex + 1)-\(phase.endWeekIndex + 1)")
+                            Text(language.plan.phaseWeeks(phase.startWeekIndex + 1, phase.endWeekIndex + 1))
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(Theme.faint)
                         }
@@ -434,8 +434,8 @@ struct TrainingPlanDetailView: View {
     }
 
     private var aboutPlan: some View {
-        section("ABOUT THIS PLAN") {
-            Text("This plan gradually builds weekly volume and race-specific endurance while adapting recommendations to your schedule and available training data.")
+        section(language.plan.aboutThisPlan) {
+            Text(language.plan.aboutPlanDescription)
                 .font(.subheadline)
                 .foregroundStyle(Theme.dim)
                 .fixedSize(horizontal: false, vertical: true)
@@ -501,7 +501,7 @@ struct TrainingPlanDetailView: View {
                 Text(relativeDay(workout.date))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.faint)
-                Text("\(workout.displayName) \(distanceText(workout.distanceKm))")
+                Text("\(workout.kind.map(language.name) ?? language.genericRunLabel) \(distanceText(workout.distanceKm))")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Theme.text)
                 if let band = workout.paceBand {
@@ -516,7 +516,7 @@ struct TrainingPlanDetailView: View {
                 .foregroundStyle(Theme.faint)
         }
         .frame(minHeight: 56)
-        .accessibilityLabel("Open next workout: \(workout.displayName) \(distanceText(workout.distanceKm)) \(relativeDay(workout.date))")
+        .accessibilityLabel(language.plan.openNextWorkoutAccessibility(workout.kind.map(language.name) ?? language.genericRunLabel, day: "\(distanceText(workout.distanceKm)) \(relativeDay(workout.date))"))
     }
 
     private func plannedWorkout(for id: UUID) -> PlannedWorkout? {
@@ -528,34 +528,34 @@ struct TrainingPlanDetailView: View {
         let planned = recent.reduce(0) { $0 + $1.plannedDistanceKm }
         guard planned > 0 else { return nil }
         let completed = recent.reduce(0) { $0 + $1.completedDistanceKm }
-        return "You completed \(Int((completed / planned * 100).rounded()))% of planned distance over the last \(recent.count) weeks."
+        return language.plan.completedDistanceSummary(percent: Int((completed / planned * 100).rounded()), weeks: recent.count)
     }
 
     private func chartAccessibility(_ summary: ActivePlanSummary) -> String {
         let planned = summary.weeklyProgress.reduce(0) { $0 + $1.plannedDistanceKm }
         let completed = summary.weeklyProgress.reduce(0) { $0 + $1.completedDistanceKm }
-        return "Planned versus completed weekly distance. Completed \(distanceText(completed)) of \(distanceText(planned))."
+        return language.plan.plannedCompletedAccessibility(completed: distanceText(completed), planned: distanceText(planned))
     }
 
     private func scheduleFitTitle(_ fit: WeekScheduleFit) -> String {
         switch fit.status {
         case .fitsWell:
-            return "This week fits your current availability"
+            language.plan.scheduleFits(fit.scheduledWorkouts)
         case .needsScheduling:
-            return "\(fit.unscheduledWorkouts) workouts need scheduling"
+            language.plan.workoutsNeedScheduling(fit.unscheduledWorkouts)
         case .scheduleConflict:
-            return "\(fit.conflictingWorkouts) workout timing conflicts"
+            language.plan.workoutTimingConflicts(fit.conflictingWorkouts)
         }
     }
 
     private func scheduleFitDetail(_ fit: WeekScheduleFit) -> String {
         switch fit.status {
         case .fitsWell:
-            return "\(fit.scheduledWorkouts) workouts are scheduled and no busy-time conflicts were found."
+            language.plan.workoutsScheduled(fit.scheduledWorkouts)
         case .needsScheduling:
-            return "\(fit.availableValidSlots) valid Smart Scheduling slots are available this week."
+            language.plan.validSlots(fit.availableValidSlots)
         case .scheduleConflict:
-            return "At least one workout overlaps busy time. Review options before changing the plan."
+            language.plan.scheduleConflictDetail
         }
     }
 
@@ -568,9 +568,7 @@ struct TrainingPlanDetailView: View {
     }
 
     private func relativeDay(_ date: Date) -> String {
-        if calendar.isDateInToday(date) { return "Today" }
-        if calendar.isDateInTomorrow(date) { return "Tomorrow" }
-        return date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+        language.plan.relativeDay(date)
     }
 
     private func distanceText(_ km: Double) -> String {
@@ -1114,19 +1112,19 @@ struct RaceGoalStatusCard: View {
             }
             Chart(chartWeeks) { week in
                 BarMark(
-                    x: .value("Week", week.weekIndex + 1),
+                    x: .value(language.weekLabel, week.weekIndex + 1),
                     y: .value(language.goalAssessmentText(.planned), week.plannedDistanceKm)
                 )
                 .foregroundStyle(week.isFutureWeek ? Theme.faint.opacity(0.18) : Theme.faint.opacity(0.34))
-                .position(by: .value("Metric", language.goalAssessmentText(.planned)))
+                .position(by: .value(language.goalAssessmentText(.planAndActual), language.goalAssessmentText(.planned)))
 
                 if !week.isFutureWeek {
                     BarMark(
-                        x: .value("Week", week.weekIndex + 1),
+                        x: .value(language.weekLabel, week.weekIndex + 1),
                         y: .value(language.goalAssessmentText(.actual), week.completedDistanceKm)
                     )
                     .foregroundStyle(Theme.accent)
-                    .position(by: .value("Metric", language.goalAssessmentText(.actual)))
+                    .position(by: .value(language.goalAssessmentText(.planAndActual), language.goalAssessmentText(.actual)))
                 }
                 if week.isCurrentWeek {
                     RuleMark(x: .value(language.goalAssessmentText(.currentWeek), week.weekIndex + 1))
@@ -1138,7 +1136,7 @@ struct RaceGoalStatusCard: View {
                 AxisMarks(values: chartWeeks.map { $0.weekIndex + 1 }) { value in
                     AxisValueLabel {
                         if let intValue = value.as(Int.self) {
-                            Text("W\(intValue)")
+                            Text(language.weekNumber(intValue))
                         }
                     }
                 }
@@ -1323,11 +1321,11 @@ struct RaceGoalStatusCard: View {
     private var raceDateText: String {
         switch language {
         case .vi:
-            return assessment.raceDate.formatted(.dateTime.day(.twoDigits).month(.twoDigits).year())
+            return assessment.raceDate.formatted(.dateTime.day(.twoDigits).month(.twoDigits).year().locale(language.uiLocale))
         case .ja:
-            return assessment.raceDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP")))
+            return assessment.raceDate.formatted(.dateTime.year().month().day().locale(language.uiLocale))
         case .en:
-            return assessment.raceDate.formatted(.dateTime.month(.abbreviated).day().year().locale(Locale(identifier: "en_US")))
+            return assessment.raceDate.formatted(.dateTime.month(.abbreviated).day().year().locale(language.uiLocale))
         }
     }
 
@@ -1521,11 +1519,7 @@ struct RaceGoalStatusCard: View {
     }
 
     private func weekRangeText(_ week: ActivePlanWeekSummary) -> String {
-        switch language {
-        case .vi: return "Tuần \(week.startDate.formatted(.dateTime.day().month()))-\(week.endDate.formatted(.dateTime.day().month()))"
-        case .ja: return "\(week.startDate.formatted(.dateTime.month().day()))-\(week.endDate.formatted(.dateTime.month().day()))"
-        case .en: return "\(week.startDate.formatted(.dateTime.month(.abbreviated).day()))-\(week.endDate.formatted(.dateTime.month(.abbreviated).day()))"
-        }
+        language.plan.weekRange(week.startDate, week.endDate)
     }
 
     private func signedDistanceText(_ km: Double) -> String {
@@ -1764,7 +1758,7 @@ struct GoalMetricDetailSheet: View {
 
     private var calculatedAtText: String {
         guard let metric = assessment.metric else { return language.goalAssessmentText(.insufficientData) }
-        return metric.calculatedAt.formatted(date: .abbreviated, time: .shortened)
+        return "\(language.shortDate(metric.calculatedAt)) \(language.time(metric.calculatedAt))"
     }
 
     private func statusText(_ status: GoalAssessmentFactorStatus) -> String {
@@ -2216,7 +2210,7 @@ struct PlanAdjustmentPreviewRow: View {
                     Text(title)
                         .font(.torHeading(16, .bold))
                         .foregroundStyle(Theme.text)
-                    Text(change.before.date.formatted(date: .abbreviated, time: .omitted))
+                    Text(language.shortDate(change.before.date))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.faint)
                 }
@@ -2250,7 +2244,7 @@ struct PlanAdjustmentPreviewRow: View {
     }
 
     private var title: String {
-        WorkoutKind(rawValue: change.before.kindRaw)?.displayName ?? change.before.kindRaw.capitalized
+        WorkoutKind(rawValue: change.before.kindRaw).map(language.name) ?? language.genericRunLabel
     }
 
     private var symbol: String {
@@ -2262,15 +2256,11 @@ struct PlanAdjustmentPreviewRow: View {
     }
 
     private var restText: String {
-        switch language {
-        case .vi: "Nghỉ"
-        case .ja: "休み"
-        case .en: "Rest"
-        }
+        language.restDayLabel
     }
 
     private func snapshotText(_ snapshot: PlanWorkoutSnapshot) -> String {
-        let kind = WorkoutKind(rawValue: snapshot.kindRaw)?.displayName ?? snapshot.kindRaw.capitalized
+        let kind = WorkoutKind(rawValue: snapshot.kindRaw).map(language.name) ?? language.genericRunLabel
         return "\(kind) \(String(format: "%.0f", snapshot.distanceKm)) km"
     }
 }
@@ -2283,6 +2273,7 @@ private struct WeeklySmartSchedulingSuggestion: Identifiable {
 
 private struct WeeklySmartSchedulingReviewView: View {
     let suggestions: [WeeklySmartSchedulingSuggestion]
+    let language: CoachLanguage
     let onApply: ([WeeklySmartSchedulingSuggestion]) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -2291,45 +2282,45 @@ private struct WeeklySmartSchedulingReviewView: View {
             List {
                 if suggestions.isEmpty {
                     ContentUnavailableView(
-                        "No suitable slot",
+                        language.plan.noSuitableSlot,
                         systemImage: "calendar.badge.exclamationmark",
-                        description: Text("Smart Scheduling could not find safe available windows for this week.")
+                        description: Text(language.plan.noSafeSchedulingWindows)
                     )
                 } else {
                     Section {
                         ForEach(suggestions) { suggestion in
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(suggestion.workout.kind?.displayName ?? "Workout")
+                                Text(suggestion.workout.kind.map(language.name) ?? language.plan.workout)
                                     .font(.headline)
-                                Text("\(suggestion.candidate.startTime.formatted(date: .abbreviated, time: .shortened))-\(suggestion.candidate.endTime.formatted(date: .omitted, time: .shortened))")
+                                Text("\(language.shortDate(suggestion.candidate.startTime)) \(language.time(suggestion.candidate.startTime))-\(language.time(suggestion.candidate.endTime))")
                                     .font(.subheadline.weight(.semibold))
                                 ForEach(suggestion.candidate.reasons.prefix(3), id: \.self) { reason in
-                                    Text("• \(reason)")
+                                    Text("• \(language.plan.schedulingMessage(reason))")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
                             }
                             .padding(.vertical, 4)
                             .accessibilityElement(children: .combine)
-                            .accessibilityLabel("Best scheduling option for \(suggestion.workout.kind?.displayName ?? "workout")")
+                            .accessibilityLabel(language.plan.bestSchedulingOptionAccessibility(suggestion.workout.kind.map(language.name) ?? language.plan.workout))
                         }
                     } header: {
-                        Text("Suggested schedule adjustment")
+                        Text(language.plan.suggestedScheduleAdjustment)
                     } footer: {
-                        Text("TrainOrRest validates recovery and plan rules before showing these options. No workout moves until you apply the changes.")
+                        Text(language.plan.schedulingValidationNotice)
                     }
                 }
             }
-            .navigationTitle("Review schedule")
+            .navigationTitle(language.plan.reviewSchedule)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Keep current") { dismiss() }
+                    Button(language.plan.keepCurrent) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Apply changes") { onApply(suggestions) }
+                    Button(language.applyChangesLabel) { onApply(suggestions) }
                         .disabled(suggestions.isEmpty)
-                        .accessibilityLabel("Apply Smart Scheduling changes")
+                        .accessibilityLabel(language.plan.applySmartSchedulingAccessibility)
                 }
             }
         }

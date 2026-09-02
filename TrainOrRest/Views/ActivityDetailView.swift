@@ -9,7 +9,9 @@ struct ActivityDetailView: View {
     @Query private var storedShoePreferences: [RunningShoePreferences]
     @Environment(\.modelContext) private var modelContext
     @AppStorage(WorkoutPushSettings.athleteIDKey) private var intervalsAthleteID = ""
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
 
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
     @State private var analysisExpanded = false
     @State private var selectedAnalysisTab: ActivityAnalysisTab = .pace
     @State private var expandedTechnicalSection: ActivityTechnicalSection?
@@ -22,7 +24,7 @@ struct ActivityDetailView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
-                RunDetailSummary(activity: activity, intervalsAnalysis: intervalsAnalysis)
+                RunDetailSummary(activity: activity, intervalsAnalysis: intervalsAnalysis, language: language)
                     .padding(.top, 8)
 
                 RunReviewCard(
@@ -41,7 +43,7 @@ struct ActivityDetailView: View {
         }
         .background(Theme.bg.ignoresSafeArea())
         .safeAreaPadding(.bottom, 96)
-        .navigationTitle(activity.date.formatted(.dateTime.month(.abbreviated).day()))
+        .navigationTitle(language.shortDate(activity.date))
         .navigationBarTitleDisplayMode(.inline)
         .task(id: activity.hkUUID) {
             await loadIntervalsAnalysis()
@@ -69,67 +71,84 @@ struct ActivityDetailView: View {
             CollapsibleMetricSection(
                 section: .activityDetails,
                 expandedSection: $expandedTechnicalSection,
+                language: language,
                 preview: "\(Formatters.kilometers(summaryDistanceMeters)) · \(Formatters.duration(summaryDurationSeconds))"
             ) {
-                MetricRow(label: "Date", value: activity.date.formatted(date: .long, time: .shortened))
-                MetricRow(label: "Distance", value: Formatters.kilometers(summaryDistanceMeters))
-                MetricRow(label: "Duration", value: Formatters.duration(summaryDurationSeconds))
-                MetricRow(label: "Average pace", value: Formatters.pace(summaryAveragePace))
+                MetricRow(
+                    label: language.history.date,
+                    value: activity.date.formatted(.dateTime.year().month(.wide).day().hour().minute().locale(language.uiLocale))
+                )
+                MetricRow(label: language.history.distance, value: Formatters.kilometers(summaryDistanceMeters))
+                MetricRow(label: language.history.duration, value: Formatters.duration(summaryDurationSeconds))
+                MetricRow(label: language.history.averagePace, value: Formatters.pace(summaryAveragePace))
                 if let plannedWorkout = matchedWorkout {
-                    MetricRow(label: "Matched plan", value: plannedWorkout.kind?.displayName ?? plannedWorkout.kindRaw)
-                    MetricRow(label: "Planned distance", value: Formatters.kilometers(plannedWorkout.distanceKm * 1000))
+                    MetricRow(
+                        label: language.history.matchedPlan,
+                        value: plannedWorkout.kind.map(language.name) ?? plannedWorkout.kindRaw
+                    )
+                    MetricRow(label: language.history.plannedDistance, value: Formatters.kilometers(plannedWorkout.distanceKm * 1000))
                 }
                 if let intervalsAnalysis {
-                    MetricRow(label: "Analysis source", value: "intervals.icu · \(intervalsAnalysis.activityID)")
+                    MetricRow(label: language.history.analysisSource, value: language.history.intervalsActivity(intervalsAnalysis.activityID))
                     if let load = intervalsAnalysis.trainingLoad {
-                        MetricRow(label: "Training load", value: "\(Int(load.rounded()))")
+                        MetricRow(label: language.trainingLoadLabel, value: "\(Int(load.rounded()))")
                     }
                 } else {
-                    MetricRow(label: "Analysis source", value: intervalsLoadState.fallbackDescription)
+                    MetricRow(label: language.history.analysisSource, value: intervalsLoadState.fallbackDescription(language))
                 }
             }
 
             CollapsibleMetricSection(
                 section: .heartRateDetails,
                 expandedSection: $expandedTechnicalSection,
+                language: language,
                 preview: "\(heartRateLabel) \(Formatters.heartRate(summaryAverageHeartRate))"
             ) {
                 MetricRow(label: heartRateLabel, value: Formatters.heartRate(summaryAverageHeartRate))
-                MetricRow(label: "Maximum HR", value: Formatters.heartRate(summaryMaxHeartRate))
-                MetricRow(label: "Averaging logic", value: intervalsAnalysis == nil ? "Health samples across the workout interval" : "intervals.icu Garmin activity summary")
+                MetricRow(label: language.history.maximumHeartRate, value: Formatters.heartRate(summaryMaxHeartRate))
+                MetricRow(
+                    label: language.history.averagingLogic,
+                    value: intervalsAnalysis == nil
+                        ? language.history.healthSamplesAcrossWorkout
+                        : language.history.intervalsGarminActivitySummary
+                )
             }
 
             CollapsibleMetricSection(
                 section: .runningDynamics,
                 expandedSection: $expandedTechnicalSection,
-                preview: "Cadence and stride data not synced"
+                language: language,
+                preview: language.history.cadenceUnavailable
             ) {
-                MetricRow(label: "Cadence", value: "Not available")
-                MetricRow(label: "Stride length", value: "Not available")
-                MetricRow(label: "Ground contact", value: "Not available")
+                MetricRow(label: language.history.cadence, value: language.history.notAvailable)
+                MetricRow(label: language.history.strideLength, value: language.history.notAvailable)
+                MetricRow(label: language.history.groundContact, value: language.history.notAvailable)
             }
 
             CollapsibleMetricSection(
                 section: .elevation,
                 expandedSection: $expandedTechnicalSection,
-                preview: "No elevation series"
+                language: language,
+                preview: language.history.noElevationSeries
             ) {
-                MetricRow(label: "Gain", value: "Not available")
-                MetricRow(label: "Loss", value: "Not available")
+                MetricRow(label: language.history.gain, value: language.history.notAvailable)
+                MetricRow(label: language.history.loss, value: language.history.notAvailable)
             }
 
             CollapsibleMetricSection(
                 section: .weather,
                 expandedSection: $expandedTechnicalSection,
-                preview: "No weather attached"
+                language: language,
+                preview: language.history.noWeatherAttached
             ) {
-                MetricRow(label: "Temperature", value: "Not available")
-                MetricRow(label: "Humidity", value: "Not available")
+                MetricRow(label: language.history.temperature, value: language.history.notAvailable)
+                MetricRow(label: language.history.humidity, value: language.history.notAvailable)
             }
 
             CollapsibleMetricSection(
                 section: .gear,
                 expandedSection: $expandedTechnicalSection,
+                language: language,
                 preview: assignedShoe?.displayName ?? intervalsAnalysis?.deviceName ?? activity.sourceName
             ) {
                 Button {
@@ -144,14 +163,17 @@ struct ActivityDetailView: View {
                 .buttonStyle(.plain)
                 if let assignedShoe {
                     MetricRow(
-                        label: "Shoe total",
-                        value: "\(kmText(ShoeMileageService.currentMileageKm(for: assignedShoe, ledger: mileageEntries))) km"
+                        label: language.history.shoeTotal,
+                        value: Formatters.kilometers(ShoeMileageService.currentMileageKm(for: assignedShoe, ledger: mileageEntries) * 1000)
                     )
                 }
-                MetricRow(label: "Recorded by", value: activity.sourceName)
-                MetricRow(label: "Analysis source", value: intervalsAnalysis == nil ? "Apple Health import" : "intervals.icu Garmin import")
+                MetricRow(label: language.history.recordedBy, value: activity.sourceName)
+                MetricRow(
+                    label: language.history.analysisSource,
+                    value: intervalsAnalysis == nil ? language.history.appleHealthImport : language.history.intervalsGarminImport
+                )
                 if let deviceName = intervalsAnalysis?.deviceName {
-                    MetricRow(label: "Device", value: deviceName)
+                    MetricRow(label: language.history.device, value: deviceName)
                 }
             }
         }
@@ -178,7 +200,7 @@ struct ActivityDetailView: View {
     }
 
     private var heartRateLabel: String {
-        intervalsAnalysis == nil ? "Recorded average HR" : "Intervals average HR"
+        intervalsAnalysis == nil ? language.history.recordedAverageHeartRate : language.history.intervalsAverageHeartRate
     }
 
     @MainActor
@@ -255,6 +277,9 @@ struct RunReviewCard: View {
     @Binding var isAnalysisExpanded: Bool
     @Binding var selectedAnalysisTab: ActivityAnalysisTab
     private let allowsAnalysisExpansion: Bool
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
 
     init(
         activity: CompletedActivity,
@@ -302,13 +327,13 @@ struct RunReviewCard: View {
                     .clipShape(Capsule())
 
                 VStack(alignment: .leading, spacing: 8) {
-                    TorEyebrow(model.eyebrow).tracking(1.5)
-                    Text(model.headline)
+                    TorEyebrow(language.history.reviewEyebrow(hasPlan: model.hasPlan)).tracking(1.5)
+                    Text(language.history.reviewHeadline(model.review.verdict, hasPlan: model.hasPlan))
                         .font(.torHeading(24, .bold))
                         .foregroundStyle(Theme.text)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Text(model.supportingSentence)
+                    Text(model.supportingSentence(language))
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(Theme.dim)
                         .lineSpacing(2)
@@ -318,7 +343,7 @@ struct RunReviewCard: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(model.evidenceChips) { chip in
+                    ForEach(model.evidenceChips(language)) { chip in
                         ActivityEvidenceChip(chip: chip)
                     }
                 }
@@ -335,22 +360,22 @@ struct RunReviewCard: View {
             } label: {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text(model.chartTitle)
+                        Text(model.hasPlan ? language.history.paceVsPlan : language.history.pacePattern)
                             .font(.torHeading(15, .bold))
                             .foregroundStyle(Theme.text)
                         Spacer()
                         if allowsAnalysisExpansion {
-                            Label("View full analysis", systemImage: "chart.line.uptrend.xyaxis")
+                            Label(language.history.viewFullAnalysis, systemImage: "chart.line.uptrend.xyaxis")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(Theme.accent)
                         }
                     }
 
-                    PlanComparisonChart(model: model, style: .mini)
+                    PlanComparisonChart(model: model, language: language, style: .mini)
                         .frame(height: 126)
                         .allowsHitTesting(false)
 
-                    Text(model.miniChartInterpretation)
+                    Text(language.history.miniChartInterpretation(hasPlan: model.hasPlan))
                         .font(.system(size: 12.5, weight: .semibold))
                         .foregroundStyle(Theme.dim)
                 }
@@ -359,11 +384,15 @@ struct RunReviewCard: View {
             .buttonStyle(.plain)
 
             if isAnalysisExpanded {
-                FullAnalysisCard(model: model, selectedTab: $selectedAnalysisTab)
+                FullAnalysisCard(model: model, language: language, selectedTab: $selectedAnalysisTab)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            CoachRecommendationView(text: model.recommendation, accent: accent)
+            CoachRecommendationView(
+                text: language.history.recommendation(verdict: model.review.verdict, averageHeartRate: model.averageHeartRate),
+                accent: accent,
+                language: language
+            )
         }
         .padding(16)
         .background(
@@ -380,8 +409,8 @@ struct RunReviewCard: View {
 private struct RunDetailSummary: View {
     let activity: CompletedActivity
     let intervalsAnalysis: IntervalsActivityAnalysisData?
+    let language: CoachLanguage
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-
 
     private var distanceMeters: Double? {
         intervalsAnalysis?.distanceMeters ?? activity.distanceMeters
@@ -403,7 +432,7 @@ private struct RunDetailSummary: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Run")
+                    Text(language.history.run)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.dim)
                     Text(Formatters.kilometers(distanceMeters))
@@ -489,19 +518,20 @@ struct ActivityStatPill: View {
 
 private struct FullAnalysisCard: View {
     let model: ActivityDetailAnalysis
+    let language: CoachLanguage
     @Binding var selectedTab: ActivityAnalysisTab
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            AnalysisSegmentedControl(selection: $selectedTab, availableTabs: model.availableTabs)
+            AnalysisSegmentedControl(selection: $selectedTab, availableTabs: model.availableTabs, language: language)
 
             switch selectedTab {
             case .pace:
-                PaceAnalysisView(model: model)
+                PaceAnalysisView(model: model, language: language)
             case .heartRate:
-                HeartRateAnalysisView(model: model)
+                HeartRateAnalysisView(model: model, language: language)
             case .splits:
-                SplitsAnalysisView(model: model)
+                SplitsAnalysisView(model: model, language: language)
             }
         }
         .padding(14)
@@ -512,21 +542,22 @@ private struct FullAnalysisCard: View {
 
 private struct PaceAnalysisView: View {
     let model: ActivityDetailAnalysis
+    let language: CoachLanguage
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(model.hasPlan ? "Pace vs plan" : "Pace pattern")
+            Text(model.hasPlan ? language.history.paceVsPlan : language.history.pacePattern)
                 .font(.torHeading(18, .bold))
                 .foregroundStyle(Theme.text)
 
             summaryMetrics
 
-            PlanComparisonChart(model: model, style: .expanded)
+            PlanComparisonChart(model: model, language: language, style: .expanded)
                 .frame(height: 230)
 
-            Text(model.paceInsight)
+            Text(language.history.paceInsight(hasPlan: model.hasPlan, easyLabel: language.name(WorkoutKind.easy)))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.dim)
                 .fixedSize(horizontal: false, vertical: true)
@@ -540,26 +571,26 @@ private struct PaceAnalysisView: View {
                 alignment: .leading,
                 spacing: 8
             ) {
-                AnalysisSummaryPill(value: Formatters.pace(model.actualPace).replacingOccurrences(of: " /km", with: "/km"), label: "actual", color: Theme.accent)
+                AnalysisSummaryPill(value: Formatters.pace(model.actualPace).replacingOccurrences(of: " /km", with: "/km"), label: language.history.actual, color: Theme.accent)
                 if model.hasPlan {
-                    AnalysisSummaryPill(value: Formatters.pace(model.plannedAveragePace).replacingOccurrences(of: " /km", with: "/km"), label: "planned", color: Theme.good)
-                    AnalysisSummaryPill(value: model.paceDeltaText, label: "fast", color: Theme.warn)
+                    AnalysisSummaryPill(value: Formatters.pace(model.plannedAveragePace).replacingOccurrences(of: " /km", with: "/km"), label: language.history.planned, color: Theme.good)
+                    AnalysisSummaryPill(value: language.history.paceDeltaValue(model.review.paceDeltaSecondsPerKm), label: language.history.fast, color: Theme.warn)
                 }
             }
         } else {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
-                    AnalysisSummaryPill(value: Formatters.pace(model.actualPace).replacingOccurrences(of: " /km", with: "/km"), label: "actual", color: Theme.accent)
+                    AnalysisSummaryPill(value: Formatters.pace(model.actualPace).replacingOccurrences(of: " /km", with: "/km"), label: language.history.actual, color: Theme.accent)
                     if model.hasPlan {
-                        AnalysisSummaryPill(value: Formatters.pace(model.plannedAveragePace).replacingOccurrences(of: " /km", with: "/km"), label: "planned", color: Theme.good)
-                        AnalysisSummaryPill(value: model.paceDeltaText, label: "fast", color: Theme.warn)
+                        AnalysisSummaryPill(value: Formatters.pace(model.plannedAveragePace).replacingOccurrences(of: " /km", with: "/km"), label: language.history.planned, color: Theme.good)
+                        AnalysisSummaryPill(value: language.history.paceDeltaValue(model.review.paceDeltaSecondsPerKm), label: language.history.fast, color: Theme.warn)
                     }
                 }
                 VStack(alignment: .leading, spacing: 8) {
-                    AnalysisSummaryPill(value: Formatters.pace(model.actualPace).replacingOccurrences(of: " /km", with: "/km"), label: "actual", color: Theme.accent)
+                    AnalysisSummaryPill(value: Formatters.pace(model.actualPace).replacingOccurrences(of: " /km", with: "/km"), label: language.history.actual, color: Theme.accent)
                     if model.hasPlan {
-                        AnalysisSummaryPill(value: Formatters.pace(model.plannedAveragePace).replacingOccurrences(of: " /km", with: "/km"), label: "planned", color: Theme.good)
-                        AnalysisSummaryPill(value: model.paceDeltaText, label: "fast", color: Theme.warn)
+                        AnalysisSummaryPill(value: Formatters.pace(model.plannedAveragePace).replacingOccurrences(of: " /km", with: "/km"), label: language.history.planned, color: Theme.good)
+                        AnalysisSummaryPill(value: language.history.paceDeltaValue(model.review.paceDeltaSecondsPerKm), label: language.history.fast, color: Theme.warn)
                     }
                 }
             }
@@ -570,21 +601,22 @@ private struct PaceAnalysisView: View {
 
 private struct HeartRateAnalysisView: View {
     let model: ActivityDetailAnalysis
+    let language: CoachLanguage
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Heart rate")
+            Text(language.heartRateLabel)
                 .font(.torHeading(18, .bold))
                 .foregroundStyle(Theme.text)
 
             summaryMetrics
 
-            HeartRateTrendChart(model: model)
+            HeartRateTrendChart(model: model, language: language)
                 .frame(height: 210)
 
-            Text(model.heartRateInsight)
+            Text(language.history.heartRateInsight)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.dim)
                 .fixedSize(horizontal: false, vertical: true)
@@ -598,18 +630,18 @@ private struct HeartRateAnalysisView: View {
                 alignment: .leading,
                 spacing: 8
             ) {
-                AnalysisSummaryPill(value: Formatters.heartRate(model.averageHeartRate), label: "recorded avg", color: Theme.data)
-                AnalysisSummaryPill(value: Formatters.heartRate(model.maxHeartRate), label: "max", color: Theme.warn)
+                AnalysisSummaryPill(value: Formatters.heartRate(model.averageHeartRate), label: language.history.recordedAverage, color: Theme.data)
+                AnalysisSummaryPill(value: Formatters.heartRate(model.maxHeartRate), label: language.history.maximum, color: Theme.warn)
             }
         } else {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
-                    AnalysisSummaryPill(value: Formatters.heartRate(model.averageHeartRate), label: "recorded avg", color: Theme.data)
-                    AnalysisSummaryPill(value: Formatters.heartRate(model.maxHeartRate), label: "max", color: Theme.warn)
+                    AnalysisSummaryPill(value: Formatters.heartRate(model.averageHeartRate), label: language.history.recordedAverage, color: Theme.data)
+                    AnalysisSummaryPill(value: Formatters.heartRate(model.maxHeartRate), label: language.history.maximum, color: Theme.warn)
                 }
                 VStack(alignment: .leading, spacing: 8) {
-                    AnalysisSummaryPill(value: Formatters.heartRate(model.averageHeartRate), label: "recorded avg", color: Theme.data)
-                    AnalysisSummaryPill(value: Formatters.heartRate(model.maxHeartRate), label: "max", color: Theme.warn)
+                    AnalysisSummaryPill(value: Formatters.heartRate(model.averageHeartRate), label: language.history.recordedAverage, color: Theme.data)
+                    AnalysisSummaryPill(value: Formatters.heartRate(model.maxHeartRate), label: language.history.maximum, color: Theme.warn)
                 }
             }
         }
@@ -618,20 +650,21 @@ private struct HeartRateAnalysisView: View {
 
 private struct SplitsAnalysisView: View {
     let model: ActivityDetailAnalysis
+    let language: CoachLanguage
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Splits")
+            Text(language.history.splits)
                 .font(.torHeading(18, .bold))
                 .foregroundStyle(Theme.text)
 
             VStack(spacing: 7) {
                 ForEach(model.splits) { split in
-                    SplitComparisonRow(split: split, plannedAveragePace: model.plannedAveragePace)
+                    SplitComparisonRow(split: split, plannedAveragePace: model.plannedAveragePace, language: language)
                 }
             }
 
-            Text(model.splitsSummary)
+            Text(language.history.splitsSummary(fastCount: model.splits.filter(\.isMeaningfullyFast).count, total: model.splits.count))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.dim)
         }
@@ -685,7 +718,7 @@ struct ActivityEvidenceChip: View {
 struct CoachRecommendationView: View {
     let text: String
     let accent: Color
-
+    let language: CoachLanguage
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "arrow.triangle.branch")
@@ -695,7 +728,7 @@ struct CoachRecommendationView: View {
                 .background(Theme.soft(accent, 0.16), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("Next session")
+                Text(language.history.nextSession)
                     .font(.system(size: 11, weight: .bold))
                     .tracking(0.8)
                     .foregroundStyle(Theme.faint)
@@ -716,6 +749,7 @@ struct CoachRecommendationView: View {
 struct AnalysisSegmentedControl: View {
     @Binding var selection: ActivityAnalysisTab
     let availableTabs: [ActivityAnalysisTab]
+    let language: CoachLanguage
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -740,7 +774,7 @@ struct AnalysisSegmentedControl: View {
                 selection = tab
             }
         } label: {
-            Text(tab.title)
+            Text(language.history.analysisTabTitle(tab))
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(selection == tab ? Color.white : Theme.dim)
                 .frame(maxWidth: .infinity)
@@ -759,6 +793,7 @@ struct PlanComparisonChart: View {
     }
 
     let model: ActivityDetailAnalysis
+    let language: CoachLanguage
     var style: Style = .mini
     @State private var scrubTime: Double?
 
@@ -771,7 +806,7 @@ struct PlanComparisonChart: View {
                 }
 
                 if model.hasPlan {
-                    Text("Target")
+                    Text(language.history.target)
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(Theme.good)
                         .padding(.horizontal, 6)
@@ -781,7 +816,7 @@ struct PlanComparisonChart: View {
                 }
 
                 if style == .mini, model.hasPlan {
-                    Text("Main deviation · 18-24 min")
+                    Text(language.history.mainDeviation)
                         .font(.system(size: 10.5, weight: .bold))
                         .foregroundStyle(Theme.warn)
                         .padding(.horizontal, 7)
@@ -826,7 +861,7 @@ struct PlanComparisonChart: View {
                     }
             )
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(model.accessibilityChartSummary)
+            .accessibilityLabel(language.history.chartAccessibility(hasPlan: model.hasPlan))
         }
     }
 
@@ -898,6 +933,7 @@ struct PlanComparisonChart: View {
 
 private struct HeartRateTrendChart: View {
     let model: ActivityDetailAnalysis
+    let language: CoachLanguage
     @State private var scrubTime: Double?
 
     var body: some View {
@@ -921,7 +957,11 @@ private struct HeartRateTrendChart: View {
                         .fill(point.bpm >= model.heartRateUpperTarget ? Theme.warn : Theme.data)
                         .frame(width: 8, height: 8)
                         .position(x: x, y: y)
-                    ChartTooltip(time: Formatters.duration(point.time), actual: "\(Int(point.bpm.rounded())) bpm", planned: "easy \(Int(model.heartRateUpperTarget.rounded())) bpm")
+                    ChartTooltip(
+                        time: Formatters.duration(point.time),
+                        actual: "\(Int(point.bpm.rounded())) bpm",
+                        planned: language.history.easyHeartRateTarget(Int(model.heartRateUpperTarget.rounded()))
+                    )
                         .position(x: min(max(x, 86), size.width - 86), y: max(28, y - 42))
                 }
             }
@@ -992,7 +1032,7 @@ private struct ChartTooltip: View {
 struct SplitComparisonRow: View {
     let split: SplitComparison
     let plannedAveragePace: Double
-
+    let language: CoachLanguage
     var body: some View {
         HStack(spacing: 10) {
             Text("\(split.kilometer)")
@@ -1034,13 +1074,20 @@ struct SplitComparisonRow: View {
         .padding(.horizontal, 10)
         .frame(minHeight: 44)
         .background(Theme.chip.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .accessibilityLabel("Kilometer \(split.kilometer), \(Formatters.pace(split.paceSecondsPerKm)), planned \(Formatters.pace(plannedAveragePace))")
+        .accessibilityLabel(
+            language.history.splitAccessibility(
+                kilometer: split.kilometer,
+                pace: Formatters.pace(split.paceSecondsPerKm),
+                plannedPace: Formatters.pace(plannedAveragePace)
+            )
+        )
     }
 }
 
 struct CollapsibleMetricSection<Content: View>: View {
     let section: ActivityTechnicalSection
     @Binding var expandedSection: ActivityTechnicalSection?
+    let language: CoachLanguage
     let preview: String
     @ViewBuilder var content: () -> Content
 
@@ -1057,7 +1104,7 @@ struct CollapsibleMetricSection<Content: View>: View {
             } label: {
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(section.title)
+                        Text(language.history.technicalSectionTitle(section))
                             .font(.system(size: 14, weight: .bold))
                             .foregroundStyle(Theme.text)
                         Text(preview)
@@ -1114,13 +1161,6 @@ enum ActivityAnalysisTab: CaseIterable {
     case heartRate
     case splits
 
-    var title: String {
-        switch self {
-        case .pace: "Pace"
-        case .heartRate: "Heart rate"
-        case .splits: "Splits"
-        }
-    }
 }
 
 enum ActivityTechnicalSection: CaseIterable {
@@ -1131,16 +1171,6 @@ enum ActivityTechnicalSection: CaseIterable {
     case weather
     case gear
 
-    var title: String {
-        switch self {
-        case .activityDetails: "Activity details"
-        case .heartRateDetails: "Heart rate details"
-        case .runningDynamics: "Running dynamics"
-        case .elevation: "Elevation"
-        case .weather: "Weather"
-        case .gear: "Gear"
-        }
-    }
 }
 
 struct ActivityEvidence: Identifiable {
@@ -1179,18 +1209,18 @@ enum IntervalsActivityLoadState: Equatable {
     case notFound
     case failed
 
-    var fallbackDescription: String {
+    func fallbackDescription(_ language: CoachLanguage) -> String {
         switch self {
         case .idle, .loading:
-            return "Loading intervals.icu analysis"
+            return language.history.loadingIntervalsAnalysis
         case .loaded:
             return "intervals.icu"
         case .unconfigured:
-            return "HealthKit summary fallback"
+            return language.history.healthKitSummaryFallback
         case .notFound:
-            return "HealthKit fallback · no intervals activity match"
+            return language.history.healthKitNoIntervalsMatch
         case .failed:
-            return "HealthKit fallback · intervals unavailable"
+            return language.history.healthKitIntervalsUnavailable
         }
     }
 }
@@ -1444,60 +1474,58 @@ struct ActivityDetailAnalysis {
         plannedWorkout != nil
     }
 
-    var eyebrow: String {
-        hasPlan ? "Post-run review" : "Run review"
-    }
-
-    var headline: String {
-        hasPlan ? review.verdict.title : "Run logged"
-    }
-
-    var supportingSentence: String {
+    func supportingSentence(_ language: CoachLanguage) -> String {
         guard hasPlan else {
-            return "No planned workout is matched yet, so TrainOrRest is showing the pacing pattern without judging execution."
+            return language.history.unmatchedSupportingSentence
         }
-        let kind = plannedWorkout?.kind?.displayName ?? "planned run"
-        let distance = abs(review.distanceDeltaKm ?? 0) < 0.15 ? "Your distance matched the \(kind)" : "Your distance drifted from the \(kind)"
-        if let paceDelta = review.paceDeltaSecondsPerKm, abs(paceDelta) >= 10 {
-            let direction = paceDelta < 0 ? "faster" : "slower"
-            return "\(distance), but your pace was \(formatPaceDelta(abs(paceDelta))) sec/km \(direction) than planned."
-        }
-        return "\(distance), and your average pace stayed close to the planned range."
+        let kind = plannedWorkout?.kind.map { language.name($0) } ?? language.history.plannedRun
+        return language.history.supportingSentence(
+            kind: kind,
+            distanceMatched: abs(review.distanceDeltaKm ?? 0) < 0.15,
+            paceDelta: review.paceDeltaSecondsPerKm
+        )
     }
 
-    var evidenceChips: [ActivityEvidence] {
+    func evidenceChips(_ language: CoachLanguage) -> [ActivityEvidence] {
         guard hasPlan else {
             return [
-                ActivityEvidence(title: "Garmin synced", symbol: "checkmark", color: Theme.good),
+                ActivityEvidence(title: language.history.garminSynced, symbol: "checkmark", color: Theme.good),
                 ActivityEvidence(title: Formatters.kilometers(distanceMeters), symbol: "figure.run", color: Theme.accent)
             ]
         }
 
         var chips: [ActivityEvidence] = []
         if let delta = review.distanceDeltaKm {
-            chips.append(ActivityEvidence(title: abs(delta) < 0.15 ? "Distance on plan" : String(format: "%.1f km off", abs(delta)), symbol: abs(delta) < 0.15 ? "checkmark" : "arrow.left.and.right", color: abs(delta) < 0.15 ? Theme.good : Theme.warn))
+            chips.append(
+                ActivityEvidence(
+                    title: abs(delta) < 0.15 ? language.history.distanceOnPlan : language.history.distanceOff(abs(delta)),
+                    symbol: abs(delta) < 0.15 ? "checkmark" : "arrow.left.and.right",
+                    color: abs(delta) < 0.15 ? Theme.good : Theme.warn
+                )
+            )
         }
         if let paceDelta = review.paceDeltaSecondsPerKm {
-            let direction = paceDelta < 0 ? "fast" : "slow"
-            chips.append(ActivityEvidence(title: "\(formatPaceDelta(abs(paceDelta))) sec/km \(direction)", symbol: paceDelta < 0 ? "flame" : "leaf", color: abs(paceDelta) >= 20 ? Theme.warn : Theme.dim))
+            chips.append(
+                ActivityEvidence(
+                    title: language.history.paceDelta(abs(paceDelta), faster: paceDelta < 0),
+                    symbol: paceDelta < 0 ? "flame" : "leaf",
+                    color: abs(paceDelta) >= 20 ? Theme.warn : Theme.dim
+                )
+            )
         }
         if let durationDelta = review.durationDeltaSeconds {
-            let minutes = Int((abs(durationDelta) / 60).rounded())
-            chips.append(ActivityEvidence(title: "\(minutes) min \(durationDelta < 0 ? "shorter" : "longer")", symbol: "clock", color: abs(durationDelta) >= 180 ? Theme.warn : Theme.dim))
+            chips.append(
+                ActivityEvidence(
+                    title: language.history.durationDelta(
+                        Int((abs(durationDelta) / 60).rounded()),
+                        shorter: durationDelta < 0
+                    ),
+                    symbol: "clock",
+                    color: abs(durationDelta) >= 180 ? Theme.warn : Theme.dim
+                )
+            )
         }
         return Array(chips.prefix(3))
-    }
-
-    var chartTitle: String {
-        hasPlan ? "Pace vs plan" : "Pace pattern"
-    }
-
-    var miniChartInterpretation: String {
-        hasPlan ? "Most of the extra effort came from the middle of the run." : "The pace pattern is shown without a plan target."
-    }
-
-    var recommendation: String {
-        review.recoveryNote
     }
 
     var availableTabs: [ActivityAnalysisTab] {
@@ -1542,26 +1570,6 @@ struct ActivityDetailAnalysis {
         plannedSlowPace
     }
 
-    var paceDeltaText: String {
-        guard let delta = review.paceDeltaSecondsPerKm else { return "on range" }
-        return "\(formatPaceDelta(abs(delta)))s/km"
-    }
-
-    var paceInsight: String {
-        hasPlan
-            ? "You were closest to the Easy target during the final third, but the middle section was substantially faster."
-            : "Without a matched plan, this is a pacing shape only. Match the run to a planned workout for execution feedback."
-    }
-
-    var heartRateInsight: String {
-        "Heart rate continued rising even after pace settled, suggesting accumulating effort."
-    }
-
-    var accessibilityChartSummary: String {
-        hasPlan
-            ? "Actual pace line compared with planned target band. Faster than plan is highlighted in amber during the middle of the run."
-            : "Actual pace line over the workout duration."
-    }
 
     var pacePoints: [PaceChartPoint] {
         if let points = intervalsAnalysis?.pacePoints, !points.isEmpty {
@@ -1650,10 +1658,6 @@ struct ActivityDetailAnalysis {
         }
     }
 
-    var splitsSummary: String {
-        let fastCount = splits.filter(\.isMeaningfullyFast).count
-        return "\(fastCount) of \(splits.count) kilometres were faster than the planned Easy range."
-    }
 
     func nearestPacePoint(to time: Double) -> PaceChartPoint {
         pacePoints.min { abs($0.time - time) < abs($1.time - time) } ?? PaceChartPoint(time: time, actual: actualPace)

@@ -6,9 +6,10 @@ import SwiftUI
 /// week-by-week list; both share the plan's real workout data.
 struct PlanCalendarView: View {
     var onReviewRunInChat: (CompletedActivity) -> Void = { _ in }
-    enum Mode: String, CaseIterable, Identifiable {
-        case month = "Month"
-        case week = "Week"
+    enum Mode: CaseIterable, Identifiable {
+        case month
+        case week
+
         var id: Self { self }
     }
 
@@ -24,6 +25,10 @@ struct PlanCalendarView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 
+
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
     @State private var mode: Mode = .month
     @State private var monthAnchor: Date = .now
     @State private var selectedDate: Date = Calendar.current.startOfDay(for: .now)
@@ -41,10 +46,11 @@ struct PlanCalendarView: View {
             if verticalSizeClass != .compact {
                 topBar
             }
-            ForceIntervalsSyncStatusView(status: forceSyncStatus, onRetry: forceSyncIntervals)
+            ForceIntervalsSyncStatusView(status: forceSyncStatus, language: language, onRetry: forceSyncIntervals)
             RecentCoachChangesView(
                 edits: recentCoachEdits,
                 error: revertError,
+                language: language,
                 onRevert: revert
             )
             content
@@ -73,11 +79,11 @@ struct PlanCalendarView: View {
                     if pushService.isPushing {
                         ProgressView()
                     } else {
-                        Label("Sync intervals.icu", systemImage: "arrow.triangle.2.circlepath")
+                        Label(language.plan.syncIntervals, systemImage: "arrow.triangle.2.circlepath")
                     }
                 }
                 .disabled(pushService.isPushing)
-                Button("Today", systemImage: "calendar") { goToToday() }
+                Button(language.todayLabel, systemImage: "calendar") { goToToday() }
                 Button {
                     isEditingGoal = true
                 } label: {
@@ -115,14 +121,14 @@ struct PlanCalendarView: View {
     private var content: some View {
         if workouts.isEmpty {
             ContentUnavailableView {
-                Label("No plan yet", systemImage: "calendar.badge.plus")
+                Label(language.plan.noPlanYet, systemImage: "calendar.badge.plus")
             } description: {
-                Text("Set a race goal and TrainOrRest builds your day-by-day training plan.")
+                Text(language.plan.noPlanDescription)
             } actions: {
                 Button {
                     isEditingGoal = true
                 } label: {
-                    Text("Set race goal")
+                    Text(language.plan.setRaceGoal)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
@@ -137,6 +143,7 @@ struct PlanCalendarView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         PlanMonthView(
                             workouts: workouts,
+                            language: language,
                             completedActivities: completedActivities,
                             monthAnchor: $monthAnchor,
                             selectedDate: $selectedDate,
@@ -161,6 +168,7 @@ struct PlanCalendarView: View {
         if mode == .month {
             PlanMonthView(
                 workouts: workouts,
+                language: language,
                 completedActivities: completedActivities,
                 monthAnchor: $monthAnchor,
                 selectedDate: $selectedDate,
@@ -168,7 +176,7 @@ struct PlanCalendarView: View {
                 showsTodaysCall: !hidesTodaysCall
             )
         } else {
-            PlanWeekListView(scrollToTodayToken: weekScrollToken, onReviewRunInChat: onReviewRunInChat)
+            PlanWeekListView(scrollToTodayToken: weekScrollToken, language: language, onReviewRunInChat: onReviewRunInChat)
         }
     }
 
@@ -177,12 +185,12 @@ struct PlanCalendarView: View {
         // beside the eyebrow (large Dynamic Type), the toggle drops below it.
         ViewThatFits(in: .horizontal) {
             HStack {
-                TorEyebrow("Training plan").tracking(2)
+                TorEyebrow(language.plan.trainingPlanTitle).tracking(2)
                 Spacer()
                 modeToggle
             }
             VStack(alignment: .leading, spacing: 10) {
-                TorEyebrow("Training plan").tracking(2)
+                TorEyebrow(language.plan.trainingPlanTitle).tracking(2)
                 modeToggle
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -234,7 +242,7 @@ struct PlanCalendarView: View {
                 weekScrollToken += 1
             }
         } label: {
-            Text(option.rawValue)
+            Text(modeName(option))
                 .font(.caption.weight(selected ? .bold : .semibold))
                 .fixedSize(horizontal: true, vertical: false)
                 .foregroundStyle(selected ? Color.white : Theme.faint)
@@ -251,8 +259,12 @@ struct PlanCalendarView: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
+    private func modeName(_ mode: Mode) -> String {
+        mode == .month ? language.plan.monthMode : language.plan.weekMode
+    }
+
     private var goalButtonTitle: String {
-        goals.isEmpty ? "Set the race you entered" : "Change goal"
+        goals.isEmpty ? language.plan.setEnteredRace : language.plan.changeGoal
     }
 
     private var googleConnection: GoogleCalendarConnection? {
@@ -260,23 +272,23 @@ struct PlanCalendarView: View {
     }
 
     private var googleCalendarStatusText: String {
-        guard let connection = googleConnection else { return "Connect Google Calendar" }
+        guard let connection = googleConnection else { return language.plan.connectGoogleCalendar }
         switch connection.connectionStatus {
         case .connected:
             if pendingGoogleCalendarReviews > 0 {
-                return "Google Calendar · \(pendingGoogleCalendarReviews) changes need review"
+                return language.plan.googleChangesNeedReview(pendingGoogleCalendarReviews)
             }
-            return "Google Calendar · Up to date"
+            return language.plan.googleUpToDate
         case .syncing, .initialSync:
-            return "Google Calendar · Syncing"
+            return language.plan.googleSyncing
         case .needsReconnect:
-            return "Google Calendar · Reconnect required"
+            return language.plan.googleReconnectRequired
         case .offlineQueued:
-            return "Google Calendar · Waiting for connection"
+            return language.plan.googleWaitingForConnection
         case .partialFailure, .calendarMissing:
-            return "Google Calendar · Needs attention"
+            return language.plan.googleNeedsAttention
         default:
-            return "Connect Google Calendar"
+            return language.plan.connectGoogleCalendar
         }
     }
 
@@ -302,13 +314,13 @@ struct PlanCalendarView: View {
 
     private var googleCalendarAccessibilityLabel: String {
         if pendingGoogleCalendarReviews > 0 {
-            return "Google Calendar changes need review"
+            return language.plan.googleChangesNeedReviewAccessibility
         }
         switch googleConnection?.connectionStatus {
-        case .connected: return "Google Calendar connected"
-        case .syncing, .initialSync: return "Google Calendar syncing"
-        case .needsReconnect: return "Google Calendar needs reconnect"
-        default: return "Manage Google Calendar sync"
+        case .connected: return language.plan.googleConnectedAccessibility
+        case .syncing, .initialSync: return language.plan.googleSyncingAccessibility
+        case .needsReconnect: return language.plan.googleReconnectAccessibility
+        default: return language.plan.manageGoogleSyncAccessibility
         }
     }
 
@@ -352,7 +364,7 @@ struct PlanCalendarView: View {
                 } else if let lastPushAt = pushService.lastPushAt {
                     forceSyncStatus = .synced(lastPushAt)
                 } else {
-                    forceSyncStatus = .skipped("Nothing to sync right now.")
+                    forceSyncStatus = .skipped(language.plan.noWorkoutsToSync)
                 }
             }
         }
@@ -377,6 +389,7 @@ private enum ForceSyncStatus: Equatable {
 
 private struct ForceIntervalsSyncStatusView: View {
     var status: ForceSyncStatus?
+    let language: CoachLanguage
     var onRetry: () -> Void
 
     var body: some View {
@@ -391,12 +404,12 @@ private struct ForceIntervalsSyncStatusView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
                 if case .failed = status {
-                    Button("Retry", action: onRetry)
+                    Button(language.plan.retry, action: onRetry)
                         .font(.caption.weight(.bold))
                         .foregroundStyle(Theme.accent)
                         .buttonStyle(.plain)
                         .frame(minHeight: 36)
-                        .accessibilityLabel("Retry intervals.icu sync")
+                        .accessibilityLabel(language.plan.retryIntervalsAccessibility)
                 }
             }
             .padding(.horizontal, 16)
@@ -425,10 +438,10 @@ private struct ForceIntervalsSyncStatusView: View {
 
     private func message(_ status: ForceSyncStatus) -> String {
         switch status {
-        case .syncing: "Syncing planned workouts to intervals.icu…"
-        case .synced(let date): "Synced to intervals.icu · \(date.formatted(date: .abbreviated, time: .shortened))"
-        case .skipped(let reason): "Sync skipped · \(reason)"
-        case .failed(let reason): "Couldn't sync to intervals.icu · \(reason)"
+        case .syncing: language.plan.syncingIntervals
+        case .synced(let date): language.plan.syncedIntervals(date)
+        case .skipped(let reason): language.plan.syncSkipped(reason)
+        case .failed(let reason): language.plan.syncFailed(reason)
         }
     }
 }
@@ -436,6 +449,7 @@ private struct ForceIntervalsSyncStatusView: View {
 private struct RecentCoachChangesView: View {
     var edits: [PlanEdit]
     var error: String?
+    let language: CoachLanguage
     var onRevert: (PlanEdit) -> Void
 
     var body: some View {
@@ -445,7 +459,7 @@ private struct RecentCoachChangesView: View {
                     row(edit)
                 }
                 if edits.count > 1 {
-                    Text("+\(edits.count - 1) more recent change\(edits.count - 1 == 1 ? "" : "s")")
+                    Text(language.plan.moreRecentChanges(edits.count - 1))
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(Theme.faint)
                         .padding(.leading, 12)
@@ -468,7 +482,7 @@ private struct RecentCoachChangesView: View {
                 .font(.caption.weight(.bold))
                 .foregroundStyle(Theme.accent)
                 .accessibilityHidden(true)
-            Text("Coach updated 1 workout · \(summary(for: edit))")
+            Text(language.plan.coachUpdatedWorkout(summary(for: edit)))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.text)
                 .lineLimit(1)
@@ -477,13 +491,13 @@ private struct RecentCoachChangesView: View {
             Button {
                 onRevert(edit)
             } label: {
-                Text("Undo")
+                Text(language.plan.undo)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(Theme.accent)
                     .frame(minWidth: 54, minHeight: 36)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Undo Coach workout change")
+            .accessibilityLabel(language.plan.undoCoachWorkoutChangeAccessibility)
         }
         .padding(.leading, 12)
         .padding(.trailing, 8)
@@ -494,11 +508,16 @@ private struct RecentCoachChangesView: View {
     }
 
     private func summary(for edit: PlanEdit) -> String {
-        "\(kindName(edit.kindRaw)) \(km(edit.distanceKm)) km -> \(kindName(edit.afterKindRaw)) \(km(edit.afterDistanceKm)) km"
+        language.plan.workoutChangeSummary(
+            beforeKind: kindName(edit.kindRaw),
+            beforeDistance: km(edit.distanceKm),
+            afterKind: kindName(edit.afterKindRaw),
+            afterDistance: km(edit.afterDistanceKm)
+        )
     }
 
     private func kindName(_ raw: String) -> String {
-        WorkoutKind(rawValue: raw)?.displayName ?? raw.capitalized
+        WorkoutKind(rawValue: raw).map(language.name) ?? language.genericRunLabel
     }
 
     private func km(_ value: Double) -> String {

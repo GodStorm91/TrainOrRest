@@ -17,6 +17,10 @@ struct GoogleCalendarSettingsView: View {
     @State private var dateChoiceChangeID: UUID?
     @State private var dateChoiceDraft = Date()
     @State private var didSyncOnOpen = false
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+
 
     private var connection: GoogleCalendarConnection {
         connections.first ?? googleCalendar.connection()
@@ -35,50 +39,51 @@ struct GoogleCalendarSettingsView: View {
                 calendarMissingSections
             }
         }
-        .navigationTitle("Google Calendar")
+        .environment(\.locale, language.uiLocale)
+        .navigationTitle(language.integrations.googleCalendarTitle)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $isShowingPermission) {
-            GoogleCalendarPermissionView {
+            GoogleCalendarPermissionView(language: language) {
                 isShowingPermission = false
                 connect()
             } onCancel: {
                 isShowingPermission = false
             }
         }
-        .confirmationDialog("Disconnect Google Calendar?", isPresented: $isShowingDisconnect, titleVisibility: .visible) {
-            Button("Keep calendar and events") {
+        .confirmationDialog(language.integrations.disconnectGoogleCalendarQuestion, isPresented: $isShowingDisconnect, titleVisibility: .visible) {
+            Button(language.integrations.keepCalendarAndEvents) {
                 disconnect(deleteCalendar: false)
             }
-            Button("Delete TrainOrRest Training calendar", role: .destructive) {
+            Button(language.integrations.deleteTrainingCalendar, role: .destructive) {
                 deleteRemoteCalendar = true
             }
-            Button("Cancel", role: .cancel) {}
+            Button(language.cancelLabel, role: .cancel) {}
         } message: {
-            Text("TrainOrRest will stop updating your Google Calendar.")
+            Text(language.integrations.disconnectMessage)
         }
-        .alert("Delete TrainOrRest Training calendar?", isPresented: $deleteRemoteCalendar) {
-            Button("Delete calendar", role: .destructive) {
+        .alert(language.integrations.deleteTrainingCalendarQuestion, isPresented: $deleteRemoteCalendar) {
+            Button(language.integrations.deleteCalendar, role: .destructive) {
                 disconnect(deleteCalendar: true)
             }
-            Button("Cancel", role: .cancel) {}
+            Button(language.cancelLabel, role: .cancel) {}
         } message: {
-            Text("Only the TrainOrRest-created secondary calendar is removed. Your workouts and personal calendars stay untouched.")
+            Text(language.integrations.deleteTrainingCalendarMessage)
         }
-        .alert("Allow scheduling from Google Calendar?", isPresented: $isShowingSchedulingPrompt) {
-            Button("Cancel", role: .cancel) {}
-            Button("Enable") {
+        .alert(language.integrations.schedulingFromGoogleQuestion, isPresented: $isShowingSchedulingPrompt) {
+            Button(language.cancelLabel, role: .cancel) {}
+            Button(language.integrations.enable) {
                 googleCalendar.updateSchedulingFromGoogle(enabled: true)
             }
         } message: {
-            Text("You’ll be able to change when a TrainOrRest workout happens directly from Google Calendar.\n\nGoogle Calendar can change:\n✓ Workout date\n✓ Start time\n\nGoogle Calendar cannot change:\n✕ Workout type\n✕ Distance\n✕ Pace or intensity\n✕ Workout structure\n✕ Your training goal\n\nMoves that could disrupt your training plan will require review in TrainOrRest.")
+            Text(language.integrations.schedulingFromGoogleMessage)
         }
-        .alert("Use Google Calendar availability?", isPresented: $isShowingSmartSchedulingPrompt) {
-            Button("Cancel", role: .cancel) {}
-            Button("Continue with Google") {
+        .alert(language.integrations.smartSchedulingQuestion, isPresented: $isShowingSmartSchedulingPrompt) {
+            Button(language.cancelLabel, role: .cancel) {}
+            Button(language.integrations.continueWithGoogle) {
                 Task { await googleCalendar.enableSmartScheduling() }
             }
         } message: {
-            Text("TrainOrRest can use your busy and available time to suggest better workout times.\n\nTrainOrRest will be able to see:\n✓ When you are busy\n✓ When you are available\n\nTrainOrRest will not read:\n✕ Event names\n✕ Event descriptions\n✕ Attendees\n✕ Meeting links\n✕ Event notes\n\nYour training plan and workout details remain managed by TrainOrRest.")
+            Text(language.integrations.smartSchedulingMessage)
         }
         .task {
             guard !didSyncOnOpen,
@@ -94,19 +99,19 @@ struct GoogleCalendarSettingsView: View {
             NavigationStack {
                 Form {
                     Section {
-                        DatePicker("Workout date", selection: $dateChoiceDraft, displayedComponents: [.date, .hourAndMinute])
+                        DatePicker(language.integrations.workoutDate, selection: $dateChoiceDraft, displayedComponents: [.date, .hourAndMinute])
                     } footer: {
-                        Text("TrainOrRest will validate the chosen date before applying it.")
+                        Text(language.integrations.dateValidationFooter)
                     }
                 }
-                .navigationTitle("Choose another day")
+                .navigationTitle(language.integrations.chooseAnotherDay)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { dateChoiceChangeID = nil }
+                        Button(language.cancelLabel) { dateChoiceChangeID = nil }
                     }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Apply") {
+                        Button(language.integrations.apply) {
                             if let dateChoiceChangeID {
                                 googleCalendar.moveReviewedWorkout(for: dateChoiceChangeID, to: dateChoiceDraft)
                             }
@@ -119,7 +124,7 @@ struct GoogleCalendarSettingsView: View {
         }
         .sheet(isPresented: $isShowingSchedulingPreferences) {
             NavigationStack {
-                SmartSchedulingPreferencesView(connection: connection)
+                SmartSchedulingPreferencesView(language: language, connection: connection)
                     .environmentObject(googleCalendar)
             }
         }
@@ -129,19 +134,19 @@ struct GoogleCalendarSettingsView: View {
         Group {
             Section {
                 connectionHeader(
-                    title: "Connect Google Calendar",
-                    subtitle: "View TrainOrRest workouts alongside your work and personal schedule.",
+                    title: language.integrations.connectGoogleCalendar,
+                    subtitle: language.integrations.connectCalendarSubtitle,
                     symbol: "calendar.badge.plus",
                     tint: Theme.accent
                 )
                 Button {
                     isShowingPermission = true
                 } label: {
-                    Label("Connect Google Calendar", systemImage: "link")
+                    Label(language.integrations.connectGoogleCalendar, systemImage: "link")
                 }
-                .accessibilityLabel("Connect Google Calendar")
+                .accessibilityLabel(language.integrations.connectGoogleCalendar)
             } footer: {
-                Text("TrainOrRest creates a separate training calendar and does not read personal events.")
+                Text(language.integrations.separateCalendarFooter)
             }
         }
     }
@@ -151,7 +156,7 @@ struct GoogleCalendarSettingsView: View {
             Section {
                 connectionHeader(
                     title: statusTitle,
-                    subtitle: connection.maskedEmail ?? "TrainOrRest Training",
+                    subtitle: connection.maskedEmail ?? language.integrations.trainingCalendarName,
                     symbol: statusSymbol,
                     tint: statusTint
                 )
@@ -161,49 +166,49 @@ struct GoogleCalendarSettingsView: View {
                         .foregroundStyle(connection.connectionStatus == .partialFailure ? Theme.warn : .secondary)
                 }
                 if let last = connection.lastSuccessfulSyncAt {
-                    LabeledContent("Last successful sync", value: last.formatted(date: .abbreviated, time: .shortened))
+                    LabeledContent(language.integrations.lastSuccessfulSync, value: last.formatted(.relative(presentation: .named).locale(language.uiLocale)))
                 } else {
-                    LabeledContent("Last successful sync", value: "Not yet")
+                    LabeledContent(language.integrations.lastSuccessfulSync, value: language.integrations.notYet)
                 }
-                LabeledContent("Calendar", value: connection.calendarName)
+                LabeledContent(language.integrations.calendar, value: connection.calendarName)
                 Button {
                     syncNow()
                 } label: {
                     if googleCalendar.isSyncing || isWorking {
                         ProgressView()
                     } else {
-                        Label("Sync now", systemImage: "arrow.triangle.2.circlepath")
+                        Label(language.integrations.syncNow, systemImage: "arrow.triangle.2.circlepath")
                     }
                 }
                 .disabled(googleCalendar.isSyncing || isWorking)
-                .accessibilityLabel("Sync Google Calendar now")
+                .accessibilityLabel(language.integrations.syncGoogleCalendarNow)
             }
 
             Section {
-                Toggle("Upcoming plan workouts", isOn: .constant(connection.upcomingWorkoutsEnabled))
+                Toggle(language.integrations.upcomingPlanWorkouts, isOn: .constant(connection.upcomingWorkoutsEnabled))
                     .disabled(true)
-                Picker("Completed activities", selection: completedModeBinding) {
+                Picker(language.integrations.completedActivities, selection: completedModeBinding) {
                     ForEach(GoogleCalendarCompletedActivityMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                        Text(language.integrations.completedActivityMode(mode)).tag(mode)
                     }
                 }
-                LabeledContent("Workouts without a start time", value: "All-day event")
-                LabeledContent("Google Calendar reminders", value: "Off")
+                LabeledContent(language.integrations.workoutsWithoutStartTime, value: language.integrations.allDayEvent)
+                LabeledContent(language.integrations.googleCalendarReminders, value: language.integrations.off)
             } header: {
-                Text("What syncs")
+                Text(language.integrations.whatSyncs)
             } footer: {
-                Text(connection.allowsSchedulingFromGoogle ? "Google Calendar can schedule the workout. TrainOrRest defines the workout." : "TrainOrRest is the source of truth. Changes made in Google Calendar do not update your training plan and may be overwritten during sync.")
+                Text(connection.allowsSchedulingFromGoogle ? language.integrations.schedulingEnabledSyncFooter : language.integrations.schedulingDisabledSyncFooter)
             }
 
             Section {
-                Toggle("Allow scheduling from Google Calendar", isOn: schedulingFromGoogleBinding)
+                Toggle(language.integrations.allowSchedulingFromGoogle, isOn: schedulingFromGoogleBinding)
                 if let last = connection.lastCalendarChangeCheckAt {
-                    LabeledContent("Last checked", value: last.formatted(date: .abbreviated, time: .shortened))
+                    LabeledContent(language.integrations.lastChecked, value: last.formatted(.relative(presentation: .named).locale(language.uiLocale)))
                 }
             } header: {
-                Text("Scheduling from Google")
+                Text(language.integrations.schedulingFromGoogle)
             } footer: {
-                Text("When enabled, changing the date or start time of a TrainOrRest workout in Google Calendar can update your training schedule.\n\nWorkout type, distance, pace, and structure remain managed by TrainOrRest.")
+                Text(language.integrations.schedulingFromGoogleFooter)
             }
 
             smartSchedulingSection
@@ -221,7 +226,7 @@ struct GoogleCalendarSettingsView: View {
                                 Label(changeStatusTitle(change.status), systemImage: changeStatusSymbol(change.status))
                                     .font(.subheadline.weight(.semibold))
                                 Spacer()
-                                Text(change.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                Text(change.createdAt.formatted(.dateTime.month(.abbreviated).day().hour().minute().locale(language.uiLocale)))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -236,7 +241,7 @@ struct GoogleCalendarSettingsView: View {
                         .padding(.vertical, 4)
                     }
                 } header: {
-                    Text("Calendar change review")
+                    Text(language.integrations.calendarChangeReview)
                 }
             }
 
@@ -244,9 +249,9 @@ struct GoogleCalendarSettingsView: View {
                 Button(role: .destructive) {
                     isShowingDisconnect = true
                 } label: {
-                    Label("Disconnect Google Calendar", systemImage: "link.badge.minus")
+                    Label(language.integrations.disconnectGoogleCalendar, systemImage: "link.badge.minus")
                 }
-                .accessibilityLabel("Disconnect Google Calendar")
+                .accessibilityLabel(language.integrations.disconnectGoogleCalendar)
             }
         }
     }
@@ -255,20 +260,20 @@ struct GoogleCalendarSettingsView: View {
         Group {
             Section {
                 connectionHeader(
-                    title: "Google Calendar needs attention",
-                    subtitle: "TrainOrRest no longer has permission to update your training calendar.",
+                    title: language.integrations.googleCalendarNeedsAttention,
+                    subtitle: language.integrations.reconnectSubtitle,
                     symbol: "exclamationmark.triangle",
                     tint: Theme.warn
                 )
                 Button {
                     isShowingPermission = true
                 } label: {
-                    Label("Reconnect", systemImage: "arrow.clockwise")
+                    Label(language.integrations.reconnect, systemImage: "arrow.clockwise")
                 }
                 Button(role: .destructive) {
                     isShowingDisconnect = true
                 } label: {
-                    Label("Disconnect", systemImage: "link.badge.minus")
+                    Label(language.integrations.disconnect, systemImage: "link.badge.minus")
                 }
             }
         }
@@ -278,8 +283,8 @@ struct GoogleCalendarSettingsView: View {
         Group {
             Section {
                 connectionHeader(
-                    title: "Training calendar was removed",
-                    subtitle: "The TrainOrRest Training calendar can no longer be found in Google Calendar.",
+                    title: language.integrations.trainingCalendarRemoved,
+                    subtitle: language.integrations.trainingCalendarRemovedSubtitle,
                     symbol: "calendar.badge.exclamationmark",
                     tint: Theme.warn
                 )
@@ -290,13 +295,13 @@ struct GoogleCalendarSettingsView: View {
                         await MainActor.run { isWorking = false }
                     }
                 } label: {
-                    Label("Create again", systemImage: "calendar.badge.plus")
+                    Label(language.integrations.createAgain, systemImage: "calendar.badge.plus")
                 }
                 .disabled(isWorking)
                 Button(role: .destructive) {
                     isShowingDisconnect = true
                 } label: {
-                    Label("Disconnect", systemImage: "link.badge.minus")
+                    Label(language.integrations.disconnect, systemImage: "link.badge.minus")
                 }
             }
         }
@@ -330,25 +335,25 @@ struct GoogleCalendarSettingsView: View {
 
     private var smartSchedulingSection: some View {
         Section {
-            Toggle("Use calendar availability", isOn: smartSchedulingBinding)
-                .accessibilityLabel("Use Google Calendar availability")
-            Text("Let Coach use busy and available time blocks to suggest better workout times. TrainOrRest does not read event names or details.")
+            Toggle(language.integrations.useCalendarAvailability, isOn: smartSchedulingBinding)
+                .accessibilityLabel(language.integrations.useGoogleCalendarAvailability)
+            Text(language.integrations.availabilityCoachExplanation)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             if connection.smartSchedulingStatus == .needsPermission {
-                LabeledContent("Smart Scheduling", value: "Needs permission")
+                LabeledContent(language.integrations.smartScheduling, value: language.integrations.needsPermission)
                 Button {
                     isShowingSmartSchedulingPrompt = true
                 } label: {
-                    Label("Reconnect Smart Scheduling", systemImage: "lock.rotation")
+                    Label(language.integrations.reconnectSmartScheduling, systemImage: "lock.rotation")
                 }
             }
 
             if connection.smartSchedulingEnabled {
                 if !availabilityCalendarsForConnection.isEmpty {
-                    DisclosureGroup("Availability calendars") {
+                    DisclosureGroup(language.integrations.availabilityCalendars) {
                         ForEach(availabilityCalendarsForConnection, id: \.uuid) { calendar in
                             Toggle(isOn: Binding(
                                 get: { calendar.selectedForAvailability },
@@ -369,10 +374,10 @@ struct GoogleCalendarSettingsView: View {
                 Button {
                     isShowingSchedulingPreferences = true
                 } label: {
-                    Label("Scheduling preferences", systemImage: "slider.horizontal.3")
+                    Label(language.integrations.schedulingPreferences, systemImage: "slider.horizontal.3")
                 }
                 if let last = connection.smartSchedulingLastAvailabilityRefreshAt {
-                    LabeledContent("Last availability refresh", value: last.formatted(date: .abbreviated, time: .shortened))
+                    LabeledContent(language.integrations.lastAvailabilityRefresh, value: last.formatted(.relative(presentation: .named).locale(language.uiLocale)))
                 }
                 if let summary = connection.smartSchedulingLastAvailabilitySummary {
                     Text(summary)
@@ -382,14 +387,14 @@ struct GoogleCalendarSettingsView: View {
                 Button {
                     Task { await googleCalendar.refreshAvailability(reason: "manual") }
                 } label: {
-                    Label("Refresh availability", systemImage: "arrow.clockwise")
+                    Label(language.integrations.refreshAvailability, systemImage: "arrow.clockwise")
                 }
-                .accessibilityLabel("Refresh calendar availability")
+                .accessibilityLabel(language.integrations.refreshCalendarAvailability)
             }
         } header: {
-            Text("Smart Scheduling")
+            Text(language.integrations.smartScheduling)
         } footer: {
-            Text("TrainOrRest only uses busy/free time to help schedule workouts. Event names and details are not used.")
+            Text(language.integrations.smartSchedulingFooter)
         }
     }
 
@@ -424,13 +429,7 @@ struct GoogleCalendarSettingsView: View {
     }
 
     private var statusTitle: String {
-        switch connection.connectionStatus {
-        case .initialSync: "Initial sync"
-        case .syncing: "Syncing"
-        case .partialFailure: "Calendar sync incomplete"
-        case .offlineQueued: "Waiting for connection"
-        default: "Google Calendar Connected"
-        }
+        language.integrations.connectionStatusTitle(connection.connectionStatus)
     }
 
     private var statusSymbol: String {
@@ -493,7 +492,7 @@ struct GoogleCalendarSettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
             recommendedControl(for: change, kind: recommendation.kind)
             if change.reason != .eventDeleted {
-                DisclosureGroup("Other options") {
+                DisclosureGroup(language.integrations.otherOptions) {
                     VStack(alignment: .leading, spacing: 8) {
                         otherActions(for: change, recommended: recommendation.kind)
                     }
@@ -508,15 +507,15 @@ struct GoogleCalendarSettingsView: View {
     private func recommendation(for change: GoogleCalendarInboundChange) -> (kind: ReviewActionKind, rationale: String) {
         switch change.reason {
         case .eventDeleted:
-            return (.addBack, "You deleted this workout in Google Calendar. Recommended: add it back so your plan stays intact.")
+            return (.addBack, language.integrations.recommendationRationale(for: .eventDeleted))
         case .targetDayConflict:
-            return (.swap, "That day already has a workout. Recommended: swap the two so both still fit your week.")
+            return (.swap, language.integrations.recommendationRationale(for: .targetDayConflict))
         case .outsidePlannedWeek:
-            return (.coach, "This moves the workout outside its planned week. Recommended: review with Coach before changing plan structure.")
+            return (.coach, language.integrations.recommendationRationale(for: .outsidePlannedWeek))
         case .planValidationFailed:
-            return (.coach, "This move breaks a plan rule. Recommended: review with Coach to find a safe fit.")
+            return (.coach, language.integrations.recommendationRationale(for: .planValidationFailed))
         default:
-            return (.coach, "This change needs review. Recommended: review with Coach before applying it.")
+            return (.coach, language.integrations.recommendationRationale(for: change.reason))
         }
     }
 
@@ -527,37 +526,37 @@ struct GoogleCalendarSettingsView: View {
             Button {
                 googleCalendar.addBackToGoogleCalendar(workoutID: change.localEntityID)
             } label: {
-                Label("Add back to Google Calendar", systemImage: "arrow.uturn.left")
+                Label(language.integrations.addBackToGoogleCalendar, systemImage: "arrow.uturn.left")
             }
             .buttonStyle(.borderedProminent)
-            .accessibilityLabel("Add workout back to Google Calendar")
+            .accessibilityLabel(language.integrations.addWorkoutBackToGoogleCalendar)
         case .swap:
             Button {
                 googleCalendar.swapWorkouts(for: change.uuid)
             } label: {
-                Label("Swap workouts", systemImage: "arrow.left.arrow.right")
+                Label(language.integrations.swapWorkouts, systemImage: "arrow.left.arrow.right")
             }
             .buttonStyle(.borderedProminent)
-            .accessibilityLabel("Swap workouts")
+            .accessibilityLabel(language.integrations.swapWorkouts)
         case .coach:
             NavigationLink {
                 ChatView(reviewRequest: CalendarReviewChatRequest(prompt: coachPrompt(for: change)))
             } label: {
-                Label("Review with Coach", systemImage: "sparkles")
+                Label(language.integrations.reviewWithCoach, systemImage: "sparkles")
             }
             .buttonStyle(.borderedProminent)
-            .accessibilityLabel("Review Google Calendar change with Coach")
+            .accessibilityLabel(language.integrations.reviewGoogleCalendarChangeWithCoach)
         }
     }
 
     @ViewBuilder
     private func otherActions(for change: GoogleCalendarInboundChange, recommended: ReviewActionKind) -> some View {
         if change.reason == .targetDayConflict, recommended != .swap {
-            Button("Swap workouts") {
+            Button(language.integrations.swapWorkouts) {
                 googleCalendar.swapWorkouts(for: change.uuid)
             }
             .buttonStyle(.bordered)
-            .accessibilityLabel("Swap workouts")
+            .accessibilityLabel(language.integrations.swapWorkouts)
         }
         if let workout = workouts.first(where: { $0.uuid == change.localEntityID }),
            connection.smartSchedulingEnabled,
@@ -565,7 +564,7 @@ struct GoogleCalendarSettingsView: View {
             let candidates = googleCalendar.smartSchedulingCandidates(for: workout, limit: 3)
             if !candidates.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Smart Scheduling found")
+                    Text(language.integrations.smartSchedulingFound)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     ForEach(candidates) { candidate in
@@ -573,12 +572,15 @@ struct GoogleCalendarSettingsView: View {
                             googleCalendar.acceptSmartSchedulingCandidate(candidate, resolvingReview: change.uuid)
                         } label: {
                             Label(
-                                "\(candidate.startTime.formatted(date: .abbreviated, time: .shortened))-\(candidate.endTime.formatted(date: .omitted, time: .shortened))",
+                                language.integrations.timeRange(
+                                    candidate.startTime.formatted(.dateTime.month(.abbreviated).day().hour().minute().locale(language.uiLocale)),
+                                    candidate.endTime.formatted(.dateTime.hour().minute().locale(language.uiLocale))
+                                ),
                                 systemImage: "sparkles"
                             )
                         }
                         .buttonStyle(.bordered)
-                        .accessibilityLabel("Accept Smart Scheduling alternative")
+                        .accessibilityLabel(language.integrations.acceptSmartSchedulingAlternative)
                     }
                 }
             }
@@ -588,33 +590,28 @@ struct GoogleCalendarSettingsView: View {
             NavigationLink {
                 ChatView(reviewRequest: CalendarReviewChatRequest(prompt: coachPrompt(for: change)))
             } label: {
-                Text("Review with Coach")
+                Text(language.integrations.reviewWithCoach)
             }
             .buttonStyle(.bordered)
-            .accessibilityLabel("Review Google Calendar change with Coach")
+            .accessibilityLabel(language.integrations.reviewGoogleCalendarChangeWithCoach)
         }
         if change.reason != .eventDeleted {
-            Button("Choose another day") {
+            Button(language.integrations.chooseAnotherDay) {
                 dateChoiceDraft = change.proposedDate ?? change.originalDate
                 dateChoiceChangeID = change.uuid
             }
             .buttonStyle(.bordered)
-            .accessibilityLabel("Choose another day")
-            Button(change.reason == .outsidePlannedWeek ? "Restore original date" : "Keep original schedule") {
+            .accessibilityLabel(language.integrations.chooseAnotherDay)
+            Button(change.reason == .outsidePlannedWeek ? language.integrations.restoreOriginalDate : language.integrations.keepOriginalSchedule) {
                 googleCalendar.restoreOriginalSchedule(for: change.uuid)
             }
             .buttonStyle(.bordered)
-            .accessibilityLabel("Restore original workout date")
+            .accessibilityLabel(language.integrations.restoreOriginalWorkoutDate)
         }
     }
 
     private func changeStatusTitle(_ status: GoogleCalendarInboundChangeStatus) -> String {
-        switch status {
-        case .pendingReview: "Needs review"
-        case .applied: "Applied"
-        case .rejected: "Rejected"
-        case .restored: "Restored"
-        }
+        language.integrations.changeStatusTitle(status)
     }
 
     private func changeStatusSymbol(_ status: GoogleCalendarInboundChangeStatus) -> String {
@@ -627,12 +624,16 @@ struct GoogleCalendarSettingsView: View {
     }
 
     private func coachPrompt(for change: GoogleCalendarInboundChange) -> String {
-        let proposed = change.proposedDate?.formatted(date: .abbreviated, time: .shortened) ?? "the Google Calendar date"
-        return "Review this Google Calendar schedule change before changing the training plan. Original workout date: \(change.originalDate.formatted(date: .abbreviated, time: .shortened)). Requested Google Calendar date: \(proposed). Consider the current plan week, target week, nearby workouts, phase, load, recovery, and whether to accept, swap, adjust the week, or keep the original schedule."
+        let proposed = change.proposedDate?.formatted(.dateTime.month(.abbreviated).day().hour().minute().locale(language.uiLocale)) ?? language.integrations.googleCalendarDate
+        return language.integrations.coachPrompt(
+            original: change.originalDate.formatted(.dateTime.month(.abbreviated).day().hour().minute().locale(language.uiLocale)),
+            proposed: proposed
+        )
     }
 }
 
 private struct GoogleCalendarPermissionView: View {
+    let language: CoachLanguage
     var onContinue: () -> Void
     var onCancel: () -> Void
     @Environment(\.dismiss) private var dismiss
@@ -642,15 +643,15 @@ private struct GoogleCalendarPermissionView: View {
             List {
                 Section {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("See your TrainOrRest workouts alongside your work and personal schedule.")
+                        Text(language.integrations.connectCalendarSubtitle)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                        permissionRow("Create a separate calendar named “TrainOrRest Training”", positive: true)
-                        permissionRow("Add and update workouts in that calendar", positive: true)
-                        permissionRow("Keep those workouts synchronized when your plan changes", positive: true)
-                        permissionRow("Read events from your personal calendars", positive: false)
-                        permissionRow("Change your other calendars", positive: false)
-                        permissionRow("Reschedule your TrainOrRest plan from Google Calendar", positive: false)
+                        permissionRow(language.integrations.createSeparateTrainingCalendar, positive: true)
+                        permissionRow(language.integrations.addAndUpdateWorkouts, positive: true)
+                        permissionRow(language.integrations.keepWorkoutsSynchronized, positive: true)
+                        permissionRow(language.integrations.doNotReadPersonalEvents, positive: false)
+                        permissionRow(language.integrations.doNotChangeOtherCalendars, positive: false)
+                        permissionRow(language.integrations.doNotReschedulePlan, positive: false)
                     }
                     .padding(.vertical, 6)
                 }
@@ -659,15 +660,15 @@ private struct GoogleCalendarPermissionView: View {
                         dismiss()
                         onContinue()
                     } label: {
-                        Label("Continue with Google", systemImage: "link")
+                        Label(language.integrations.continueWithGoogle, systemImage: "link")
                     }
-                    Button("Not now", role: .cancel) {
+                    Button(language.integrations.notNow, role: .cancel) {
                         dismiss()
                         onCancel()
                     }
                 }
             }
-            .navigationTitle("Connect Google Calendar")
+            .navigationTitle(language.integrations.connectGoogleCalendar)
             .navigationBarTitleDisplayMode(.inline)
         }
     }
@@ -690,6 +691,9 @@ struct GoogleCalendarStatusSheet: View {
     @Query(sort: \GoogleCalendarInboundChange.createdAt, order: .reverse) private var calendarChanges: [GoogleCalendarInboundChange]
     @State private var isShowingSettings = false
     @State private var isShowingPermission = false
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
 
     private var connection: GoogleCalendarConnection {
         connections.first ?? googleCalendar.connection()
@@ -703,7 +707,7 @@ struct GoogleCalendarStatusSheet: View {
                         .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(tint)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Google Calendar")
+                        Text(language.integrations.googleCalendarTitle)
                             .font(.headline)
                         Text(subtitle)
                             .font(.subheadline)
@@ -712,10 +716,10 @@ struct GoogleCalendarStatusSheet: View {
                     Spacer()
                 }
                 if connection.connectionStatus == .disconnected {
-                    Text("View your TrainOrRest workouts alongside your work and personal schedule.")
+                    Text(language.integrations.connectCalendarSubtitle)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    Button("Connect Google Calendar") { isShowingPermission = true }
+                    Button(language.integrations.connectGoogleCalendar) { isShowingPermission = true }
                         .buttonStyle(.borderedProminent)
                 } else {
                     if let summary = connection.lastSyncSummary {
@@ -723,31 +727,31 @@ struct GoogleCalendarStatusSheet: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
-                    LabeledContent("Status", value: pendingReviewCount > 0 ? "\(pendingReviewCount) changes need review" : statusValue)
+                    LabeledContent(language.integrations.status, value: pendingReviewCount > 0 ? language.integrations.changesNeedReview(pendingReviewCount) : statusValue)
                     if pendingReviewCount > 0 {
-                        Button("Review changes") { isShowingSettings = true }
+                        Button(language.integrations.reviewChanges) { isShowingSettings = true }
                             .buttonStyle(.bordered)
-                            .accessibilityLabel("Review Google Calendar changes")
+                            .accessibilityLabel(language.integrations.reviewGoogleCalendarChanges)
                     }
                     ViewThatFits(in: .horizontal) {
                         HStack {
-                            Button("Sync now") {
+                            Button(language.integrations.syncNow) {
                                 Task { await googleCalendar.reconcile(reason: "manual") }
                             }
                             .buttonStyle(.borderedProminent)
                             .disabled(googleCalendar.isSyncing)
-                            .accessibilityLabel("Sync Google Calendar now")
-                            Button("Manage sync") { isShowingSettings = true }
+                            .accessibilityLabel(language.integrations.syncGoogleCalendarNow)
+                            Button(language.integrations.manageSync) { isShowingSettings = true }
                                 .buttonStyle(.bordered)
                         }
                         VStack(alignment: .leading, spacing: 8) {
-                            Button("Sync now") {
+                            Button(language.integrations.syncNow) {
                                 Task { await googleCalendar.reconcile(reason: "manual") }
                             }
                             .buttonStyle(.borderedProminent)
                             .disabled(googleCalendar.isSyncing)
-                            .accessibilityLabel("Sync Google Calendar now")
-                            Button("Manage sync") { isShowingSettings = true }
+                            .accessibilityLabel(language.integrations.syncGoogleCalendarNow)
+                            Button(language.integrations.manageSync) { isShowingSettings = true }
                                 .buttonStyle(.bordered)
                         }
                     }
@@ -759,7 +763,7 @@ struct GoogleCalendarStatusSheet: View {
                 GoogleCalendarSettingsView()
             }
             .sheet(isPresented: $isShowingPermission) {
-                GoogleCalendarPermissionView {
+                GoogleCalendarPermissionView(language: language) {
                     isShowingPermission = false
                     Task { await googleCalendar.connect() }
                 } onCancel: {
@@ -771,29 +775,12 @@ struct GoogleCalendarStatusSheet: View {
     }
 
     private var subtitle: String {
-        switch connection.connectionStatus {
-        case .disconnected: return "Not connected"
-        case .syncing, .initialSync: return "Syncing"
-        case .needsReconnect: return "Reconnect required"
-        case .offlineQueued: return "Waiting for connection"
-        case .partialFailure: return "Needs attention"
-        default:
-            if let last = connection.lastSuccessfulSyncAt {
-                return "Last synced \(last.formatted(date: .omitted, time: .shortened))"
-            }
-            return "Connected"
-        }
+        let lastSynced = connection.lastSuccessfulSyncAt?.formatted(.relative(presentation: .named).locale(language.uiLocale))
+        return language.integrations.statusSheetSubtitle(connection.connectionStatus, lastSynced: lastSynced)
     }
 
     private var statusValue: String {
-        switch connection.connectionStatus {
-        case .connected: "Up to date"
-        case .syncing, .initialSync: "Syncing"
-        case .needsReconnect: "Reconnect required"
-        case .offlineQueued: "Waiting for connection"
-        case .partialFailure, .calendarMissing: "Sync incomplete"
-        case .disconnected, .connecting: "Not connected"
-        }
+        language.integrations.statusValue(connection.connectionStatus)
     }
 
     private var pendingReviewCount: Int {
@@ -821,6 +808,7 @@ struct GoogleCalendarStatusSheet: View {
 }
 
 private struct SmartSchedulingPreferencesView: View {
+    let language: CoachLanguage
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var googleCalendar: GoogleCalendarSyncService
     @Bindable var connection: GoogleCalendarConnection
@@ -828,24 +816,24 @@ private struct SmartSchedulingPreferencesView: View {
     var body: some View {
         Form {
             Section {
-                Picker("Preferred training time", selection: preferredTimeBinding) {
+                Picker(language.integrations.preferredTrainingTime, selection: preferredTimeBinding) {
                     ForEach(PreferredTrainingTime.allCases) { option in
-                        Text(option.title).tag(option)
+                        Text(language.integrations.preferredTrainingTimeOption(option)).tag(option)
                     }
                 }
-                Stepper("Earliest start \(timeText(connection.smartSchedulingEarliestStartOrDefault))", value: earliestBinding, in: 0...(22 * 60), step: 15)
-                Stepper("Latest finish \(timeText(connection.smartSchedulingLatestFinishOrDefault))", value: latestBinding, in: (4 * 60)...(24 * 60), step: 15)
-                Stepper("Buffer before \(connection.smartSchedulingBufferBeforeOrDefault) min", value: bufferBeforeBinding, in: 0...60, step: 5)
-                Stepper("Buffer after \(connection.smartSchedulingBufferAfterOrDefault) min", value: bufferAfterBinding, in: 0...60, step: 5)
+                Stepper(language.integrations.earliestStart(timeText(connection.smartSchedulingEarliestStartOrDefault)), value: earliestBinding, in: 0...(22 * 60), step: 15)
+                Stepper(language.integrations.latestFinish(timeText(connection.smartSchedulingLatestFinishOrDefault)), value: latestBinding, in: (4 * 60)...(24 * 60), step: 15)
+                Stepper(language.integrations.bufferBefore(connection.smartSchedulingBufferBeforeOrDefault), value: bufferBeforeBinding, in: 0...60, step: 5)
+                Stepper(language.integrations.bufferAfter(connection.smartSchedulingBufferAfterOrDefault), value: bufferAfterBinding, in: 0...60, step: 5)
             } footer: {
-                Text("These preferences rank valid slots. They never override recovery or plan-safety validation.")
+                Text(language.integrations.schedulingPreferencesFooter)
             }
         }
-        .navigationTitle("Scheduling preferences")
+        .navigationTitle(language.integrations.schedulingPreferences)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("Done") { dismiss() }
+                Button(language.doneLabel) { dismiss() }
             }
         }
     }
