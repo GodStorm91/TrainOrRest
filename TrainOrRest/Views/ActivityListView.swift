@@ -31,11 +31,11 @@ struct ActivityListView: View {
         var id: Self { self }
     }
 
+    /// `activities` is already newest-first from the query, so the period
+    /// slice keeps that order without a second sort.
     private var filtered: [CompletedActivity] {
         let range = selectedRange
-        return activities
-            .filter { $0.date >= range.start && $0.date < range.end }
-            .sorted { $0.date > $1.date }
+        return activities.filter { $0.date >= range.start && $0.date < range.end }
     }
 
     private var selectedRange: (start: Date, end: Date) {
@@ -56,7 +56,8 @@ struct ActivityListView: View {
     }
 
     var body: some View {
-        ScrollViewReader { _ in
+        let filtered = filtered
+        return ScrollViewReader { _ in
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     periodToggle
@@ -330,17 +331,13 @@ struct ActivityListView: View {
         }
     }
 
-    private var monthYearTitle: String {
-        monthYearFormatter.string(from: selectedMonth)
-    }
+    private var monthYearTitle: String { monthYear(selectedMonth) }
 
-    private var monthYearFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.locale = locale
-        formatter.timeZone = calendar.timeZone
-        formatter.setLocalizedDateFormatFromTemplate("MMMM yyyy")
-        return formatter
+    private func monthYear(_ date: Date) -> String {
+        date.formatted(
+            Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+                .month(.wide).year()
+        )
     }
 
     private var previousAccessibilityLabel: String {
@@ -349,7 +346,7 @@ struct ActivityListView: View {
             return "Previous period"
         case .calendarMonth:
             let destination = calendar.date(byAdding: .month, value: -1, to: selectedMonth) ?? selectedMonth
-            return "Previous month, \(monthYearFormatter.string(from: destination))"
+            return "Previous month, \(monthYear(destination))"
         case .calendarYear:
             return "Previous year, \(selectedYear - 1)"
         }
@@ -361,7 +358,7 @@ struct ActivityListView: View {
             return "Next period"
         case .calendarMonth:
             let destination = calendar.date(byAdding: .month, value: 1, to: selectedMonth) ?? selectedMonth
-            return canNavigateForward ? "Next month, \(monthYearFormatter.string(from: destination))" : "Next month unavailable"
+            return canNavigateForward ? "Next month, \(monthYear(destination))" : "Next month unavailable"
         case .calendarYear:
             return canNavigateForward ? "Next year, \(selectedYear + 1)" : "Next year unavailable"
         }
@@ -452,12 +449,13 @@ private struct MonthYearPickerSheet: View {
         let date = calendar.date(from: DateComponents(year: visibleYear, month: month, day: 1)) ?? selectedMonth
         let disabled = date > currentMonthStart
         let selected = calendar.isDate(date, equalTo: selectedMonth, toGranularity: .month)
+        let name = monthName(date)
         return Button {
             selectedMonth = calendar.startOfMonth(for: date)
             onSelect()
             dismiss()
         } label: {
-            Text(monthName(month))
+            Text(name)
                 .font(.callout.weight(selected ? .bold : .semibold))
                 .foregroundStyle(selected ? Color.white : disabled ? Theme.faint.opacity(0.45) : Theme.text)
                 .multilineTextAlignment(.center)
@@ -474,16 +472,15 @@ private struct MonthYearPickerSheet: View {
         }
         .buttonStyle(.plain)
         .disabled(disabled)
-        .accessibilityLabel("\(monthName(month)) \(visibleYear)")
+        .accessibilityLabel("\(name) \(visibleYear)")
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
-    private func monthName(_ month: Int) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.locale = locale
-        formatter.timeZone = calendar.timeZone
-        return formatter.monthSymbols[max(0, month - 1)].capitalized(with: locale)
+    private func monthName(_ date: Date) -> String {
+        date.formatted(
+            Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+                .month(.wide)
+        ).capitalized(with: locale)
     }
 }
 

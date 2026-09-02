@@ -52,7 +52,17 @@ enum ReadinessStore {
         today: Date,
         calendar: Calendar
     ) throws -> DailyReadiness? {
-        let wellnessRows = try context.fetch(FetchDescriptor<DailyWellness>())
+        let day = calendar.startOfDay(for: today)
+        // The engine re-evaluates up to two prior days when holding a verdict
+        // for persistence, so each window carries that slack; rows older than
+        // that never reach a verdict and stay on disk.
+        let priorDays = 2
+        let wellnessStart = calendar.date(
+            byAdding: .day, value: -(ReadinessEngine.Tuning.baselineWindowDays + priorDays), to: day
+        ) ?? .distantPast
+        let wellnessRows = try context.fetch(FetchDescriptor<DailyWellness>(
+            predicate: #Predicate { $0.date >= wellnessStart }
+        ))
         let samples = wellnessRows.map {
             WellnessSample(
                 date: $0.date,
@@ -64,7 +74,21 @@ enum ReadinessStore {
 
         let fitness = try PlanStore.currentFitness(in: context, today: today, calendar: calendar)
         let paces = fitness.map { VDOTTable.trainingPaces(vdot: $0.vdot) }
-        let loads = try context.fetch(FetchDescriptor<CompletedActivity>()).map { activity in
+        let loadStart = calendar.date(
+            byAdding: .day, value: -(TrainingLoad.Tuning.chronicWindowDays + priorDays), to: day
+        ) ?? .distantPast
+        var activities = try context.fetch(FetchDescriptor<CompletedActivity>(
+            predicate: #Predicate { $0.date >= loadStart }
+        ))
+        // ACWR only trusts history that reaches a full chronic window back; the
+        // single oldest run proves that without loading everything in between.
+        var oldestRun = FetchDescriptor<CompletedActivity>(
+            predicate: #Predicate { $0.date < loadStart },
+            sortBy: [SortDescriptor(\.date)]
+        )
+        oldestRun.fetchLimit = 1
+        activities += try context.fetch(oldestRun)
+        let loads = activities.map { activity in
             (
                 date: activity.date,
                 load: TrainingLoad.sessionLoad(
@@ -78,7 +102,6 @@ enum ReadinessStore {
         let checkInHistory = try recentCheckInHistory(in: context, today: today, calendar: calendar)
         let checkIns = todayCheckInSignals(from: checkInHistory, today: today, calendar: calendar)
         let overrides = try recentRuleOverrides(in: context, today: today, calendar: calendar)
-        let day = calendar.startOfDay(for: today)
         let disputedMetrics: Set<ReadinessRule> = wellnessRows.contains {
             calendar.isDate($0.date, inSameDayAs: day) && $0.hrvDisputed
         } ? Set<ReadinessRule>([.hrv]) : []

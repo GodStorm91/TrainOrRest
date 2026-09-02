@@ -4,9 +4,11 @@
 > train‑or‑rest coach for one serious recreational runner. Register: **product**
 > (design serves the task; the bar is earned familiarity, and the tool should
 > disappear into the decision). This document is the source of truth for the
-> redesign. It was produced from the existing `dark cockpit` system plus a
+> redesign. It was produced from the original `dark cockpit` system plus a
 > designer↔reviewer design review (10 rounds) and supersedes ad‑hoc styling in
-> individual views.
+> individual views. Where this document and the shipped app disagreed, the
+> shipped app was made canonical (light‑leads appearance, three‑destination
+> dock); the project `CLAUDE.md` Design Context records those decisions.
 
 ## 1. North star
 
@@ -28,21 +30,29 @@ Design principles (from PRODUCT.md), operationalized:
 
 ## 2. Color system
 
-Keep the **dark cockpit** as the default; it fits a sober daily tool used in
-varied light. The fix is *role discipline* — today one hue (violet) means five
-things, so it means nothing.
+**Light leads.** The app is used in daylight, before and after runs, so light
+mode is the primary appearance: a warm off‑white canvas, near‑white glass
+cards, near‑black ink, and restrained violet/green accents. Dark is a faithful
+derivative that keeps the original cockpit mood on the same token roles — not
+a separate design. When a decision only works in one mode, fix it for light
+first, then verify dark. Screenshots and reviews default to light.
 
-### 2.1 Neutral surface (unchanged tokens, in `Theme.swift`)
+The fix in both modes is *role discipline* — one hue (violet) used to mean
+five things, so it meant nothing.
 
-| Token | Dark | Light | Role |
+### 2.1 Neutral surface (tokens in `Theme.swift`)
+
+| Token | Light | Dark | Role |
 |---|---|---|---|
-| `bg` | `#08080D` | `#EEEFF3` | app canvas |
-| `card` | `#14141D` | `#FFFFFF` | primary surface |
-| `card2` | `#1B1B26` | `#F6F6FA` | nested/inset surface (use sparingly; never nest cards in cards) |
-| `text` | `#F5F5FA` | `#0C0C14` | ink |
-| `dim` | ink @ 62% | ink @ 62% | secondary text — **body copy floor** |
-| `faint` | ink @ 46% | ink @ 46% | captions/timestamps only; never body |
-| `border` | white @ 8% | ink @ 9% | hairline, 1px |
+| `bg` | `#F7F6F2` | `#08080D` | app canvas |
+| `card` | `#FFFFFF` @ 98% | `#14141D` | primary surface |
+| `card2` | `#FFFFFF` @ 92% | `#1B1B26` | nested/inset surface (use sparingly; never nest cards in cards) |
+| `text` | `#11131A` | `#F5F5FA` | ink |
+| `dim` | ink @ 74% | ink @ 62% | secondary text — **body copy floor** |
+| `faint` | ink @ 62% | ink @ 50% | captions/timestamps only; never body |
+| `border` | `#182033` @ 16% | white @ 8% | hairline, 1px |
+| `line` | `#182033` @ 8% | white @ 7% | dividers |
+| `chip` | white @ 82% | white @ 6% | chip/pill fill |
 
 **Contrast rule:** body text uses `text` or `dim` (≥4.5:1 on `card`). `faint`
 is for ≤12pt captions and timestamps only. Never use `faint` for anything a
@@ -50,12 +60,14 @@ glancing, mid‑routine athlete must read.
 
 ### 2.2 Role colors — one job each
 
-| Role | Token / hex (dark) | Used for | Never used for |
+| Role | Light / Dark hex | Used for | Never used for |
 |---|---|---|---|
-| **Interactive** | violet `#9B7BF0` / `accent2 #7C5CE0` | buttons, links, selected tab, focus ring, primary action | data, decoration, verdicts |
-| **Data series** | cyan `#6BB8D6` (new, desaturated) | all sparklines & charts, one neutral series | conveying good/bad judgment |
-| **Error only** | rose `#FB7185` | sync failed, permission denied, validator rejected | the Rest verdict |
-| **Uncertainty** | amber `#FBBF24` | stale sync, disputed source, unconfirmed metric | anything healthy |
+| **Interactive** | violet `accent #7C3AED` / `#9B7BF0`; `accent2 #6D28D9` / `#7C5CE0` | buttons, links, selected tab, focus ring, primary action | data, decoration, verdicts |
+| **Data series** | cyan `#08758F` / `#6BB8D6` (desaturated) | all sparklines & charts, one neutral series | conveying good/bad judgment |
+| **Good** | green `#0F9D6E` / `#35D9A0` | confirmed sync, passed validation | verdicts, decoration |
+| **Error only** | rose `#E11D48` / `#FB7185` | sync failed, permission denied, validator rejected | the Rest verdict |
+| **Uncertainty** | amber `#D97706` / `#FBBF24` | stale sync, disputed source, unconfirmed metric | anything healthy |
+| **Endurance** | blue `#2563EB` / `#5AA9F0` | long‑run indicators on the calendar | anything tappable |
 
 Metrics are neutral evidence. Coloring each driver a different hue implies a
 judgment the app doesn't have; sparklines are all one cyan.
@@ -67,15 +79,15 @@ rose is wrong. Verdicts read from a calm, non‑alarm palette, and **color is
 only reinforcement — the word + glyph carry the meaning** (honest for the ~5%
 of deutan athletes for whom teal/sand collapse, and for VoiceOver).
 
-| Verdict | Word | SF Symbol | Hex on `#14141D` | Contrast |
+| Verdict | Word | SF Symbol | Light on `#FFFFFF` | Dark on `#14141D` |
 |---|---|---|---|---|
-| Train | "Train" | `figure.run` | `#4EDCC4` | ≈10.9:1 |
-| Go easy | "Go easy" | `tortoise` | `#E4C58A` | ≈10.3:1 |
-| Rest | "Rest" | `moon.zzz` | `#97AEDC` | ≈7.1:1 |
-| Building baseline | "Building baseline" | `chart.line.uptrend.xyaxis` | `dim` | — |
+| Train | "Train" | `figure.run` | `#087A6E` | `#4EDCC4` (≈10.9:1) |
+| Go easy | "Go easy" | `tortoise` | `#806021` | `#E4C58A` (≈10.3:1) |
+| Rest | "Rest" | `moon.zzz` | `#496BA3` | `#97AEDC` (≈7.1:1) |
+| Building baseline | "Building baseline" | `chart.line.uptrend.xyaxis` | `dim` | `dim` |
 
-**Contrast is enforced, not asserted:** a snapshot/unit test asserts each
-verdict color ≥4.5:1 against `card` so token drift fails CI.
+**Contrast is enforced, not asserted:** a unit test asserts each verdict color
+≥4.5:1 against `card` in both appearances so token drift fails CI.
 `ReadinessCardView` (the legacy tinted card) is **deleted** — two verdict
 languages is one too many.
 
@@ -191,19 +203,39 @@ two‑signal layer — so a disputed HRV alone can't downshift a workout.
 
 ## 7. Information architecture
 
-Four standard iOS tabs; **no center FAB.**
+Three destinations in a floating Liquid Glass dock (`TorTabDock`); **no center
+FAB.** This is the shipped shell and the source of truth; the earlier four‑tab
+`Today · Plan · Trends · Coach` target is superseded — do not migrate toward it.
 
-`Today · Plan · Trends · Coach`
+`Calendar · Chat · Profile`
 
-- **Remove the raised "+" FAB.** Race‑goal entry happens ~4×/year — it's an onboarding/empty‑state flow and a button inside **Plan**, not the app's anthemic action. The FAB currently mis‑signals goal entry as the primary verb.
-- **Coach earns a tab** — plan negotiation is a recurring task. The Today coach entry shrinks to one quiet row (no gradient avatar hero treatment).
-- **Settings** stays behind the gear on Today.
-- **Streak + 🔥 chip: deleted from Today.** Gamified streaks are an explicit anti‑reference. Streak survives only as a plain stat in Trends.
+- **Calendar** owns the daily decision. Today's Call (verdict banner + evidence)
+  sits at the top of the calendar; the Month | Week toggle and Google Calendar
+  status live in the top bar. On compact height the top bar folds into the
+  navigation bar and Today's Call collapses to its verdict line; on regular
+  width Today's Call and the Google pane move to a 360pt side pane.
+- **Chat** is the coach. Plan negotiation is a recurring task, so it earns a
+  destination; the coach pet appears only while a turn is in flight (§10).
+- **Profile** holds the athlete: active goal, run history, shoes, and the
+  Settings gear. Settings is reachable from the Profile gear and the Chat
+  overflow menu, never from the dock.
+- **Race‑goal entry** happens ~4×/year — it is an onboarding/empty‑state flow
+  and a sheet from Calendar or Profile, never a dock action.
+- **Dock behavior.** Reserved bottom space is `TorTabDockMetrics.reservedBottomSpace`;
+  every screen and the coach composer clear it. The dock stays on iPad and in
+  landscape. Its labels scale with Dynamic Type only to `xLarge` (a fixed‑height
+  control, like the system tab bar). Hidden while the keyboard is up.
+- **Streak + 🔥 chip: deleted from Today's Call.** Gamified streaks are an
+  explicit anti‑reference; a training streak may exist only as a plain stat in
+  run history.
 
-### 7.1 Trends
+### 7.1 Trends (not shipped)
 
-- Cut "best readiness" — a leaderboard/record stat invites gaming. Replace with the **verdict distribution**: "Trained 16 · Easy 5 · Rested 7."
-- The 28‑day readiness line stays but is **banded** (normal range shaded), unlabeled by peaks, captioned *"readiness reflects recovery, not effort."* No maxima, no records.
+`TrendsView` exists in source but is unreachable from the dock. If it returns,
+it lives under Profile → Run history, and these rules hold:
+
+- No "best readiness" — a leaderboard/record stat invites gaming. Show the **verdict distribution** instead: "Trained 16 · Easy 5 · Rested 7."
+- The 28‑day readiness line is **banded** (normal range shaded), unlabeled by peaks, captioned *"readiness reflects recovery, not effort."* No maxima, no records.
 
 ---
 
@@ -244,6 +276,11 @@ Product motion: 150–250ms, conveys state only.
 - "Why?" and receipt sheets: standard disclosure/`.sheet`, no orchestration.
 - Sparklines/charts: no entrance choreography — the app loads into a decision, not a reveal.
 - **Reduced motion:** every transition has a `prefers-reduced-motion` → instant/crossfade path. No bounce, no elastic.
+- **Coach pet** (`CoachPetView`, `coach-pet-*` assets) is the one sanctioned
+  personality moment. It appears only while a coach turn is preparing,
+  analyzing, building, or streaming, and on that turn's success beat. Never on
+  Today's Call, verdicts, empty states, onboarding, or data surfaces. Reduced
+  motion shows the static frame; it never loops when the thread is inactive.
 
 ---
 
@@ -258,9 +295,9 @@ Product motion: 150–250ms, conveys state only.
 | `DriverCard` grid | keep | single‑cyan sparklines, sentence‑case labels |
 | Receipt sheet | **new** | shared by rule adjustments, AI edits, source conflicts |
 | Coach edit card (3‑chip ledger) | **new/refactor** | replaces free‑floating `PlanUpdateCard` styling |
-| Custom tab bar + center FAB | **replace** | standard 4‑tab bar, no FAB |
+| `TorTabDock` (floating Liquid Glass dock) | keep | three destinations, no FAB; Dynamic Type capped at `xLarge` |
 | `TorEyebrow` | keep, **rate‑limit** | max 2 per screen |
-| Streak chip | **delete** from Today | plain stat in Trends |
+| Streak chip | **deleted** from Today's Call | plain stat in run history only |
 
 Every interactive component ships all states: default, hover(N/A on touch),
 focus, pressed, disabled, loading (skeleton, not spinner), error.
@@ -285,5 +322,7 @@ focus, pressed, disabled, loading (skeleton, not spinner), error.
 ---
 
 *Provenance: synthesized from `Theme.swift` / `TrainingVisualStyle.swift` and the
-existing dark‑cockpit source (`design/TrainOrRest.dc.html`), refined through a
-10‑round designer↔reviewer design review. Full Q&A transcript retained separately.*
+original dark‑cockpit source (`design/TrainOrRest.dc.html`), refined through a
+10‑round designer↔reviewer design review, then reconciled with the shipped app
+(light‑leads appearance, `Calendar · Chat · Profile` dock, current token
+values). Full Q&A transcript retained separately.*

@@ -95,6 +95,7 @@ enum DevSeed {
         OnboardingGate.markCompleted()
         preloadAPIKey()
         seedPlanIfRequested(context)
+        seedHistoryIfRequested(context)
         if isLiveRequested { return seedLiveThread(context) }
 
         let id = threadID
@@ -154,6 +155,66 @@ enum DevSeed {
         )
         let fitness = FitnessProfile(vdot: 48, weeklyVolumeKm: 40, volumeTrend: 0, longestRecentRunKm: 16)
         try? PlanStore.replaceGoal(spec: spec, fitness: fitness, today: today, calendar: calendar, in: context)
+    }
+
+    /// `TOR_DEV_HISTORY=1` seeds six months of wellness, runs, and readiness
+    /// rows so launch, scrolling, and trends are measured against a realistic
+    /// store instead of an empty one. Deterministic; idempotent.
+    @MainActor
+    private static func seedHistoryIfRequested(_ context: ModelContext) {
+        guard ProcessInfo.processInfo.environment["TOR_DEV_HISTORY"] == "1" else { return }
+        let hasHistory = ((try? context.fetch(FetchDescriptor<DailyWellness>()).count) ?? 0) > 30
+        if hasHistory { return }
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        for offset in 1...180 {
+            guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
+            let wave = sin(Double(offset) / 9)
+            context.insert(DailyWellness(
+                date: day,
+                hrvSDNN: 48 + wave * 6,
+                hrvPrimarySource: "Garmin",
+                restingHeartRate: 49 - wave * 2,
+                sleepHours: 7.2 + wave * 0.6,
+                vo2Max: 52,
+                deepSleepHours: 1.4,
+                remSleepHours: 1.6,
+                lightSleepHours: 4.2
+            ))
+            // Run on five of every seven days; long run every seventh.
+            let weekday = offset % 7
+            guard weekday != 1 && weekday != 4 else { continue }
+            let km = weekday == 0 ? 18.0 : 8.0 + Double(weekday)
+            let pace = weekday == 0 ? 320.0 : 290.0 - wave * 10
+            context.insert(CompletedActivity(
+                hkUUID: UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", offset))!,
+                date: day.addingTimeInterval(7 * 3600),
+                distanceMeters: km * 1000,
+                durationSeconds: km * pace,
+                avgHeartRate: 148 + wave * 4,
+                maxHeartRate: 172,
+                avgPaceSecondsPerKm: pace,
+                sourceName: "Garmin"
+            ))
+            let verdict: ReadinessVerdict = wave < -0.7 ? .rest : (wave < 0 ? .goEasy : .train)
+            let snapshot = ReadinessAssessment.Snapshot(
+                hrvMean7: 48 + wave * 6, hrvMean28: 48, rhrMean7: 49 - wave * 2, rhrMean28: 49,
+                sleepLastNight: 7.2 + wave * 0.6, sleepMean14: 7.2, acuteChronicRatio: 1.0 + wave * 0.2,
+                hrvBaseline: 48, hrvSD: 5, rhrBaseline: 49, rhrSD: 2
+            )
+            context.insert(DailyReadiness(
+                date: day,
+                assessment: ReadinessAssessment(
+                    verdict: verdict,
+                    score: ReadinessScore.score(snapshot: snapshot, verdict: verdict),
+                    reasons: [],
+                    baselineDayCount: min(offset, 28),
+                    snapshot: snapshot
+                ),
+                computedAt: day.addingTimeInterval(6 * 3600)
+            ))
+        }
+        try? context.save()
     }
 
     /// Live-coach verification seam: an empty thread so one real read-only

@@ -23,6 +23,7 @@ struct PlanMonthView: View {
         if displaysOnlyTodaysCall {
             todaysCall
         } else {
+            let index = MonthIndex(anchor: monthAnchor, workouts: workouts, calendar: calendar)
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if showsTodaysCall {
@@ -32,13 +33,13 @@ struct PlanMonthView: View {
                     if horizontalSizeClass == .regular {
                         VStack(alignment: .leading, spacing: 8) {
                             weekdayRow
-                            grid
+                            grid(index)
                         }
                         .frame(maxWidth: 7 * 96 + railWidth, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .center)
                     } else {
                         weekdayRow
-                        grid
+                        grid(index)
                     }
                     selectedDayDetail
                 }
@@ -103,13 +104,13 @@ struct PlanMonthView: View {
         }
     }
 
-    private var grid: some View {
+    private func grid(_ index: MonthIndex) -> some View {
         VStack(spacing: 3) {
-            ForEach(Array(weekRows.enumerated()), id: \.offset) { _, week in
+            ForEach(Array(index.weekRows.enumerated()), id: \.offset) { row, week in
                 HStack(spacing: 3) {
                     ForEach(Array(week.enumerated()), id: \.offset) { _, cell in
                         if let date = cell {
-                            dayCell(date)
+                            dayCell(date, kind: index.firstKind(on: date))
                                 .frame(maxWidth: .infinity)
                         } else {
                             Color.clear
@@ -117,17 +118,16 @@ struct PlanMonthView: View {
                                 .frame(maxWidth: .infinity)
                         }
                     }
-                    weekLoadRail(week)
+                    weekLoadRail(km: index.weekLoads[row], peak: index.peakWeekLoad)
                 }
             }
         }
     }
 
-    private func dayCell(_ date: Date) -> some View {
+    private func dayCell(_ date: Date, kind: WorkoutKind?) -> some View {
         let isToday = calendar.isDateInToday(date)
         let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
         let isPast = date < calendar.startOfDay(for: .now)
-        let kind = workouts(on: date).first?.kind
 
         return Button {
             withAnimation(.easeOut(duration: 0.15)) {
@@ -188,33 +188,46 @@ struct PlanMonthView: View {
 
     // MARK: - Weekly rhythm
 
-    /// Month cells grouped into calendar weeks so each row can carry its own
-    /// planned volume — the training block's rhythm, read down the month.
-    private var weekRows: [[Date?]] {
-        let cells = MonthGrid.cells(for: monthAnchor, calendar: calendar)
-        return stride(from: 0, to: cells.count, by: 7).map {
-            Array(cells[$0..<min($0 + 7, cells.count)])
+    /// Lookup tables built once per body evaluation so the grid's cells and
+    /// rails do not each rescan every planned workout. Month cells grouped
+    /// into calendar weeks carry their own planned volume — the training
+    /// block's rhythm, read down the month.
+    private struct MonthIndex {
+        let weekRows: [[Date?]]
+        /// Planned kilometers per week row, in `weekRows` order.
+        let weekLoads: [Double]
+        /// The heaviest week in the month, used to scale the volume bars.
+        let peakWeekLoad: Double
+        private let workoutsByDay: [Date: [PlannedWorkout]]
+        private let calendar: Calendar
+
+        init(anchor: Date, workouts: [PlannedWorkout], calendar: Calendar) {
+            let cells = MonthGrid.cells(for: anchor, calendar: calendar)
+            let rows = stride(from: 0, to: cells.count, by: 7).map {
+                Array(cells[$0..<min($0 + 7, cells.count)])
+            }
+            let byDay = Dictionary(grouping: workouts) { calendar.startOfDay(for: $0.date) }
+            let loads = rows.map { week in
+                week.compactMap { $0 }.reduce(0) { sum, day in
+                    sum + (byDay[calendar.startOfDay(for: day)] ?? []).reduce(0) { $0 + $1.distanceKm }
+                }
+            }
+            self.calendar = calendar
+            weekRows = rows
+            workoutsByDay = byDay
+            weekLoads = loads
+            peakWeekLoad = loads.max() ?? 0
         }
-    }
 
-    /// Planned kilometers for the in-month days of one week row.
-    private func weekLoad(_ week: [Date?]) -> Double {
-        week.compactMap { $0 }
-            .filter { calendar.isDate($0, equalTo: monthAnchor, toGranularity: .month) }
-            .flatMap { workouts(on: $0) }
-            .reduce(0) { $0 + $1.distanceKm }
-    }
-
-    /// The heaviest week in the month, used to scale the volume bars.
-    private var peakWeekLoad: Double {
-        weekRows.map(weekLoad).max() ?? 0
+        func firstKind(on date: Date) -> WorkoutKind? {
+            workoutsByDay[calendar.startOfDay(for: date)]?.first?.kind
+        }
     }
 
     /// A week's planned volume: a number plus a cyan bar scaled to the peak
     /// week, so build, recovery, and taper weeks read as a shape down the rail.
     @ViewBuilder
-    private func weekLoadRail(_ week: [Date?]) -> some View {
-        let km = weekLoad(week)
+    private func weekLoadRail(km: Double, peak: Double) -> some View {
         if km > 0 {
             VStack(alignment: .leading, spacing: 5) {
                 Text("\(Int(km.rounded()))")
@@ -224,7 +237,7 @@ struct PlanMonthView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Capsule()
                     .fill(Theme.data)
-                    .frame(width: barWidth(km), height: 3)
+                    .frame(width: barWidth(km, peak: peak), height: 3)
             }
             .frame(width: railWidth, alignment: .leading)
             .frame(maxHeight: .infinity, alignment: .center)
@@ -235,10 +248,10 @@ struct PlanMonthView: View {
         }
     }
 
-    private func barWidth(_ km: Double) -> CGFloat {
-        guard peakWeekLoad > 0 else { return 0 }
+    private func barWidth(_ km: Double, peak: Double) -> CGFloat {
+        guard peak > 0 else { return 0 }
         let maxBar = railWidth - 4
-        return max(4, CGFloat(km / peakWeekLoad) * maxBar)
+        return max(4, CGFloat(km / peak) * maxBar)
     }
 
     // MARK: - Selected day detail
@@ -258,7 +271,7 @@ struct PlanMonthView: View {
                         activity: activity,
                         plannedWorkout: matchedWorkout(for: activity) ?? dayWorkouts.first,
                         compact: false,
-                        reviewDestination: AnyView(ChatView(contextualCompletedActivityID: activity.hkUUID)),
+                        reviewDestination: ChatView(contextualCompletedActivityID: activity.hkUUID),
                         onReview: { onReviewRunInChat(activity) }
                     )
                     ForEach(dayWorkouts) { workout in
@@ -463,7 +476,7 @@ struct PlanMonthView: View {
                         activity: activity,
                         plannedWorkout: matchedWorkout(for: activity) ?? dayWorkouts.first,
                         compact: false,
-                        reviewDestination: AnyView(ChatView(contextualCompletedActivityID: activity.hkUUID)),
+                        reviewDestination: ChatView(contextualCompletedActivityID: activity.hkUUID),
                         onReview: { onReviewRunInChat(activity) }
                     )
                 }

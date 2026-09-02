@@ -5,7 +5,7 @@ struct CalendarRunSummaryCard: View {
     let activity: CompletedActivity
     let plannedWorkout: PlannedWorkout?
     var compact: Bool = false
-    var reviewDestination: AnyView? = nil
+    var reviewDestination: ChatView? = nil
     var onReview: (() -> Void)? = nil
 
     private var load: Int {

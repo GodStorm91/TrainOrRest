@@ -17,15 +17,16 @@ struct PlanWeekListView: View {
     private var calendar: Calendar { .current }
 
     var body: some View {
+        let index = WeekIndex(workouts: workouts, activities: completedActivities, calendar: calendar)
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
-                    ForEach(weekStarts, id: \.self) { weekStart in
+                    ForEach(index.weekStarts, id: \.self) { weekStart in
                         VStack(alignment: .leading, spacing: 10) {
-                            weekHeader(weekStart)
+                            weekHeader(weekStart, index: index)
                                 .id(weekStart)
                             if expandedWeekStarts.contains(weekStart) {
-                                weekDays(weekStart)
+                                weekDays(weekStart, index: index)
                                     .transition(.opacity.combined(with: .move(edge: .top)))
                             }
                         }
@@ -39,16 +40,16 @@ struct PlanWeekListView: View {
             .background(Theme.bg)
             .onAppear {
                 expandedWeekStarts.insert(todayWeekStart)
-                scrollToToday(proxy, animated: false)
+                scrollToToday(proxy, weekStarts: index.weekStarts, animated: false)
             }
             .onChange(of: scrollToTodayToken) {
                 expandedWeekStarts.insert(todayWeekStart)
-                scrollToToday(proxy, animated: true)
+                scrollToToday(proxy, weekStarts: index.weekStarts, animated: true)
             }
         }
     }
 
-    private func scrollToToday(_ proxy: ScrollViewProxy, animated: Bool) {
+    private func scrollToToday(_ proxy: ScrollViewProxy, weekStarts: [Date], animated: Bool) {
         guard weekStarts.contains(todayWeekStart) else { return }
         DispatchQueue.main.async {
             let action = { proxy.scrollTo(todayWeekStart, anchor: .top) }
@@ -60,7 +61,7 @@ struct PlanWeekListView: View {
         }
     }
 
-    private func weekHeader(_ weekStart: Date) -> some View {
+    private func weekHeader(_ weekStart: Date, index: WeekIndex) -> some View {
         Button {
             withAnimation(.easeOut(duration: 0.18)) { toggleWeek(weekStart) }
         } label: {
@@ -71,7 +72,7 @@ struct PlanWeekListView: View {
                     Text(weekTitle(weekStart))
                         .font(.torHeading(20, .bold))
                         .foregroundStyle(Theme.text)
-                    Text(weekSummary(weekStart))
+                    Text(weekSummary(weekStart, index: index))
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Theme.dim)
                 }
@@ -88,28 +89,28 @@ struct PlanWeekListView: View {
         .buttonStyle(.plain)
     }
 
-    private func weekDays(_ weekStart: Date) -> some View {
+    private func weekDays(_ weekStart: Date, index: WeekIndex) -> some View {
         VStack(spacing: 10) {
             ForEach(days(inWeekStarting: weekStart), id: \.self) { date in
-                dayRow(date)
+                dayRow(date, index: index)
             }
         }
     }
 
-    private func dayRow(_ date: Date) -> some View {
+    private func dayRow(_ date: Date, index: WeekIndex) -> some View {
         HStack(alignment: .top, spacing: 12) {
             dayRail(date)
 
             VStack(alignment: .leading, spacing: 8) {
-                if let activity = completedActivity(on: date) {
+                if let activity = index.activity(on: date) {
                     CalendarRunSummaryCard(
                         activity: activity,
-                        plannedWorkout: matchedWorkout(for: activity) ?? workouts(on: date).first,
+                        plannedWorkout: index.matchedWorkout(for: activity),
                         compact: true,
-                        reviewDestination: AnyView(ChatView(contextualCompletedActivityID: activity.hkUUID)),
+                        reviewDestination: ChatView(contextualCompletedActivityID: activity.hkUUID),
                         onReview: { onReviewRunInChat(activity) }
                     )
-                } else if let workout = workouts(on: date).first {
+                } else if let workout = index.workouts(on: date).first {
                     plannedDayCard(workout)
                 } else {
                     restPlaceholder
@@ -277,16 +278,42 @@ struct PlanWeekListView: View {
         }
     }
 
-    private var workoutsByWeekStart: [Date: [PlannedWorkout]] {
-        Dictionary(grouping: workouts) { PlanGenerator.mondayOfWeek(containing: $0.date, calendar: calendar) }
-    }
+    /// Lookup tables built once per body evaluation so week headers and day
+    /// rows do not each regroup every workout and activity.
+    private struct WeekIndex {
+        let weekStarts: [Date]
+        let workoutsByWeekStart: [Date: [PlannedWorkout]]
+        let activitiesByWeekStart: [Date: [CompletedActivity]]
+        private let workoutsByDay: [Date: [PlannedWorkout]]
+        private let activityByDay: [Date: CompletedActivity]
+        private let workoutByMatchedActivity: [UUID: PlannedWorkout]
+        private let calendar: Calendar
 
-    private var activitiesByWeekStart: [Date: [CompletedActivity]] {
-        Dictionary(grouping: completedActivities) { PlanGenerator.mondayOfWeek(containing: $0.date, calendar: calendar) }
-    }
+        init(workouts: [PlannedWorkout], activities: [CompletedActivity], calendar: Calendar) {
+            self.calendar = calendar
+            workoutsByWeekStart = Dictionary(grouping: workouts) { PlanGenerator.mondayOfWeek(containing: $0.date, calendar: calendar) }
+            activitiesByWeekStart = Dictionary(grouping: activities) { PlanGenerator.mondayOfWeek(containing: $0.date, calendar: calendar) }
+            weekStarts = Set(workoutsByWeekStart.keys).union(activitiesByWeekStart.keys).sorted()
+            workoutsByDay = Dictionary(grouping: workouts) { calendar.startOfDay(for: $0.date) }
+            // Activities arrive newest-first; keep the first seen per day like the old scan did.
+            activityByDay = Dictionary(activities.map { (calendar.startOfDay(for: $0.date), $0) }, uniquingKeysWith: { first, _ in first })
+            workoutByMatchedActivity = Dictionary(
+                workouts.compactMap { workout in workout.matchedActivityUUID.map { ($0, workout) } },
+                uniquingKeysWith: { first, _ in first }
+            )
+        }
 
-    private var weekStarts: [Date] {
-        Set(workoutsByWeekStart.keys).union(activitiesByWeekStart.keys).sorted()
+        func workouts(on date: Date) -> [PlannedWorkout] {
+            workoutsByDay[calendar.startOfDay(for: date)] ?? []
+        }
+
+        func activity(on date: Date) -> CompletedActivity? {
+            activityByDay[calendar.startOfDay(for: date)]
+        }
+
+        func matchedWorkout(for activity: CompletedActivity) -> PlannedWorkout? {
+            workoutByMatchedActivity[activity.hkUUID] ?? workouts(on: activity.date).first
+        }
     }
 
     private var todayWeekStart: Date {
@@ -303,9 +330,9 @@ struct PlanWeekListView: View {
         return "\(month1) \(calendar.component(.day, from: weekStart)) - \(month2) \(calendar.component(.day, from: end))"
     }
 
-    private func weekSummary(_ weekStart: Date) -> String {
-        let workouts = workoutsByWeekStart[weekStart] ?? []
-        let activities = activitiesByWeekStart[weekStart] ?? []
+    private func weekSummary(_ weekStart: Date, index: WeekIndex) -> String {
+        let workouts = index.workoutsByWeekStart[weekStart] ?? []
+        let activities = index.activitiesByWeekStart[weekStart] ?? []
         let plannedMinutes = workouts.compactMap(\.expectedDurationSeconds).reduce(0, +) / 60
         let doneMinutes = activities.reduce(0) { $0 + $1.durationSeconds } / 60
         let plannedLoad = workouts.compactMap { $0.expectedDurationSeconds }.reduce(0) { $0 + TrainingLoad.sessionLoad(durationSeconds: $1, avgPaceSecondsPerKm: nil, paces: nil) }
@@ -328,18 +355,6 @@ struct PlanWeekListView: View {
 
     private func days(inWeekStarting weekStart: Date) -> [Date] {
         (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: weekStart) }
-    }
-
-    private func workouts(on date: Date) -> [PlannedWorkout] {
-        workouts.filter { calendar.isDate($0.date, inSameDayAs: date) }
-    }
-
-    private func completedActivity(on date: Date) -> CompletedActivity? {
-        completedActivities.first { calendar.isDate($0.date, inSameDayAs: date) }
-    }
-
-    private func matchedWorkout(for activity: CompletedActivity) -> PlannedWorkout? {
-        workouts.first(where: { $0.matchedActivityUUID == activity.hkUUID }) ?? workouts(on: activity.date).first
     }
 
     private func assignedShoe(for workout: PlannedWorkout) -> RunningShoe? {
