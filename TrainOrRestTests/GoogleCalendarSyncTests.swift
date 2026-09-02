@@ -447,6 +447,68 @@ final class GoogleCalendarSyncTests: XCTestCase {
     }
 
     @MainActor
+    func testExpiredRefreshTokenRequiresReconnectInsteadOfTemporaryFailure() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let calendar = fixedCalendar
+        let plan = makePlan(anchor: date(2026, 8, 17, calendar: calendar))
+        let workout = makeWorkout(on: date(2026, 8, 25, calendar: calendar), plan: plan)
+        context.insert(plan)
+        context.insert(workout)
+        let connection = GoogleCalendarConnection()
+        connection.connectionStatus = .connected
+        connection.googleCalendarID = "calendar-1"
+        connection.lastSuccessfulSyncAt = date(2026, 8, 20, calendar: calendar)
+        context.insert(connection)
+        try context.save()
+        let now = date(2026, 8, 27, calendar: calendar)
+        try GoogleCalendarTokenStore.save(
+            GoogleCalendarTokenSet(
+                accessToken: "expired-access",
+                refreshToken: "stale-refresh",
+                expiresAt: now.addingTimeInterval(-60),
+                tokenType: "Bearer"
+            ),
+            connectionID: connection.uuid
+        )
+        defer { try? GoogleCalendarTokenStore.delete(connectionID: connection.uuid) }
+        let api = FakeGoogleCalendarAPI()
+        api.refreshError = .permanent(400, "invalid_grant: Token has been expired or revoked.")
+        let service = GoogleCalendarSyncService(
+            modelContext: context,
+            api: api,
+            oauth: nil,
+            calendar: calendar,
+            timeZone: .current,
+            now: { now }
+        )
+
+        await service.reconcile(reason: "test")
+
+        XCTAssertEqual(connection.connectionStatus, .needsReconnect)
+        XCTAssertEqual(connection.lastSyncErrorCategory, .permissionRevoked)
+        XCTAssertEqual(connection.lastSyncSummary, "Reconnect Google Calendar.")
+        XCTAssertEqual(connection.lastSuccessfulSyncAt, date(2026, 8, 20, calendar: calendar))
+        XCTAssertNotEqual(connection.lastSyncSummary, "Could not finish calendar sync.")
+    }
+
+    func testEmptyIncrementalEventListOmittingItemsDecodes() throws {
+        let data = Data(#"{"kind":"calendar#events","etag":"abc","nextSyncToken":"token-2"}"#.utf8)
+        let page = try JSONDecoder().decode(GoogleCalendarEventPage.self, from: data)
+        XCTAssertEqual(page.items, [])
+        XCTAssertEqual(page.nextSyncToken, "token-2")
+    }
+
+    func testOAuthInvalidGrantJSONMapsToUnauthorized() throws {
+        let data = Data(#"{"error":"invalid_grant","error_description":"Token has been expired or revoked."}"#.utf8)
+        let error = GoogleCalendarAPIError.fromHTTP(statusCode: 400, data: data)
+        guard case .unauthorized = error else {
+            return XCTFail("expected unauthorized, got \(error)")
+        }
+    }
+
+
+    @MainActor
     func testRemovedFutureWorkoutDeletesManagedEvent() async throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -1114,13 +1176,16 @@ private final class FakeGoogleCalendarAPI: GoogleCalendarAPIServicing {
     var patchedEventPayloads: [GoogleCalendarEventPayload] = []
     var calendarList: [GoogleCalendarListEntry] = []
     var freeBusyResponse = GoogleFreeBusyResponse(calendars: [:])
+    var refreshError: GoogleCalendarAPIError?
+
 
     func exchangeCode(_ code: String, verifier: String) async throws -> GoogleCalendarTokenSet {
         GoogleCalendarTokenSet(accessToken: "access", refreshToken: "refresh", expiresAt: Date().addingTimeInterval(3600), tokenType: "Bearer")
     }
 
     func refresh(_ refreshToken: String) async throws -> GoogleCalendarTokenSet {
-        GoogleCalendarTokenSet(accessToken: "refreshed", refreshToken: refreshToken, expiresAt: Date().addingTimeInterval(3600), tokenType: "Bearer")
+        if let refreshError { throw refreshError }
+        return GoogleCalendarTokenSet(accessToken: "refreshed", refreshToken: refreshToken, expiresAt: Date().addingTimeInterval(3600), tokenType: "Bearer")
     }
 
     func userInfo(accessToken: String) async throws -> GoogleCalendarUserInfo {

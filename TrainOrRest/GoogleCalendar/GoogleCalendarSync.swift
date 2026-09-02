@@ -243,7 +243,19 @@ struct GoogleCalendarListEntry: Codable, Equatable {
 struct GoogleCalendarListPage: Codable, Equatable {
     var items: [GoogleCalendarListEntry]
     var nextPageToken: String?
+
+    init(items: [GoogleCalendarListEntry], nextPageToken: String? = nil) {
+        self.items = items
+        self.nextPageToken = nextPageToken
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        items = try container.decodeIfPresent([GoogleCalendarListEntry].self, forKey: .items) ?? []
+        nextPageToken = try container.decodeIfPresent(String.self, forKey: .nextPageToken)
+    }
 }
+
 
 struct GoogleCalendarEventPayload: Codable, Equatable {
     var id: String?
@@ -311,7 +323,15 @@ struct GoogleCalendarEventPage: Codable, Equatable {
         self.nextPageToken = nextPageToken
         self.nextSyncToken = nextSyncToken
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        items = try container.decodeIfPresent([GoogleCalendarRemoteEvent].self, forKey: .items) ?? []
+        nextPageToken = try container.decodeIfPresent(String.self, forKey: .nextPageToken)
+        nextSyncToken = try container.decodeIfPresent(String.self, forKey: .nextSyncToken)
+    }
 }
+
 
 struct GoogleFreeBusyRequest: Codable, Equatable {
     var timeMin: String
@@ -352,7 +372,70 @@ enum GoogleCalendarAPIError: Error {
     case temporary
     case permanent(Int, String?)
     case invalidResponse
+
+    static func fromHTTP(statusCode: Int, data: Data) -> GoogleCalendarAPIError {
+        switch statusCode {
+        case 401, 403:
+            return .unauthorized
+        case 404:
+            return .notFound
+        case 410:
+            return .syncTokenExpired
+        case 429:
+            return .rateLimited
+        case 500..<600:
+            return .temporary
+        default:
+            let message = errorMessage(from: data)
+            if statusCode == 400, isInvalidGrant(message) {
+                return .unauthorized
+            }
+            return .permanent(statusCode, message)
+        }
+    }
+
+    static func isAuthorizationFailure(_ error: Error) -> Bool {
+        switch error as? GoogleCalendarAPIError {
+        case .unauthorized:
+            return true
+        case .permanent(_, let message)?:
+            return isInvalidGrant(message)
+        default:
+            return false
+        }
+    }
+
+    static func isInvalidGrant(_ message: String?) -> Bool {
+        let text = message ?? ""
+        return text.localizedCaseInsensitiveContains("invalid_grant")
+            || text.localizedCaseInsensitiveContains("token has been expired or revoked")
+    }
+
+    static func errorMessage(from data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        if let error = object["error"] as? String {
+            let description = object["error_description"] as? String
+            return [error, description]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: ": ")
+        }
+        if let error = object["error"] as? [String: Any] {
+            let status = error["status"] as? String
+            let message = error["message"] as? String
+            let reason = (error["errors"] as? [[String: Any]])?.first?["reason"] as? String
+            return [status, reason, message]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: ": ")
+        }
+        if let message = object["message"] as? String {
+            return message.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
+    }
 }
+
 
 enum SmartSchedulingApplyStatus: Equatable {
     case completed
@@ -584,12 +667,7 @@ struct GoogleCalendarAPIClient: GoogleCalendarAPIServicing {
         components.queryItems = items
         var request = URLRequest(url: components.url!)
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        let response: RemoteEventListResponse = try await send(request)
-        return GoogleCalendarEventPage(
-            items: response.items,
-            nextPageToken: response.nextPageToken,
-            nextSyncToken: response.nextSyncToken
-        )
+        return try await send(request)
     }
 
     private func tokenRequest(_ body: [String: String]) async throws -> GoogleCalendarTokenSet {
@@ -620,18 +698,8 @@ struct GoogleCalendarAPIClient: GoogleCalendarAPIServicing {
         switch http.statusCode {
         case 200..<300:
             return emptySuccess && data.isEmpty ? Data("{}".utf8) : data
-        case 401, 403:
-            throw GoogleCalendarAPIError.unauthorized
-        case 404:
-            throw GoogleCalendarAPIError.notFound
-        case 410:
-            throw GoogleCalendarAPIError.syncTokenExpired
-        case 429:
-            throw GoogleCalendarAPIError.rateLimited
-        case 500..<600:
-            throw GoogleCalendarAPIError.temporary
         default:
-            throw GoogleCalendarAPIError.permanent(http.statusCode, Self.errorMessage(from: data))
+            throw GoogleCalendarAPIError.fromHTTP(statusCode: http.statusCode, data: data)
         }
     }
 
@@ -639,22 +707,6 @@ struct GoogleCalendarAPIClient: GoogleCalendarAPIServicing {
         value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
     }
 
-    private static func errorMessage(from data: Data) -> String? {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        if let error = object["error"] as? [String: Any] {
-            let status = error["status"] as? String
-            let message = error["message"] as? String
-            let reason = (error["errors"] as? [[String: Any]])?.first?["reason"] as? String
-            return [status, reason, message]
-                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-                .joined(separator: ": ")
-        }
-        if let message = object["message"] as? String {
-            return message.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return nil
-    }
 
     private struct TokenResponse: Codable {
         var access_token: String
@@ -665,17 +717,22 @@ struct GoogleCalendarAPIClient: GoogleCalendarAPIServicing {
 
     private struct EventListResponse: Codable {
         var items: [GoogleCalendarEventResponse]
-    }
 
-    private struct RemoteEventListResponse: Codable {
-        var items: [GoogleCalendarRemoteEvent]
-        var nextPageToken: String?
-        var nextSyncToken: String?
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            items = try container.decodeIfPresent([GoogleCalendarEventResponse].self, forKey: .items) ?? []
+        }
     }
 
     private struct CalendarListResponse: Codable {
         var items: [GoogleCalendarListEntry]
         var nextPageToken: String?
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            items = try container.decodeIfPresent([GoogleCalendarListEntry].self, forKey: .items) ?? []
+            nextPageToken = try container.decodeIfPresent(String.self, forKey: .nextPageToken)
+        }
     }
 }
 
@@ -1933,9 +1990,16 @@ final class GoogleCalendarSyncService: ObservableObject {
             throw GoogleCalendarAPIError.unauthorized
         }
         if tokens.expiresAt <= now(), let refresh = tokens.refreshToken {
-            let refreshed = try await api.refresh(refresh)
-            tokens = refreshed
-            try GoogleCalendarTokenStore.save(tokens, connectionID: connection.uuid)
+            do {
+                let refreshed = try await api.refresh(refresh)
+                tokens = refreshed
+                try GoogleCalendarTokenStore.save(tokens, connectionID: connection.uuid)
+            } catch {
+                if GoogleCalendarAPIError.isAuthorizationFailure(error) {
+                    throw GoogleCalendarAPIError.unauthorized
+                }
+                throw error
+            }
         }
         return tokens.accessToken
     }
