@@ -6,6 +6,7 @@ import SwiftUI
 struct GoalEntryView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
 
     @State private var distance: RaceDistance = .halfMarathon
     @State private var targetHours = 1
@@ -26,6 +27,8 @@ struct GoalEntryView: View {
 
     private let calendar = Calendar.current
 
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -37,25 +40,25 @@ struct GoalEntryView: View {
                     Section { Text(saveError).foregroundStyle(Theme.bad) }
                 }
             }
-            .navigationTitle("Race Goal")
+            .navigationTitle(language.settings.raceGoalTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: requestSave).disabled(!isValid)
+                    Button(language.saveLabel, action: requestSave).disabled(!isValid)
                 }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(language.cancelLabel) { dismiss() }
                 }
             }
             .confirmationDialog(
-                "Regenerate Future Workouts?",
+                language.settings.overwriteCurrentPlan,
                 isPresented: $isConfirmingRegeneration,
                 titleVisibility: .visible
             ) {
-                Button("Regenerate Plan", role: .destructive, action: save)
-                Button("Cancel", role: .cancel) {}
+                Button(language.settings.overwritePlan, role: .destructive, action: save)
+                Button(language.cancelLabel, role: .cancel) {}
             } message: {
-                Text("Changing this goal replaces future planned workouts. Completed and manually changed workouts stay in your history.")
+                Text(language.settings.overwritePlanMessage)
             }
             .task { load() }
         }
@@ -64,41 +67,42 @@ struct GoalEntryView: View {
     // MARK: - Sections
 
     private var raceSection: some View {
-        Section("Race") {
-            Picker("Distance", selection: $distance) {
-                ForEach(RaceDistance.allCases) { Text($0.displayName).tag($0) }
+        Section(language.settings.raceSection) {
+            Picker(language.settings.distance, selection: $distance) {
+                ForEach(RaceDistance.allCases) { Text(language.name($0)).tag($0) }
             }
             HStack {
-                Text("Target time")
+                Text(language.settings.targetTime)
                 Spacer()
-                Picker("Hours", selection: $targetHours) {
-                    ForEach(0..<8, id: \.self) { Text("\($0) h").tag($0) }
+                Picker(language.settings.hours, selection: $targetHours) {
+                    ForEach(0..<8, id: \.self) { Text(language.settings.hourPickerValue($0)).tag($0) }
                 }
                 .labelsHidden().pickerStyle(.menu)
-                Picker("Minutes", selection: $targetMinutes) {
-                    ForEach(0..<60, id: \.self) { Text(String(format: "%02d m", $0)).tag($0) }
+                Picker(language.settings.minutes, selection: $targetMinutes) {
+                    ForEach(0..<60, id: \.self) { Text(language.settings.minutePickerValue($0)).tag($0) }
                 }
                 .labelsHidden().pickerStyle(.menu)
             }
             DatePicker(
-                "Race date",
+                language.settings.raceDate,
                 selection: $raceDate,
                 in: calendar.date(byAdding: .day, value: 1, to: .now)!...,
                 displayedComponents: .date
             )
+            .environment(\.locale, language.uiLocale)
         }
     }
 
     private var availabilitySection: some View {
         Section {
             ForEach(Weekday.allCases, id: \.self) { day in
-                Toggle(day.shortName, isOn: Binding(
+                Toggle(language.shortName(day), isOn: Binding(
                     get: { selectedDays.contains(day) },
                     set: { included in
                         if included {
                             selectedDays.insert(day)
                         } else if selectedDays.count > 3 {
-                            selectedDays.remove(day) // keep the 3-day minimum
+                            selectedDays.remove(day)
                         }
                         if !selectedDays.contains(longRunDay), let fallback = selectedDays.sorted().last {
                             longRunDay = fallback
@@ -106,14 +110,14 @@ struct GoalEntryView: View {
                     }
                 ))
             }
-            Picker("Long run day", selection: $longRunDay) {
-                ForEach(selectedDays.sorted(), id: \.self) { Text($0.shortName).tag($0) }
+            Picker(language.settings.longRunDay, selection: $longRunDay) {
+                ForEach(selectedDays.sorted(), id: \.self) { Text(language.shortName($0)).tag($0) }
             }
         } header: {
-            Text("Running Days (\(selectedDays.count)/week)")
+            Text(language.settings.runningDays(selectedDays.count))
         } footer: {
             if selectedDays.count < 3 {
-                Text("Pick at least 3 running days.").foregroundStyle(Theme.bad)
+                Text(language.settings.minimumRunningDays).foregroundStyle(Theme.bad)
             }
         }
     }
@@ -121,47 +125,50 @@ struct GoalEntryView: View {
     private var coldStartSection: some View {
         Section {
             HStack {
-                Text("Comfortable pace")
+                Text(language.settings.comfortablePace)
                 Spacer()
-                Picker("Min", selection: $comfortablePaceMinutes) {
+                Picker(language.settings.minutesAbbreviation, selection: $comfortablePaceMinutes) {
                     ForEach(3..<10, id: \.self) { Text("\($0)").tag($0) }
                 }
                 .labelsHidden().pickerStyle(.menu)
-                Text(":")
-                Picker("Sec", selection: $comfortablePaceSeconds) {
-                    ForEach([0, 15, 30, 45], id: \.self) { Text(String(format: "%02d", $0)).tag($0) }
+                Text(language.settings.timeSeparator)
+                Picker(language.settings.secondsAbbreviation, selection: $comfortablePaceSeconds) {
+                    ForEach([0, 15, 30, 45], id: \.self) { Text(String(format: "%02d", locale: language.uiLocale, $0)).tag($0) }
                 }
                 .labelsHidden().pickerStyle(.menu)
-                Text("/km")
+                Text(language.settings.paceUnit)
             }
             Stepper(
-                "Weekly volume: \(Int(manualWeeklyKm)) km",
+                language.settings.weeklyVolume(Int(manualWeeklyKm)),
                 value: $manualWeeklyKm,
                 in: 10...80,
                 step: 5
             )
         } header: {
-            Text("Current Fitness")
+            Text(language.settings.currentFitness)
         } footer: {
-            Text("Not enough recent running history to estimate fitness — tell us how you run today.")
+            Text(language.settings.coldStartFitnessFooter)
         }
     }
 
     private var feasibilitySection: some View {
-        Section("Feasibility") {
+        Section(language.settings.feasibility) {
             if let assessment {
                 HStack {
                     Image(systemName: assessment.verdict.symbolName)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(assessment.verdict.title).font(.subheadline.weight(.semibold))
-                        Text("Goal fitness \(Int(assessment.goalVDOT.rounded())) vs projected \(Int(assessment.projectedVDOT.rounded())) VDOT")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        Text(language.settings.feasibilityVerdict(assessment.verdict)).font(.subheadline.weight(.semibold))
+                        Text(language.settings.goalFitness(
+                            goal: Int(assessment.goalVDOT.rounded()),
+                            projected: Int(assessment.projectedVDOT.rounded())
+                        ))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     }
                 }
                 .foregroundStyle(assessment.verdict.color)
             } else {
-                Text("Enter goal details to see feasibility.")
+                Text(language.settings.enterGoalDetails)
                     .foregroundStyle(.secondary)
             }
         }
@@ -235,21 +242,15 @@ struct GoalEntryView: View {
                 calendar: calendar,
                 in: modelContext
             )
+            NotificationCenter.default.post(name: .planDidChange, object: nil)
             dismiss()
         } catch {
-            saveError = "Could not save goal: \(error.localizedDescription)"
+            saveError = language.settings.couldNotSaveGoal(error.localizedDescription)
         }
     }
 }
 
 extension FeasibilityVerdict {
-    var title: String {
-        switch self {
-        case .ok: "Realistic goal"
-        case .stretch: "Stretch goal"
-        case .unrealistic: "Very ambitious goal"
-        }
-    }
 
     var symbolName: String {
         switch self {
@@ -263,7 +264,7 @@ extension FeasibilityVerdict {
         switch self {
         case .ok: Theme.good
         case .stretch: Theme.warn
-        case .unrealistic: Theme.bad
+        case .unrealistic: Theme.warn
         }
     }
 }

@@ -45,7 +45,7 @@ final class SleepStageAggregatorTests: XCTestCase {
         XCTAssertEqual(night.rem, 0)
     }
 
-    func testGarminPreferredOverPhone() {
+    func testStageHoursUseSourceWithMostStagedTimeForNight() {
         let hours = SleepStageAggregator.nightlyStageHours(
             intervals: [
                 interval(date(1, 23), date(2, 1), .deep),
@@ -54,8 +54,22 @@ final class SleepStageAggregatorTests: XCTestCase {
             calendar: calendar
         )
         let night = hours[calendar.startOfDay(for: date(2, 6))]!
-        XCTAssertEqual(night.deep, 2, accuracy: 0.001)
-        XCTAssertEqual(night.light, 0, "iPhone estimate must be dropped when Garmin staged data exists")
+        XCTAssertEqual(night.deep, 0, accuracy: 0.001)
+        XCTAssertEqual(night.light, 9, accuracy: 0.001)
+        XCTAssertEqual(night.rem, 0, accuracy: 0.001)
+    }
+
+    func testStageSourceTieBreakIsDeterministic() {
+        let hours = SleepStageAggregator.nightlyStageHours(
+            intervals: [
+                interval(date(1, 23), date(2, 1), .deep, source: "Garmin Connect"),
+                interval(date(1, 23), date(2, 1), .rem, source: "Apple Watch"),
+            ],
+            calendar: calendar
+        )
+        let night = hours[calendar.startOfDay(for: date(2, 1))]!
+        XCTAssertEqual(night.deep, 0, accuracy: 0.001)
+        XCTAssertEqual(night.rem, 2, accuracy: 0.001)
     }
 
     func testEmptyProducesNothing() {

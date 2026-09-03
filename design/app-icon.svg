@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  TrainOrRest app icon — static gauge mark (concept F of design/TrainOrRest Icon.dc.html).
+  Geometry is copied verbatim from that design's 200x200 viewBox so the rendered
+  icon matches the concept exactly. Corners are intentionally square: iOS applies
+  its own mask, and baking a radius in would double-round the icon.
+
+  Regenerate the PNG with: ./design/render-app-icon.sh
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 200 200">
+  <defs>
+    <!-- CSS: radial-gradient(120% 120% at 30% 16%, #211a34, #12121c 46%, #08080d) -->
+    <radialGradient id="bg" gradientUnits="userSpaceOnUse" cx="60" cy="32" r="240">
+      <stop offset="0" stop-color="#211a34"/>
+      <stop offset="0.46" stop-color="#12121c"/>
+      <stop offset="1" stop-color="#08080d"/>
+    </radialGradient>
+    <linearGradient id="f_g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#B69BF5"/>
+      <stop offset="1" stop-color="#6D28D9"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="200" height="200" fill="url(#bg)"/>
+
+  <!-- gauge track -->
+  <path d="M46 140 A68 68 0 1 1 154 140" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="14" stroke-linecap="round"/>
+  <!-- readiness value arc -->
+  <path d="M46 140 A68 68 0 0 1 138 55" fill="none" stroke="url(#f_g)" stroke-width="14" stroke-linecap="round"/>
+  <!-- needle + hub -->
+  <g stroke="#EAE1FF" stroke-width="7" stroke-linecap="round"><path d="M100 100 L128 74"/></g>
+  <circle cx="100" cy="100" r="9" fill="#EAE1FF"/>
+
+  <!-- Static app mark only. Live readiness belongs in the widget, not the app icon. -->
+</svg>

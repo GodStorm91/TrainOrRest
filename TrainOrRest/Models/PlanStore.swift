@@ -8,8 +8,11 @@ import SwiftData
 enum PlanStore {
     // MARK: - Engine inputs
 
-    static func runSamples(in context: ModelContext) throws -> [RunSample] {
-        try context.fetch(FetchDescriptor<CompletedActivity>()).compactMap { activity in
+    /// Runs on or after `start`. The estimator never looks further back than
+    /// its history window, so older rows stay on disk.
+    static func runSamples(in context: ModelContext, since start: Date) throws -> [RunSample] {
+        let descriptor = FetchDescriptor<CompletedActivity>(predicate: #Predicate { $0.date >= start })
+        return try context.fetch(descriptor).compactMap { activity in
             guard let meters = activity.distanceMeters, meters > 0 else { return nil }
             return RunSample(
                 date: activity.date,
@@ -22,8 +25,13 @@ enum PlanStore {
     static func currentFitness(
         in context: ModelContext, today: Date, calendar: Calendar
     ) throws -> FitnessProfile? {
-        FitnessEstimator.estimate(
-            samples: try runSamples(in: context), today: today, calendar: calendar
+        let start = calendar.date(
+            byAdding: .day,
+            value: -FitnessEstimator.historyWindowWeeks * 7,
+            to: calendar.startOfDay(for: today)
+        ) ?? .distantPast
+        return FitnessEstimator.estimate(
+            samples: try runSamples(in: context, since: start), today: today, calendar: calendar
         )
     }
 
@@ -57,13 +65,16 @@ enum PlanStore {
         let planSpec = PlanGenerator.generate(goal: spec, fitness: fitness, today: today, calendar: calendar)
         let plan = TrainingPlan(spec: planSpec, generatedAt: today)
         context.insert(plan)
+        var insertedWorkouts: [PlannedWorkout] = []
         for week in planSpec.weeks {
             for workoutSpec in week.workouts {
                 let workout = PlannedWorkout(spec: workoutSpec, weekIndex: week.index, phase: week.phase)
                 workout.plan = plan
                 context.insert(workout)
+                insertedWorkouts.append(workout)
             }
         }
+        try ShoeAssignmentService.assignAutomaticShoes(to: insertedWorkouts, in: context)
         try context.save()
     }
 
@@ -76,7 +87,13 @@ enum PlanStore {
         let candidates = workouts.filter { $0.status == .planned && !$0.manuallyOverridden }
         guard !candidates.isEmpty else { return }
 
-        let activities = try context.fetch(FetchDescriptor<CompletedActivity>())
+        // Matching is same-day, so only activities inside the candidates'
+        // date span can pair; older history stays on disk.
+        let firstDay = calendar.startOfDay(for: candidates.map(\.date).min()!)
+        let lastDay = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: candidates.map(\.date).max()!))!
+        let activities = try context.fetch(FetchDescriptor<CompletedActivity>(
+            predicate: #Predicate { $0.date >= firstDay && $0.date < lastDay }
+        ))
         let alreadyMatched = Set(workouts.compactMap(\.matchedActivityUUID))
 
         let plannedRefs = candidates.map {
@@ -98,6 +115,13 @@ enum PlanStore {
             if let activityID = matches[workout.uuid] {
                 workout.status = .done
                 workout.matchedActivityUUID = activityID
+                if let activity = activities.first(where: { $0.hkUUID == activityID }),
+                   activity.shoeAssignmentSource != .manual,
+                   activity.shoeAssignmentSource != .syncedProvider {
+                    activity.shoeID = workout.shoeID
+                    activity.shoeAssignmentSource = workout.shoeID == nil ? .none : workout.shoeAssignmentSource
+                    try ShoeMileageService.syncMileage(for: activity, in: context)
+                }
             }
         }
         try context.save()

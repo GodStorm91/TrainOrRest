@@ -13,6 +13,15 @@ final class CompletedActivity {
     var maxHeartRate: Double?
     var avgPaceSecondsPerKm: Double?
     var sourceName: String
+    var shoeID: UUID?
+    var shoeAssignmentSourceRaw: String?
+    var externalProviderShoeID: String?
+    /// User's subjective post-run note. Optional so existing SwiftData stores
+    /// can lightweight-migrate after this field is added.
+    var reviewNote: String?
+    /// Once set, Today stops auto-presenting the post-run review sheet for
+    /// this activity. The detail screen can still show the review anytime.
+    var postRunReviewDismissedAt: Date?
 
     init(
         hkUUID: UUID,
@@ -32,5 +41,10 @@ final class CompletedActivity {
         self.maxHeartRate = maxHeartRate
         self.avgPaceSecondsPerKm = avgPaceSecondsPerKm
         self.sourceName = sourceName
+        self.shoeID = nil
+        self.shoeAssignmentSourceRaw = ShoeAssignmentSource.none.rawValue
+        self.externalProviderShoeID = nil
+        self.reviewNote = nil
+        self.postRunReviewDismissedAt = nil
     }
 }

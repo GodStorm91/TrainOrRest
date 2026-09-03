@@ -54,11 +54,92 @@ final class PlanPropertyTests: XCTestCase {
                 for workout in week.workouts where workout.kind == .long {
                     XCTAssertLessThanOrEqual(workout.distanceKm, PlanGenerator.Tuning.longRunCapKm)
                 }
+
+                // Every workout belongs to the week that actually contains it,
+                // so a coach-created workout can trust the week's metadata.
+                let weekEnd = calendar.date(byAdding: .day, value: 7, to: week.startDate)!
+                for workout in week.workouts {
+                    XCTAssertTrue(
+                        workout.date >= week.startDate && workout.date < weekEnd,
+                        "iteration \(iteration): \(workout.kind.rawValue) outside week \(week.index)"
+                    )
+                }
+            }
+
+            // A day never holds two workouts — the invariant `create` relies on
+            // when it rejects a collision.
+            let days = plan.weeks.flatMap(\.workouts).map { calendar.startOfDay(for: $0.date) }
+            XCTAssertEqual(Set(days).count, days.count, "iteration \(iteration): two workouts on one day")
+
+            // A stored structure always accounts for the distance it claims.
+            for workout in plan.weeks.flatMap(\.workouts) where !workout.structure.isEmpty {
+                XCTAssertEqual(
+                    WorkoutStructure.totalDistanceKm(workout.structure),
+                    workout.distanceKm,
+                    accuracy: PlanValidator.volumeEpsilonKm,
+                    "iteration \(iteration): \(workout.kind.rawValue) structure does not match its distance"
+                )
             }
 
             // Determinism per configuration.
             let again = PlanGenerator.generate(goal: goal, fitness: fitness, today: today, calendar: calendar)
             XCTAssertEqual(plan, again, "iteration \(iteration): non-deterministic output")
+        }
+    }
+
+    /// Whatever the coach asks for, a workout the factory builds is always
+    /// positive, self-consistent, fully paced, and describable.
+    func testFactoryBuiltWorkoutsAlwaysSatisfyCreateInvariants() throws {
+        var rng = SeededGenerator(seed: 0xFEEDBEEF)
+
+        for iteration in 0..<50 {
+            let paces = VDOTTable.trainingPaces(vdot: Double.random(in: 35...58, using: &rng))
+            let built = [
+                WorkoutFactory.canonicalEasy(distanceKm: Double.random(in: 4...12, using: &rng), paces: paces),
+                WorkoutFactory.canonicalLong(distanceKm: Double.random(in: 10...30, using: &rng), paces: paces),
+                WorkoutFactory.canonicalTempo(tempoKm: Double(Int.random(in: 3...8, using: &rng)), paces: paces),
+                WorkoutFactory.canonicalIntervals(repCount: Int.random(in: 3...8, using: &rng), paces: paces)
+            ]
+
+            for workout in built {
+                XCTAssertGreaterThan(workout.distanceKm, 0, "iteration \(iteration)")
+                XCTAssertLessThanOrEqual(workout.distanceKm, WorkoutFactory.Limits.maxTotalDistanceKm)
+                XCTAssertEqual(
+                    WorkoutStructure.totalDistanceKm(workout.structure),
+                    workout.distanceKm,
+                    accuracy: 0.05,
+                    "iteration \(iteration): \(workout.kind.rawValue) structure/distance mismatch"
+                )
+                XCTAssertFalse(workout.details.isEmpty)
+                for step in workout.structure.flatMap(\.steps) {
+                    XCTAssertNotNil(step.paceBand, "every canonical step resolves an app pace")
+                }
+                // The same recipe must also survive the untrusted-input path.
+                XCTAssertNoThrow(try WorkoutFactory.build(recipe(for: workout), paces: paces))
+            }
+        }
+    }
+
+    /// Rebuilds a recipe from a built workout so canonical output can be pushed
+    /// back through the validating `build` path.
+    private func recipe(for workout: BuiltWorkout) -> WorkoutRecipe {
+        WorkoutRecipe(kind: workout.kind, blocks: workout.structure.map { group in
+            WorkoutRecipe.Block(repeatCount: group.repeatCount, steps: group.steps.map { step in
+                WorkoutRecipe.Step(
+                    role: step.role,
+                    distanceKm: step.distanceKm,
+                    durationSeconds: step.durationSeconds,
+                    zone: zone(for: step, kind: workout.kind)
+                )
+            })
+        })
+    }
+
+    private func zone(for step: WorkoutStep, kind: WorkoutKind) -> PaceZone {
+        switch (kind, step.role) {
+        case (.tempo, .work): .threshold
+        case (.intervals, .work): .interval
+        default: .easy
         }
     }
 }

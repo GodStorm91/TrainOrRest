@@ -190,13 +190,7 @@ enum PlanGenerator {
         }
         if let longDate {
             let longKm = min(rounded(volume * Tuning.longRunFraction), Tuning.longRunCapKm)
-            workouts.append(PlannedWorkoutSpec(
-                date: longDate,
-                kind: .long,
-                distanceKm: longKm,
-                paceBand: paces.easy,
-                details: "Long run at E pace"
-            ))
+            workouts.append(longRun(date: longDate, distanceKm: longKm, paces: paces))
             remainingVolume -= longKm
         }
 
@@ -304,40 +298,42 @@ enum PlanGenerator {
         return min(diff, 7 - diff)
     }
 
+    /// Quality templates come from the shared factory, so a coach-created tempo
+    /// or interval session is built by exactly the same code path.
     private static func qualityWorkout(
         kind: WorkoutKind, date: Date, weekVolume: Double, paces: TrainingPaces
     ) -> PlannedWorkoutSpec {
         switch kind {
-        case .tempo:
+        case .tempo, .threshold:
             let tempoKm = rounded(min(max(weekVolume * 0.12, 3), 8))
-            return PlannedWorkoutSpec(
-                date: date,
-                kind: .tempo,
-                distanceKm: rounded(tempoKm + Tuning.warmupCooldownKm),
-                paceBand: paces.threshold,
-                details: "2 km warm-up · \(formatKm(tempoKm)) km at T pace · 2 km cool-down"
-            )
+            let built = kind == .threshold
+                ? WorkoutFactory.canonicalThreshold(workKm: tempoKm, paces: paces)
+                : WorkoutFactory.canonicalTempo(tempoKm: tempoKm, paces: paces)
+            return spec(date: date, built: built)
         case .intervals:
             let repCount = max(3, min(6, Int(weekVolume * 0.08)))
-            return PlannedWorkoutSpec(
-                date: date,
-                kind: .intervals,
-                distanceKm: rounded(Double(repCount) + Tuning.warmupCooldownKm),
-                paceBand: paces.interval,
-                details: "2 km warm-up · \(repCount) × 1 km at I pace (2–3 min jog) · 2 km cool-down"
-            )
+            return spec(date: date, built: WorkoutFactory.canonicalIntervals(repCount: repCount, paces: paces))
         default:
             fatalError("Not a quality template: \(kind)")
         }
     }
 
     private static func easyRun(date: Date, distanceKm: Double, paces: TrainingPaces) -> PlannedWorkoutSpec {
+        spec(date: date, built: WorkoutFactory.canonicalEasy(distanceKm: distanceKm, paces: paces))
+    }
+
+    private static func longRun(date: Date, distanceKm: Double, paces: TrainingPaces) -> PlannedWorkoutSpec {
+        spec(date: date, built: WorkoutFactory.canonicalLong(distanceKm: distanceKm, paces: paces))
+    }
+
+    private static func spec(date: Date, built: BuiltWorkout) -> PlannedWorkoutSpec {
         PlannedWorkoutSpec(
             date: date,
-            kind: .easy,
-            distanceKm: distanceKm,
-            paceBand: paces.easy,
-            details: "Easy run at E pace"
+            kind: built.kind,
+            distanceKm: built.distanceKm,
+            paceBand: built.paceBand,
+            details: built.details,
+            structure: built.structure
         )
     }
 
@@ -370,7 +366,4 @@ enum PlanGenerator {
         (km * 10).rounded() / 10
     }
 
-    private static func formatKm(_ km: Double) -> String {
-        km.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(km)) : String(format: "%.1f", km)
-    }
 }

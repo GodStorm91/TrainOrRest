@@ -13,9 +13,32 @@ enum MarkdownTone {
     var stroke: Color { self == .onAccent ? .white.opacity(0.28) : Theme.line }
 }
 
+enum GlossaryMode {
+    case off
+    case structured
+    case legacy
+}
+
+/// Converts leaf inline text to an `AttributedString` while preserving author
+/// line breaks. The default `.full` markdown syntax collapses soft newlines to
+/// spaces (and eats ordered-list markers), which flattens multi-line coach
+/// replies into an unreadable wall. Block structure is already resolved by
+/// `MarkdownBlockParser`, so only inline syntax needs interpreting here.
+enum InlineMarkdown {
+    static func attributed(_ text: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(text)
+    }
+}
+
 struct MarkdownMessageView: View {
     let text: String
     var tone: MarkdownTone = .standard
+    var allowsRuleTokens = true
+    var glossary: GlossaryMode = .off
+    var language: CoachLanguage = .current
 
     private var blocks: [MarkdownBlock] {
         MarkdownBlockParser.parse(text)
@@ -34,21 +57,22 @@ struct MarkdownMessageView: View {
     private func blockView(_ block: MarkdownBlock) -> some View {
         switch block {
         case .heading(let level, let text):
-            MarkdownInlineText(text)
+            MarkdownInlineText(text, allowsRuleTokens: allowsRuleTokens, glossary: glossary, language: language, color: tone.primary)
                 .font(level == 1 ? .headline : .subheadline.weight(.semibold))
                 .padding(.top, level == 1 ? 2 : 0)
         case .paragraph(let text):
-            MarkdownInlineText(text)
+            MarkdownInlineText(text, allowsRuleTokens: allowsRuleTokens, glossary: glossary, language: language, color: tone.primary)
                 .font(.body)
-        case .listItem(let text):
+        case .listItem(let marker, let text):
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("•")
+                Text(marker)
                     .font(.body.weight(.semibold))
-                MarkdownInlineText(text)
+                    .monospacedDigit()
+                MarkdownInlineText(text, allowsRuleTokens: allowsRuleTokens, glossary: glossary, language: language, color: tone.primary)
                     .font(.body)
             }
         case .quote(let text):
-            MarkdownInlineText(text)
+            MarkdownInlineText(text, allowsRuleTokens: allowsRuleTokens, glossary: glossary, language: language, color: tone.secondary)
                 .font(.callout)
                 .foregroundStyle(tone.secondary)
                 .padding(8)
@@ -62,30 +86,102 @@ struct MarkdownMessageView: View {
             }
             .background(tone.fill, in: RoundedRectangle(cornerRadius: 8))
         case .table(let table):
-            MarkdownTableView(table: table, tone: tone)
+            MarkdownTableView(
+                table: table,
+                tone: tone,
+                allowsRuleTokens: allowsRuleTokens,
+                glossary: glossary,
+                language: language
+            )
         }
     }
 }
 
 private struct MarkdownInlineText: View {
     let text: String
+    let allowsRuleTokens: Bool
+    let glossary: GlossaryMode
+    let language: CoachLanguage
+    let color: Color
+    @State private var selectedRuleID: ReadinessRuleID?
+    @State private var selectedGlossaryTerm: CoachGlossarySelectedTerm?
 
-    init(_ text: String) {
+    init(
+        _ text: String,
+        allowsRuleTokens: Bool = true,
+        glossary: GlossaryMode = .off,
+        language: CoachLanguage = .current,
+        color: Color = Theme.text
+    ) {
         self.text = text
+        self.allowsRuleTokens = allowsRuleTokens
+        self.glossary = glossary
+        self.language = language
+        self.color = color
     }
 
     var body: some View {
-        if let attributed = try? AttributedString(markdown: text) {
-            Text(attributed)
-        } else {
-            Text(text)
+        Text(attributedText)
+            .tint(Theme.accent)
+            .environment(\.openURL, OpenURLAction { url in
+                switch glossary {
+                case .off:
+                    break
+                case .structured, .legacy:
+                    if let id = CoachGlossaryTokenURL.termID(from: url) {
+                        guard CoachGlossary.term(id: id) != nil else {
+                            return .systemAction
+                        }
+                        selectedGlossaryTerm = CoachGlossarySelectedTerm(id: id)
+                        return .handled
+                    }
+                }
+
+                guard let ruleID = RuleTokenURL.ruleID(from: url) else {
+                    return .systemAction
+                }
+                selectedRuleID = ruleID
+                return .handled
+            })
+            .sheet(item: $selectedRuleID) { ruleID in
+                RuleDefinitionSheet(ruleID: ruleID, language: language)
+            }
+            .sheet(item: $selectedGlossaryTerm) { selectedTerm in
+                CoachGlossarySheet(termId: selectedTerm.id, language: language)
+            }
+    }
+
+    private var attributedText: AttributedString {
+        switch glossary {
+        case .structured:
+            return CoachGlossaryAttributedBuilder.attributed(
+                for: CoachGlossaryMarkup.firstOccurrenceOnly(CoachGlossaryMarkup.parse(text)),
+                baseColor: color
+            )
+        case .legacy:
+            return CoachGlossaryAttributedBuilder.attributed(
+                for: CoachGlossaryMarkup.legacySegments(text),
+                baseColor: color
+            )
+        case .off:
+            guard allowsRuleTokens else {
+                return Self.markdown(text)
+            }
+            return RuleAttributedStringBuilder.attributedString(from: text)
         }
+    }
+
+    private static func markdown(_ text: String) -> AttributedString {
+        InlineMarkdown.attributed(text)
     }
 }
 
 private struct MarkdownTableView: View {
     let table: MarkdownTable
     var tone: MarkdownTone = .standard
+    var allowsRuleTokens = true
+    var glossary: GlossaryMode = .off
+    var language: CoachLanguage = .current
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: true) {
@@ -120,7 +216,7 @@ private struct MarkdownTableView: View {
     }
 
     private func tableCell(_ text: String, isHeader: Bool) -> some View {
-        MarkdownInlineText(text)
+        MarkdownInlineText(text, allowsRuleTokens: allowsRuleTokens, glossary: glossary, language: language, color: tone.primary)
             .font(isHeader ? .caption.weight(.semibold) : .caption)
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -136,5 +232,59 @@ private struct MarkdownTableView: View {
                     .fill(tone.stroke)
                     .frame(width: 1)
             }
+    }
+}
+
+private enum RuleAttributedStringBuilder {
+    static func attributedString(from text: String) -> AttributedString {
+        let spans = RuleTokenizer.tokens(in: text)
+        guard !spans.isEmpty else {
+            return markdown(text)
+        }
+
+        var output = AttributedString()
+        var cursor = text.startIndex
+
+        for span in spans {
+            guard let range = Range(NSRange(location: span.lowerBound, length: span.upperBound - span.lowerBound), in: text) else {
+                continue
+            }
+            if cursor < range.lowerBound {
+                output += markdown(String(text[cursor..<range.lowerBound]))
+            }
+
+            var token = AttributedString(span.code)
+            token.link = RuleTokenURL.url(for: span.ruleID)
+            token.foregroundColor = Theme.accent
+            token.backgroundColor = Theme.accent.opacity(0.14)
+            token.font = .system(.caption, design: .monospaced).weight(.semibold)
+            output += token
+            cursor = range.upperBound
+        }
+
+        if cursor < text.endIndex {
+            output += markdown(String(text[cursor..<text.endIndex]))
+        }
+
+        return output
+    }
+
+    private static func markdown(_ text: String) -> AttributedString {
+        InlineMarkdown.attributed(text)
+    }
+}
+
+private struct RuleDefinitionSheet: View {
+    let ruleID: ReadinessRuleID
+    let language: CoachLanguage
+
+    var body: some View {
+        ReceiptSheet(
+            title: language.ruleSheetTitle(ruleID.code),
+            subtitle: language.ruleTitle(ruleID),
+            rows: [
+                .detail(language.ruleDefinitionLabel, value: language.ruleDetail(ruleID), symbol: "checkmark.seal")
+            ]
+        )
     }
 }

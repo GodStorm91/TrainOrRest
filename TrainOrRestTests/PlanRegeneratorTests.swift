@@ -26,6 +26,12 @@ final class PlanRegeneratorTests: XCTestCase {
         )
     }
 
+    private func regenerate(goal: GoalSpec, verdict: ReadinessVerdict, today: Date) -> TrainingPlanSpec {
+        PlanRegenerator.regenerate(
+            goal: goal, fitness: fitness, verdict: verdict, today: today, calendar: calendar
+        )
+    }
+
     private let qualityDay = PlanEngineTestSupport.date(2026, 1, 7) // Wednesday
 
     func testTrainVerdictMatchesPlainGeneration() {
@@ -52,6 +58,26 @@ final class PlanRegeneratorTests: XCTestCase {
         let friday = calendar.date(byAdding: .day, value: 2, to: dayStart)!
         let fridayWorkout = week.workouts.first { $0.date == friday }
         XCTAssertEqual(fridayWorkout?.kind, .tempo)
+        XCTAssertTrue(PlanValidator.validate(plan, calendar: calendar).isEmpty)
+    }
+
+    func testGoEasyDowngradeWithoutSwapKeepsStructure() {
+        let noLaterEasyGoal = GoalSpec(
+            distance: .halfMarathon,
+            targetTimeSeconds: 105 * 60,
+            raceDate: PlanEngineTestSupport.date(2026, 4, 19),
+            availableDays: [.monday, .wednesday, .sunday],
+            longRunDay: .sunday
+        )
+        let plan = regenerate(goal: noLaterEasyGoal, verdict: .goEasy, today: qualityDay)
+        let todayWorkout = plan.weeks[0].workouts.first {
+            $0.date == calendar.startOfDay(for: qualityDay)
+        }
+
+        XCTAssertEqual(todayWorkout?.kind, .easy)
+        XCTAssertEqual(todayWorkout?.details, "Easy run at E pace")
+        XCTAssertEqual(todayWorkout?.structure.isEmpty, false)
+        XCTAssertEqual(todayWorkout?.structure.first?.steps.map(\.role), [.work])
         XCTAssertTrue(PlanValidator.validate(plan, calendar: calendar).isEmpty)
     }
 

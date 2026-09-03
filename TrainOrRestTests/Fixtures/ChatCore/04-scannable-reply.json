@@ -1,0 +1,77 @@
+{
+  "id": "case-04-scannable-reply",
+  "goldenCase": 4,
+  "request": {
+    "text": "why am I sore and what should I change this week?",
+    "actionType": "readOnly",
+    "threadID": "00000000-0000-0000-0000-000000000004"
+  },
+  "setup": {
+    "readinessAnchors": [],
+    "plannedWorkoutAnchors": [],
+    "workouts": [],
+    "priorTurn": null
+  },
+  "mockResponses": [
+    {
+      "stop_reason": "tool_use",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_case4",
+          "name": "coach_response",
+          "input": {
+            "content": "Soreness is expected after yesterday's quality work. Keep this week's volume honest.",
+            "title": "Soreness after quality work",
+            "summary": "Recover from yesterday, then keep this week's remaining sessions easy.",
+            "details": {
+              "title": "This week",
+              "sections": [
+                {
+                  "id": "summary",
+                  "title": "Summary",
+                  "markdown": "- Soreness matches yesterday's quality session.\n- No extra intensity this week."
+                },
+                {
+                  "id": "why",
+                  "title": "Why",
+                  "markdown": "- Residual fatigue is still high.\n- Readiness supports easy running, not another quality day."
+                },
+                {
+                  "id": "this-week",
+                  "title": "This week",
+                  "markdown": "- Keep remaining weekday runs easy.\n- Hold the long run where it is."
+                },
+                {
+                  "id": "watch-out",
+                  "title": "Watch out",
+                  "markdown": "- Stop if soreness becomes sharp pain.\n- Do not add a second quality session."
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "invalidResponse": {
+    "stop_reason": "tool_use",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_case4_invalid",
+        "name": "coach_response",
+        "input": {
+          "content": "You are sore because yesterday was hard and this week still has a lot of running left so you should probably change several things including pace, volume, recovery, sleep, and maybe the long run, and I would also think about shoes, fueling, and whether the whole plan still fits, which is a lot to hold in one paragraph without a title or summary or scannable sections."
+        }
+      }
+    ]
+  },
+  "expect": {
+    "actionType": "readOnly",
+    "toolNames": ["coach_response"],
+    "toolChoice": { "type": "tool", "name": "coach_response" },
+    "sectionIDs": ["summary", "why", "this-week", "watch-out"],
+    "sectionTitles": ["Summary", "Why", "This week", "Watch out"]
+  }
+}

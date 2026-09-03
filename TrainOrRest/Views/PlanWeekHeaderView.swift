@@ -5,13 +5,15 @@ struct PlanWeekHeaderView: View {
     let phase: TrainingPhase?
     let volumeKm: Double?
     let isRecovery: Bool
+    let language: CoachLanguage
+
 
     private var tint: Color {
         if isRecovery { return Theme.good }
         switch phase {
-        case .base: return Theme.accent
+        case .base: return Theme.endurance
         case .build: return Theme.warn
-        case .peak: return Theme.accent2
+        case .peak: return Theme.warn
         case .taper: return Theme.good
         case nil: return Theme.dim
         }
@@ -30,9 +32,9 @@ struct PlanWeekHeaderView: View {
 
     @ViewBuilder
     private var content: some View {
-        Label("Week of \(weekStart.formatted(.dateTime.month(.abbreviated).day()))", systemImage: "calendar")
+        Label(language.weekOf(language.shortDate(weekStart)), systemImage: "calendar")
         if let phase {
-            Text(phase.displayName.uppercased())
+            Text(language.name(phase).uppercased())
                 .tracking(0.8)
                 .foregroundStyle(tint)
                 .padding(.horizontal, 8)
@@ -44,7 +46,7 @@ struct PlanWeekHeaderView: View {
                 .foregroundStyle(Theme.dim)
         }
         if isRecovery {
-            Label("Recovery", systemImage: "leaf.fill")
+            Label(language.recoveryLabel, systemImage: "leaf.fill")
                 .foregroundStyle(Theme.good)
         }
     }

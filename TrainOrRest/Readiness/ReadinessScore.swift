@@ -33,16 +33,14 @@ enum ReadinessScore {
 
     // MARK: - Per-signal sub-scores (each 0–100, higher = more ready)
 
-    /// HRV 7-day mean vs 28-day baseline: at/above baseline is excellent, the
-    /// flag threshold (0.85×) sits mid-scale.
+    /// Recent HRV vs the 60-day baseline: at/above baseline is excellent.
     private static func hrvSub(_ s: ReadinessAssessment.Snapshot) -> Double? {
         guard let hrv7 = s.hrvMean7, let hrv28 = s.hrvMean28, hrv28 > 0 else { return nil }
         let ratio = hrv7 / hrv28
         return clamp((ratio - 0.70) / (1.10 - 0.70) * 100)
     }
 
-    /// Resting HR 7-day mean vs baseline: below/equal is best, the +5 bpm flag
-    /// lands low.
+    /// Recent resting HR vs baseline: below/equal is best, +5 bpm lands low.
     private static func rhrSub(_ s: ReadinessAssessment.Snapshot) -> Double? {
         guard let rhr7 = s.rhrMean7, let rhr28 = s.rhrMean28 else { return nil }
         let delta = rhr7 - rhr28

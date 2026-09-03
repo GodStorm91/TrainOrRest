@@ -1,0 +1,396 @@
+import Foundation
+
+extension CoachLanguage {
+    var plan: PlanCopy { PlanCopy(language: self) }
+}
+
+struct PlanCopy {
+    let language: CoachLanguage
+
+    // MARK: - Calendar
+
+    var trainingPlanTitle: String { text(en: "Training Plan", ja: "トレーニングプラン", vi: "Kế hoạch tập luyện") }
+    var monthMode: String { text(en: "Month", ja: "月", vi: "Tháng") }
+    var weekMode: String { text(en: "Week", ja: "週", vi: "Tuần") }
+    var syncIntervals: String { text(en: "Sync intervals.icu", ja: "intervals.icuと同期", vi: "Đồng bộ intervals.icu") }
+    var noPlanYet: String { text(en: "No plan yet", ja: "プランはまだありません", vi: "Chưa có kế hoạch") }
+    var noPlanDescription: String { text(en: "Set a race goal and TrainOrRest builds your day-by-day training plan.", ja: "レース目標を設定すると、TrainOrRestが日ごとのトレーニングプランを作成します。", vi: "Đặt mục tiêu cuộc đua để TrainOrRest xây dựng kế hoạch tập luyện theo từng ngày.") }
+    var setRaceGoal: String { text(en: "Set race goal", ja: "レース目標を設定", vi: "Đặt mục tiêu cuộc đua") }
+    var setEnteredRace: String { text(en: "Set the race you entered", ja: "参加するレースを設定", vi: "Đặt cuộc đua bạn đã đăng ký") }
+    var changeGoal: String { text(en: "Change goal", ja: "目標を変更", vi: "Đổi mục tiêu") }
+    var connectGoogleCalendar: String { text(en: "Connect Google Calendar", ja: "Google カレンダーに接続", vi: "Kết nối Google Calendar") }
+    func googleChangesNeedReview(_ count: Int) -> String { text(en: "Google Calendar · \(count) changes need review", ja: "Google カレンダー・\(count)件の変更を確認", vi: "Google Calendar · \(count) thay đổi cần xem lại") }
+    var googleUpToDate: String { text(en: "Google Calendar · Up to date", ja: "Google カレンダー・最新", vi: "Google Calendar · Đã cập nhật") }
+    var googleSyncing: String { text(en: "Google Calendar · Syncing", ja: "Google カレンダー・同期中", vi: "Google Calendar · Đang đồng bộ") }
+    var googleReconnectRequired: String { text(en: "Google Calendar · Reconnect required", ja: "Google カレンダー・再接続が必要", vi: "Google Calendar · Cần kết nối lại") }
+    var googleWaitingForConnection: String { text(en: "Google Calendar · Waiting for connection", ja: "Google カレンダー・接続待ち", vi: "Google Calendar · Đang chờ kết nối") }
+    var googleNeedsAttention: String { text(en: "Google Calendar · Needs attention", ja: "Google カレンダー・要確認", vi: "Google Calendar · Cần chú ý") }
+    var googleChangesNeedReviewAccessibility: String { text(en: "Google Calendar changes need review", ja: "Google カレンダーの変更を確認", vi: "Các thay đổi Google Calendar cần xem lại") }
+    var googleConnectedAccessibility: String { text(en: "Google Calendar connected", ja: "Google カレンダーに接続済み", vi: "Đã kết nối Google Calendar") }
+    var googleSyncingAccessibility: String { text(en: "Google Calendar syncing", ja: "Google カレンダーを同期中", vi: "Đang đồng bộ Google Calendar") }
+    var googleReconnectAccessibility: String { text(en: "Google Calendar needs reconnect", ja: "Google カレンダーの再接続が必要", vi: "Google Calendar cần kết nối lại") }
+    var manageGoogleSyncAccessibility: String { text(en: "Manage Google Calendar sync", ja: "Google カレンダーの同期を管理", vi: "Quản lý đồng bộ Google Calendar") }
+    var noWorkoutsToSync: String { text(en: "Nothing to sync right now.", ja: "現在同期するワークアウトはありません。", vi: "Hiện không có buổi tập nào để đồng bộ.") }
+    var retry: String { text(en: "Retry", ja: "再試行", vi: "Thử lại") }
+    var retryIntervalsAccessibility: String { text(en: "Retry intervals.icu sync", ja: "intervals.icuの同期を再試行", vi: "Thử lại đồng bộ intervals.icu") }
+    var syncingIntervals: String { text(en: "Syncing planned workouts to intervals.icu…", ja: "予定ワークアウトをintervals.icuと同期中…", vi: "Đang đồng bộ buổi tập dự kiến với intervals.icu…") }
+    func syncedIntervals(_ date: Date) -> String { text(en: "Synced to intervals.icu · \(language.shortDate(date)) \(language.time(date))", ja: "intervals.icuと同期済み・\(language.shortDate(date)) \(language.time(date))", vi: "Đã đồng bộ với intervals.icu · \(language.shortDate(date)) \(language.time(date))") }
+    func syncSkipped(_ reason: String) -> String { text(en: "Sync skipped · \(reason)", ja: "同期をスキップ・\(reason)", vi: "Bỏ qua đồng bộ · \(reason)") }
+    func syncFailed(_ reason: String) -> String { text(en: "Could not sync to intervals.icu · \(reason)", ja: "intervals.icuと同期できませんでした・\(reason)", vi: "Không thể đồng bộ với intervals.icu · \(reason)") }
+    func moreRecentChanges(_ count: Int) -> String { text(en: "+\(count) more recent change\(count == 1 ? "" : "s")", ja: "ほかに\(count)件の最近の変更", vi: "+\(count) thay đổi gần đây khác") }
+    func coachUpdatedWorkout(_ summary: String) -> String { text(en: "Coach updated 1 workout · \(summary)", ja: "Coachが1件のワークアウトを更新・\(summary)", vi: "Coach đã cập nhật 1 buổi tập · \(summary)") }
+    var undo: String { text(en: "Undo", ja: "元に戻す", vi: "Hoàn tác") }
+    var undoCoachWorkoutChangeAccessibility: String { text(en: "Undo Coach workout change", ja: "Coachによるワークアウト変更を元に戻す", vi: "Hoàn tác thay đổi buổi tập của Coach") }
+    func workoutChangeSummary(beforeKind: String, beforeDistance: String, afterKind: String, afterDistance: String) -> String { "\(beforeKind) \(beforeDistance) km → \(afterKind) \(afterDistance) km" }
+
+    // MARK: - Month and week views
+
+    var todayCall: String { text(en: "Today's call", ja: "今日のメニュー", vi: "Buổi tập hôm nay") }
+    var completedRun: String { text(en: "Completed run", ja: "完了したラン", vi: "Buổi chạy đã hoàn thành") }
+    var recoveryAndAdaptation: String { text(en: "Recovery and adaptation", ja: "回復と適応", vi: "Hồi phục và thích nghi") }
+    var sessionLabel: String { text(en: "Session", ja: "セッション", vi: "Buổi tập") }
+    var autoLabel: String { text(en: "Auto", ja: "自動", vi: "Tự động") }
+    var reviewWithCoach: String { text(en: "Review with Coach", ja: "Coachと振り返る", vi: "Xem lại với Coach") }
+    var editWithCoach: String { text(en: "Edit with Coach", ja: "Coachと編集", vi: "Chỉnh sửa với Coach") }
+    var askCoach: String { text(en: "Ask Coach", ja: "Coachに聞く", vi: "Hỏi Coach") }
+    var reviewCompletedRunAccessibility: String { text(en: "Review completed run with Coach", ja: "完了したランをCoachと振り返る", vi: "Xem lại buổi chạy đã hoàn thành với Coach") }
+    func openTodayWorkoutAccessibility(_ name: String) -> String { text(en: "Open today’s \(name)", ja: "今日の\(name)を開く", vi: "Mở \(name) hôm nay") }
+    var openWorkoutDetailsAccessibility: String { text(en: "Open workout details", ja: "ワークアウトの詳細を開く", vi: "Mở chi tiết buổi tập") }
+    func coachActionAccessibility(_ action: String, workout: String) -> String { "\(action) \(workout)" }
+    func dayAccessibility(date: Date, kind: WorkoutKind?, isToday: Bool) -> String {
+        let name = kind.map(language.name) ?? language.restDayLabel
+        switch language {
+        case .en: return "\(language.shortDate(date))\(isToday ? ", today" : ""), \(name)"
+        case .ja: return "\(language.shortDate(date))\(isToday ? "、今日" : "")、\(name)"
+        case .vi: return "\(language.shortDate(date))\(isToday ? ", hôm nay" : ""), \(name)"
+        }
+    }
+    func weekVolumeAccessibility(_ kilometers: Int) -> String { text(en: "Week volume \(kilometers) kilometers", ja: "週の走行距離 \(kilometers) km", vi: "Khối lượng tuần \(kilometers) km") }
+    func planReceipt(phase: String, source: PlanReceiptSource) -> String {
+        switch (language, source) {
+        case (.en, .calendar): "\(phase) phase · synced from calendar"
+        case (.ja, .calendar): "\(phase)期・カレンダーから同期"
+        case (.vi, .calendar): "Giai đoạn \(phase) · đã đồng bộ từ lịch"
+        case (.en, .moved): "\(phase) phase · moved to fit your week"
+        case (.ja, .moved): "\(phase)期・今週に合わせて移動"
+        case (.vi, .moved): "Giai đoạn \(phase) · đã dời để phù hợp tuần này"
+        case (.en, .onPlan): "\(phase) phase · on plan"
+        case (.ja, .onPlan): "\(phase)期・プランどおり"
+        case (.vi, .onPlan): "Giai đoạn \(phase) · đúng theo kế hoạch"
+        }
+    }
+    func workoutPurpose(_ kind: WorkoutKind) -> String {
+        switch (language, kind) {
+        case (.en, .easy): "Aerobic base at an easy, conversational effort."
+        case (.ja, .easy): "会話できる楽な強度で有酸素の土台を作ります。"
+        case (.vi, .easy): "Xây nền tảng aerobic ở cường độ nhẹ, có thể trò chuyện."
+        case (.en, .long): "Extends endurance for race distance."
+        case (.ja, .long): "レース距離に向けた持久力を伸ばします。"
+        case (.vi, .long): "Phát triển sức bền cho cự ly đua."
+        case (.en, .tempo): "Sustained, comfortably-hard race effort."
+        case (.ja, .tempo): "心地よくきついレース強度を維持します。"
+        case (.vi, .tempo): "Duy trì nỗ lực cường độ đua, khó nhưng kiểm soát được."
+        case (.en, .threshold): "Raises your lactate threshold."
+        case (.ja, .threshold): "乳酸性作業閾値を高めます。"
+        case (.vi, .threshold): "Nâng ngưỡng lactate của bạn."
+        case (.en, .intervals): "Short, fast reps that sharpen speed."
+        case (.ja, .intervals): "短く速い反復でスピードを磨きます。"
+        case (.vi, .intervals): "Các đoạn ngắn, nhanh để cải thiện tốc độ."
+        case (.en, .race): "Your goal race. The plan builds to this."
+        case (.ja, .race): "目標レースです。プランはここに向けて進みます。"
+        case (.vi, .race): "Cuộc đua mục tiêu. Kế hoạch được xây dựng hướng đến đây."
+        }
+    }
+    func weekRange(_ start: Date, _ end: Date) -> String {
+        let startMonth = start.formatted(.dateTime.month(.abbreviated).locale(language.uiLocale))
+        let endMonth = end.formatted(.dateTime.month(.abbreviated).locale(language.uiLocale))
+        let startDay = Calendar.current.component(.day, from: start)
+        let endDay = Calendar.current.component(.day, from: end)
+        if startMonth == endMonth { return "\(startMonth) \(startDay) – \(endDay)" }
+        return "\(startMonth) \(startDay) – \(endMonth) \(endDay)"
+    }
+    func weekSummary(completed: String?, planned: String, completedLoad: Int?, plannedLoad: Int) -> String {
+        let load = language.trainingLoadLabel
+        if let completed, let completedLoad { return "\(completed) / \(planned) · \(completedLoad) / \(plannedLoad) \(load)" }
+        return "\(planned) · \(plannedLoad) \(load)"
+    }
+
+    // MARK: - Plan changes
+
+    var noChanges: String { text(en: "No Changes", ja: "変更なし", vi: "Không có thay đổi") }
+    var planMatchesYesterday: String { text(en: "Today's plan matches yesterday's schedule.", ja: "今日のプランは昨日のスケジュールと同じです。", vi: "Kế hoạch hôm nay khớp với lịch hôm qua.") }
+    var changesLimitedNotice: String { text(en: "Changes are limited to the upcoming plan window and reviewed by local training rules.", ja: "変更は今後のプラン期間に限定され、ローカルのトレーニングルールで確認済みです。", vi: "Thay đổi chỉ áp dụng cho phần kế hoạch sắp tới và đã được kiểm tra theo quy tắc tập luyện cục bộ.") }
+    var planChangesTitle: String { text(en: "Plan Changes", ja: "プランの変更", vi: "Thay đổi kế hoạch") }
+    var beforeLabel: String { text(en: "Before", ja: "変更前", vi: "Trước") }
+    var nowLabel: String { text(en: "Now", ja: "現在", vi: "Hiện tại") }
+    var reviewedByRules: String { text(en: "Reviewed by local plan rules before it reached your calendar.", ja: "カレンダーに反映する前にローカルのプランルールで確認済みです。", vi: "Đã được kiểm tra theo quy tắc kế hoạch cục bộ trước khi đến lịch của bạn.") }
+    var noWorkoutImpact: String { text(en: "No workout impact.", ja: "ワークアウトへの影響はありません。", vi: "Không ảnh hưởng đến buổi tập.") }
+    func readinessReason(_ verdict: ReadinessVerdict) -> String { text(en: "Triggered by today's \(language.verdictTitle(verdict).lowercased()) readiness verdict", ja: "今日の\(language.verdictTitle(verdict))のコンディション判定で実行", vi: "Được kích hoạt bởi đánh giá thể trạng \(language.verdictTitle(verdict).lowercased()) hôm nay") }
+    var volumeRefitReason: String { text(en: "Adjusted after recent completed training changed the volume fit", ja: "最近完了したトレーニングに合わせて走行量を調整", vi: "Đã điều chỉnh sau khi các buổi tập hoàn thành gần đây thay đổi mức tải phù hợp") }
+    func intensityChanged(from: String, to: String) -> String { text(en: "Changed intensity from \(from.lowercased()) to \(to.lowercased()).", ja: "強度を\(from)から\(to)へ変更。", vi: "Đã thay đổi cường độ từ \(from.lowercased()) sang \(to.lowercased()).") }
+    func distanceChanged(_ delta: Double) -> String { text(en: "Distance changed by \(String(format: "%.1f", delta)) km.", ja: "距離を\(String(format: "%.1f", delta)) km変更。", vi: "Đã thay đổi quãng đường \(String(format: "%.1f", delta)) km.") }
+    var workoutUpdatedDetails: String { text(en: "Workout kept in place with updated training details.", ja: "ワークアウトはそのままでトレーニング詳細を更新しました。", vi: "Giữ nguyên buổi tập và cập nhật chi tiết tập luyện.") }
+    var workoutRemovedRecovery: String { text(en: "Workout removed so the day becomes recovery.", ja: "ワークアウトを削除して回復日にしました。", vi: "Đã bỏ buổi tập để ngày này trở thành ngày hồi phục.") }
+    func workoutAddedBalanced(_ kind: String) -> String { text(en: "Added \(kind.lowercased()) to keep the plan balanced.", ja: "プランのバランスを保つため\(kind)を追加。", vi: "Đã thêm \(kind.lowercased()) để giữ cân bằng kế hoạch.") }
+
+    // MARK: - Plan detail
+
+    var couldNotLoadDetails: String { text(en: "Could not load plan details", ja: "プランの詳細を読み込めませんでした", vi: "Không thể tải chi tiết kế hoạch") }
+    var loadDetailsRecovery: String { text(en: "Try again from Profile or create a training plan.", ja: "プロフィールから再試行するか、トレーニングプランを作成してください。", vi: "Hãy thử lại từ Hồ sơ hoặc tạo kế hoạch tập luyện.") }
+    var pausePlanAccessibility: String { text(en: "Pause training plan", ja: "トレーニングプランを一時停止", vi: "Tạm dừng kế hoạch tập luyện") }
+    var resumePlanAccessibility: String { text(en: "Resume training plan", ja: "トレーニングプランを再開", vi: "Tiếp tục kế hoạch tập luyện") }
+    var adjustPlanAccessibility: String { text(en: "Adjust training plan", ja: "トレーニングプランを調整", vi: "Điều chỉnh kế hoạch tập luyện") }
+    var planAdjustmentFailed: String { text(en: "Plan adjustment failed", ja: "プランの調整に失敗しました", vi: "Điều chỉnh kế hoạch thất bại") }
+    var target: String { text(en: "Target", ja: "目標", vi: "Mục tiêu") }
+    var runningDays: String { text(en: "Running days", ja: "ランニング日", vi: "Ngày chạy") }
+    var timeRemaining: String { text(en: "Time remaining", ja: "残り時間", vi: "Thời gian còn lại") }
+    var raceDay: String { text(en: "Race day", ja: "レース当日", vi: "Ngày đua") }
+    func daysRemaining(_ days: Int) -> String { text(en: "\(days) days", ja: "あと\(days)日", vi: "\(days) ngày") }
+    var ok: String { text(en: "OK", ja: "OK", vi: "OK") }
+    func runningDaysPerWeek(_ days: Int) -> String { text(en: "\(days)/week", ja: "週\(days)日", vi: "\(days) ngày/tuần") }
+    func weekOfTotal(_ week: Int, total: Int) -> String { text(en: "Week \(week) of \(total)", ja: "全\(total)週中 \(week)週目", vi: "Tuần \(week) / \(total)") }
+
+    func activePlanStatus(_ status: ActivePlanStatus) -> String {
+        switch (language, status) {
+        case (.en, .active): "Active"
+        case (.ja, .active): "進行中"
+        case (.vi, .active): "Đang hoạt động"
+        case (.en, .onTrack): "On track"
+        case (.ja, .onTrack): "順調"
+        case (.vi, .onTrack): "Đúng tiến độ"
+        case (.en, .needsAttention): "Needs adjustment"
+        case (.ja, .needsAttention): "要調整"
+        case (.vi, .needsAttention): "Cần điều chỉnh"
+        case (.en, .paused): "Paused"
+        case (.ja, .paused): "一時停止中"
+        case (.vi, .paused): "Đã tạm dừng"
+        case (.en, .completed): "Completed"
+        case (.ja, .completed): "完了"
+        case (.vi, .completed): "Đã hoàn thành"
+        }
+    }
+
+    func phaseSummary(_ phase: TrainingPhase) -> String {
+        switch (language, phase) {
+        case (.en, .base): "Build a durable aerobic foundation with comfortable running."
+        case (.ja, .base): "無理のないランで持続的な有酸素の土台を作ります。"
+        case (.vi, .base): "Xây nền tảng hiếu khí bền vững bằng các buổi chạy thoải mái."
+        case (.en, .build): "Increase training volume and introduce focused quality sessions."
+        case (.ja, .build): "走行量を高め、目的を絞った質の高いセッションを加えます。"
+        case (.vi, .build): "Tăng khối lượng tập và thêm các buổi chất lượng có trọng tâm."
+        case (.en, .peak): "Sharpen race-specific fitness while protecting recovery."
+        case (.ja, .peak): "回復を守りながらレース特異的な力を磨きます。"
+        case (.vi, .peak): "Nâng cao thể lực chuyên biệt cho cuộc đua đồng thời bảo vệ hồi phục."
+        case (.en, .taper): "Reduce volume and arrive fresh for race day."
+        case (.ja, .taper): "走行量を減らし、レース当日に向けてフレッシュな状態に整えます。"
+        case (.vi, .taper): "Giảm khối lượng để đến ngày đua với thể trạng tươi mới."
+        }
+    }
+
+    var noSuitableSlot: String { text(en: "No suitable slot", ja: "適切な時間枠がありません", vi: "Không có khung giờ phù hợp") }
+    var noSafeSchedulingWindows: String { text(en: "Smart Scheduling could not find safe available windows for this week.", ja: "スマートスケジューリングでは今週の安全な空き時間を見つけられませんでした。", vi: "Xếp lịch thông minh không tìm được khung giờ trống an toàn trong tuần này.") }
+    var suggestedScheduleAdjustment: String { text(en: "Suggested schedule adjustment", ja: "スケジュール調整の提案", vi: "Đề xuất điều chỉnh lịch") }
+    var schedulingValidationNotice: String { text(en: "TrainOrRest validates recovery and plan rules before showing these options. No workout moves until you apply the changes.", ja: "TrainOrRestはこれらの候補を表示する前に回復とプランのルールを検証します。変更を適用するまでワークアウトは移動しません。", vi: "TrainOrRest kiểm tra quy tắc hồi phục và kế hoạch trước khi hiển thị các lựa chọn này. Buổi tập không bị dời cho đến khi bạn áp dụng thay đổi.") }
+    func bestSchedulingOptionAccessibility(_ workout: String) -> String { text(en: "Best scheduling option for \(workout)", ja: "\(workout)の最適な予定候補", vi: "Lựa chọn xếp lịch tốt nhất cho \(workout)") }
+    var applySmartSchedulingAccessibility: String { text(en: "Apply Smart Scheduling changes", ja: "スマートスケジューリングの変更を適用", vi: "Áp dụng thay đổi Xếp lịch thông minh") }
+
+    func schedulingMessage(_ raw: String) -> String {
+        guard language != .en else { return raw }
+        let japanese: [String: String] = [
+            "No calendar conflicts": "カレンダーの競合なし",
+            "Required duration fits": "必要な時間に収まります",
+            "Recovery spacing is safe": "回復間隔は安全です",
+            "Keeps the workout inside its training week": "ワークアウトをトレーニング週内に維持",
+            "Keeps the planned workout date": "予定したワークアウト日を維持",
+            "Leaves extra buffer around the workout": "ワークアウト前後に余裕があります",
+            "Respects hard-workout recovery spacing": "高強度ワークアウト後の回復間隔を守ります",
+            "Required buffer does not fit": "必要な余裕時間に収まりません",
+            "This workout is fixed.": "このワークアウトは固定されています。",
+            "This time has already passed.": "この時刻はすでに過ぎています。",
+            "Calendar availability needs to be refreshed.": "カレンダーの空き状況を更新する必要があります。",
+            "This time is not safe for the current plan.": "この時刻は現在のプランにとって安全ではありません。",
+            "This starts before your earliest allowed start.": "許可された最も早い開始時刻より前です。",
+            "This finishes after your latest allowed finish.": "許可された最も遅い終了時刻を過ぎます。",
+            "This option needs to be checked again.": "この候補は再確認が必要です。",
+            "Google Calendar update queued": "Google カレンダーの更新をキューに追加しました",
+            "Google Calendar was not changed": "Google カレンダーは変更されませんでした",
+            "Google Calendar will update when online": "オンラインになるとGoogle カレンダーを更新します",
+            "Workout no longer exists.": "ワークアウトは存在しなくなりました。",
+            "Undo is no longer available.": "元に戻す操作は利用できなくなりました。",
+            "This workout changed again, so undo is no longer safe.": "このワークアウトは再度変更されたため、安全に元に戻せません。"
+        ]
+        let vietnamese: [String: String] = [
+            "No calendar conflicts": "Không có xung đột lịch",
+            "Required duration fits": "Phù hợp với thời lượng cần thiết",
+            "Recovery spacing is safe": "Khoảng hồi phục an toàn",
+            "Keeps the workout inside its training week": "Giữ buổi tập trong tuần tập luyện",
+            "Keeps the planned workout date": "Giữ ngày buổi tập đã lên kế hoạch",
+            "Leaves extra buffer around the workout": "Có thời gian đệm thêm quanh buổi tập",
+            "Respects hard-workout recovery spacing": "Tôn trọng khoảng hồi phục sau buổi nặng",
+            "Required buffer does not fit": "Không đủ thời gian đệm cần thiết",
+            "This workout is fixed.": "Buổi tập này đã cố định.",
+            "This time has already passed.": "Thời điểm này đã qua.",
+            "Calendar availability needs to be refreshed.": "Cần làm mới trạng thái rảnh của lịch.",
+            "This time is not safe for the current plan.": "Thời điểm này không an toàn cho kế hoạch hiện tại.",
+            "This starts before your earliest allowed start.": "Bắt đầu trước giờ sớm nhất được phép.",
+            "This finishes after your latest allowed finish.": "Kết thúc sau giờ muộn nhất được phép.",
+            "This option needs to be checked again.": "Lựa chọn này cần được kiểm tra lại.",
+            "Google Calendar update queued": "Đã xếp hàng cập nhật Google Calendar",
+            "Google Calendar was not changed": "Google Calendar không được thay đổi",
+            "Google Calendar will update when online": "Google Calendar sẽ cập nhật khi trực tuyến",
+            "Workout no longer exists.": "Buổi tập không còn tồn tại.",
+            "Undo is no longer available.": "Không thể hoàn tác nữa.",
+            "This workout changed again, so undo is no longer safe.": "Buổi tập này đã thay đổi lần nữa nên không còn an toàn để hoàn tác."
+        ]
+        let translations = language == .ja ? japanese : vietnamese
+        if let translation = translations[raw] { return translation }
+        if raw.hasPrefix("Matches your preferred ") {
+            return text(en: raw, ja: "希望する時間帯に合います", vi: "Phù hợp với khung giờ bạn ưu tiên")
+        }
+        if raw.hasPrefix("Outside your preferred ") {
+            return text(en: raw, ja: "希望する時間帯の外です。", vi: "Ngoài khung giờ bạn ưu tiên.")
+        }
+        if raw.hasPrefix("Your calendar is busy from ") {
+            return text(en: raw, ja: "この時間帯はカレンダーが埋まっています。", vi: "Lịch của bạn đang bận trong khung giờ này.")
+        }
+        return text(en: raw, ja: "スケジュール情報", vi: "Thông tin xếp lịch")
+    }
+    var timeline: String { text(en: "Timeline", ja: "タイムライン", vi: "Tiến trình") }
+    var currentPhase: String { text(en: "CURRENT PHASE", ja: "現在のフェーズ", vi: "GIAI ĐOẠN HIỆN TẠI") }
+    func phaseDateRange(_ start: Date, _ end: Date) -> String { "\(language.shortDate(start)) – \(language.shortDate(end))" }
+    var weeklyTarget: String { text(en: "Weekly target", ja: "週の目標", vi: "Mục tiêu tuần") }
+    func phaseProgress(week: Int, total: Int) -> String { text(en: "Phase progress week \(week) of \(total)", ja: "フェーズの進捗 \(week)/\(total)週", vi: "Tiến độ giai đoạn tuần \(week)/\(total)") }
+    var thisWeek: String { text(en: "THIS WEEK", ja: "今週", vi: "TUẦN NÀY") }
+    func sessionsCompleted(_ completed: Int, of planned: Int) -> String { text(en: "\(completed) of \(planned) sessions completed", ja: "\(planned)回中\(completed)回のセッションを完了", vi: "Đã hoàn thành \(completed)/\(planned) buổi tập") }
+    func weeklyDistanceAccessibility(completed: String, planned: String) -> String { text(en: "Weekly distance \(completed) of \(planned)", ja: "週の距離 \(completed) / \(planned)", vi: "Quãng đường tuần \(completed)/\(planned)") }
+    var scheduleFit: String { text(en: "SCHEDULE FIT", ja: "スケジュールの適合", vi: "ĐỘ PHÙ HỢP LỊCH") }
+    var reviewSchedule: String { text(en: "Review schedule", ja: "スケジュールを確認", vi: "Xem lại lịch") }
+    var reviewWeeklyScheduleAccessibility: String { text(en: "Review weekly schedule", ja: "週のスケジュールを確認", vi: "Xem lại lịch tuần") }
+    var upNext: String { text(en: "UP NEXT", ja: "次の予定", vi: "TIẾP THEO") }
+    var planCompleted: String { text(en: "Plan completed", ja: "プラン完了", vi: "Đã hoàn thành kế hoạch") }
+    var noUpcomingWorkout: String { text(en: "No upcoming workout", ja: "今後のワークアウトはありません", vi: "Không có buổi tập sắp tới") }
+    var viewInCalendar: String { text(en: "View in Calendar", ja: "カレンダーで表示", vi: "Xem trong Lịch") }
+    var viewPlanInCalendarAccessibility: String { text(en: "View training plan in Calendar", ja: "トレーニングプランをカレンダーで表示", vi: "Xem kế hoạch tập luyện trong Lịch") }
+    var plannedVsCompleted: String { text(en: "PLANNED VS COMPLETED", ja: "予定と完了", vi: "DỰ KIẾN VÀ HOÀN THÀNH") }
+    func completedDistanceSummary(percent: Int, weeks: Int) -> String { text(en: "You completed \(percent)% of planned distance over the last \(weeks) weeks.", ja: "直近\(weeks)週間で予定距離の\(percent)%を完了しました。", vi: "Bạn đã hoàn thành \(percent)% quãng đường dự kiến trong \(weeks) tuần gần đây.") }
+    func plannedCompletedAccessibility(completed: String, planned: String) -> String { text(en: "Planned versus completed weekly distance. Completed \(completed) of \(planned).", ja: "週の予定距離と完了距離。\(planned)中\(completed)を完了。", vi: "Quãng đường tuần dự kiến và đã hoàn thành. Đã hoàn thành \(completed)/\(planned).") }
+    var planPhases: String { text(en: "PLAN PHASES", ja: "プランのフェーズ", vi: "CÁC GIAI ĐOẠN KẾ HOẠCH") }
+    func phaseWeeks(_ start: Int, _ end: Int) -> String { text(en: "Weeks \(start)-\(end)", ja: "第\(start)〜\(end)週", vi: "Tuần \(start)–\(end)") }
+    var aboutThisPlan: String { text(en: "ABOUT THIS PLAN", ja: "このプランについて", vi: "VỀ KẾ HOẠCH NÀY") }
+    var aboutPlanDescription: String { text(en: "This plan gradually builds weekly volume and race-specific endurance while adapting recommendations to your schedule and available training data.", ja: "このプランは週ごとの走行量とレースに必要な持久力を段階的に高め、スケジュールと利用可能なトレーニングデータに合わせて提案を調整します。", vi: "Kế hoạch này tăng dần khối lượng hàng tuần và sức bền theo cự ly đua, đồng thời điều chỉnh đề xuất theo lịch và dữ liệu tập luyện hiện có của bạn.") }
+    func openNextWorkoutAccessibility(_ workout: String, day: String) -> String { text(en: "Open next workout: \(workout) \(day)", ja: "次のワークアウトを開く：\(workout) \(day)", vi: "Mở buổi tập tiếp theo: \(workout) \(day)") }
+    func scheduleFits(_ count: Int) -> String { text(en: "This week fits your current availability", ja: "今週は現在の空き時間に収まります", vi: "Tuần này phù hợp với thời gian rảnh hiện tại") }
+    func workoutsNeedScheduling(_ count: Int) -> String { text(en: "\(count) workouts need scheduling", ja: "\(count)件のワークアウトで予定設定が必要", vi: "\(count) buổi tập cần xếp lịch") }
+    func workoutTimingConflicts(_ count: Int) -> String { text(en: "\(count) workout timing conflicts", ja: "\(count)件のワークアウトで時間が競合", vi: "\(count) buổi tập bị xung đột thời gian") }
+    func workoutsScheduled(_ count: Int) -> String { text(en: "\(count) workouts are scheduled and no busy-time conflicts were found.", ja: "\(count)件のワークアウトは予定済みで、予定との競合はありません。", vi: "\(count) buổi tập đã được xếp lịch và không có xung đột lịch bận.") }
+    func validSlots(_ count: Int) -> String { text(en: "\(count) valid Smart Scheduling slots are available this week.", ja: "今週はSmart Schedulingで\(count)件の有効な時間帯があります。", vi: "Tuần này có \(count) khung giờ Smart Scheduling hợp lệ.") }
+    var scheduleConflictDetail: String { text(en: "At least one workout overlaps busy time. Review options before changing the plan.", ja: "少なくとも1件のワークアウトが予定と重なっています。プランを変更する前に候補を確認してください。", vi: "Ít nhất một buổi tập trùng lịch bận. Hãy xem các lựa chọn trước khi đổi kế hoạch.") }
+    func relativeDay(_ date: Date) -> String {
+        if Calendar.current.isDateInToday(date) { return language.todayLabel }
+        if Calendar.current.isDateInTomorrow(date) { return language.tomorrowLabel }
+        return language.shortWeekdayDate(date)
+    }
+
+    // MARK: - Workout detail and scheduling
+
+    var date: String { text(en: "Date", ja: "日付", vi: "Ngày") }
+    var workout: String { text(en: "Workout", ja: "ワークアウト", vi: "Buổi tập") }
+    var distance: String { text(en: "Distance", ja: "距離", vi: "Quãng đường") }
+    var pace: String { text(en: "Pace", ja: "ペース", vi: "Nhịp chạy") }
+    var scheduleHistory: String { text(en: "Schedule history", ja: "予定履歴", vi: "Lịch sử xếp lịch") }
+    var scheduledFrom: String { text(en: "Scheduled from", ja: "予定元", vi: "Được xếp từ") }
+    var updated: String { text(en: "Updated", ja: "更新", vi: "Đã cập nhật") }
+    var notShownInGoogleCalendar: String { text(en: "Not shown in Google Calendar", ja: "Google カレンダーに表示されていません", vi: "Không hiển thị trong Google Calendar") }
+    var workoutStillInPlan: String { text(en: "This workout still exists in your TrainOrRest plan.", ja: "このワークアウトはTrainOrRestのプランに残っています。", vi: "Buổi tập này vẫn có trong kế hoạch TrainOrRest của bạn.") }
+    var addBackToGoogleCalendar: String { text(en: "Add back to Google Calendar", ja: "Google カレンダーに戻す", vi: "Thêm lại vào Google Calendar") }
+    var smartScheduling: String { text(en: "Smart Scheduling", ja: "スマートスケジューリング", vi: "Xếp lịch thông minh") }
+    var findingTime: String { text(en: "Finding a time", ja: "時間を検索中", vi: "Đang tìm giờ") }
+    var findTime: String { text(en: "Find a time", ja: "時間を探す", vi: "Tìm giờ") }
+    var findTimeAccessibility: String { text(en: "Find a time", ja: "時間を探す", vi: "Tìm giờ") }
+    var completedRunSection: String { text(en: "Completed Run", ja: "完了したラン", vi: "Buổi chạy đã hoàn thành") }
+    var gear: String { text(en: "Gear", ja: "ギア", vi: "Trang bị") }
+    var retiredShoeNotice: String { text(en: "This workout uses a retired shoe.", ja: "このワークアウトには引退済みのシューズを使っています。", vi: "Buổi tập này dùng một đôi giày đã ngừng sử dụng.") }
+    var status: String { text(en: "Status", ja: "ステータス", vi: "Trạng thái") }
+    var bestAvailableSlot: String { text(en: "Best available slot", ja: "最適な空き時間", vi: "Khung giờ trống tốt nhất") }
+    var chooseAnotherTime: String { text(en: "Choose another time", ja: "別の時間を選ぶ", vi: "Chọn giờ khác") }
+    func useTime(_ time: String) -> String { text(en: "Use \(time)", ja: "\(time)を使う", vi: "Dùng \(time)") }
+    var scheduled: String { text(en: "Scheduled", ja: "予定済み", vi: "Đã xếp lịch") }
+    var syncedWhenAvailable: String { text(en: "Synced with Google Calendar when connection is available", ja: "接続可能になるとGoogle カレンダーと同期されます", vi: "Sẽ đồng bộ với Google Calendar khi có kết nối") }
+    var changeTime: String { text(en: "Change time", ja: "時間を変更", vi: "Đổi giờ") }
+    func noSuitableTime(_ date: Date) -> String { text(en: "No suitable time found on \(language.shortWeekdayDate(date)).", ja: "\(language.shortWeekdayDate(date))に適切な時間が見つかりませんでした。", vi: "Không tìm thấy giờ phù hợp vào \(language.shortWeekdayDate(date)).") }
+    func workoutScheduledFor(_ time: String) -> String { text(en: "Workout scheduled for \(time).", ja: "ワークアウトを\(time)に予定しました。", vi: "Đã xếp buổi tập lúc \(time).") }
+    var workoutScheduledPendingSync: String { text(en: "Workout scheduled. Google Calendar will update when online.", ja: "ワークアウトを予定しました。オンラインになるとGoogle カレンダーを更新します。", vi: "Đã xếp buổi tập. Google Calendar sẽ cập nhật khi trực tuyến.") }
+    var noCalendarConflicts: String { text(en: "No calendar conflicts", ja: "カレンダーの競合なし", vi: "Không có xung đột lịch") }
+    func statusHelp(_ status: WorkoutStatus) -> String {
+        switch (language, status) {
+        case (.en, .done): "Done is a manual completion and stays linked to this workout."
+        case (.ja, .done): "完了は手動で記録され、このワークアウトとの紐付けを維持します。"
+        case (.vi, .done): "Hoàn thành là ghi nhận thủ công và vẫn liên kết với buổi tập này."
+        case (.en, .skipped): "Skipped is a manual decision; the planner will not auto-match this workout."
+        case (.ja, .skipped): "スキップは手動の決定です。プランナーはこのワークアウトを自動照合しません。"
+        case (.vi, .skipped): "Bỏ qua là quyết định thủ công; trình lập kế hoạch sẽ không tự ghép buổi tập này."
+        case (.en, .planned): "Planned clears the manual decision so future sync matching can apply again."
+        case (.ja, .planned): "予定に戻すと手動の決定が解除され、今後の同期で再び自動照合できます。"
+        case (.vi, .planned): "Dự kiến sẽ xoá quyết định thủ công để lần đồng bộ sau có thể tự ghép lại."
+        }
+    }
+    var chooseCustomTime: String { text(en: "Choose a custom time", ja: "時刻を指定", vi: "Chọn giờ tùy chỉnh") }
+    var chooseStartTime: String { text(en: "Choose start time", ja: "開始時刻を選択", vi: "Chọn giờ bắt đầu") }
+    var workoutScheduledTitle: String { text(en: "Workout scheduled", ja: "ワークアウトを予定しました", vi: "Đã xếp buổi tập") }
+    func estimatedDuration(_ minutes: Int) -> String { text(en: "Estimated duration: \(minutes) min", ja: "推定時間：\(minutes)分", vi: "Thời lượng ước tính: \(minutes) phút") }
+    var availableTimes: String { text(en: "Available times", ja: "空き時間", vi: "Khung giờ trống") }
+    var noSuitableTimeFound: String { text(en: "No suitable time found", ja: "適切な時間が見つかりません", vi: "Không tìm thấy giờ phù hợp") }
+    var needsClearWindow: String { text(en: "This workout needs a clear window plus buffers.", ja: "このワークアウトには余裕を含む空き時間が必要です。", vi: "Buổi tập này cần một khung giờ trống kèm thời gian đệm.") }
+    var chooseAnotherDay: String { text(en: "Choose another day", ja: "別の日を選ぶ", vi: "Chọn ngày khác") }
+    var selected: String { text(en: "Selected", ja: "選択中", vi: "Đã chọn") }
+    var recommended: String { text(en: "Recommended", ja: "おすすめ", vi: "Đề xuất") }
+    var customStartTime: String { text(en: "Custom start time", ja: "開始時刻を指定", vi: "Giờ bắt đầu tùy chỉnh") }
+    var startTime: String { text(en: "Start time", ja: "開始時刻", vi: "Giờ bắt đầu") }
+    var estimatedEnd: String { text(en: "Estimated end", ja: "終了予定", vi: "Giờ kết thúc dự kiến") }
+    func requiredWindow(_ minutes: Int) -> String { text(en: "Required window: \(minutes) min workout + buffers", ja: "必要な時間枠：\(minutes)分のワークアウト＋余裕時間", vi: "Khung giờ cần thiết: buổi tập \(minutes) phút + thời gian đệm") }
+    func timeAvailability(_ time: String, available: Bool) -> String {
+        switch language {
+        case .en: return "\(time) is \(available ? "available" : "not available")"
+        case .ja: return "\(time)は\(available ? "利用可能" : "利用不可")"
+        case .vi: return "\(time) \(available ? "còn trống" : "không còn trống")"
+        }
+    }
+    func workoutTimeRange(_ range: String) -> String { text(en: "Workout \(range)", ja: "ワークアウト \(range)", vi: "Buổi tập \(range)") }
+    var nearestAvailableOptions: String { text(en: "Nearest available options", ja: "近い空き時間", vi: "Các lựa chọn trống gần nhất") }
+    var keepTimeFixed: String { text(en: "Keep this time fixed", ja: "この時間を固定", vi: "Giữ cố định giờ này") }
+    var keepTimeFixedAccessibility: String { text(en: "Keep this scheduled time fixed", ja: "この予定時刻を固定", vi: "Giữ cố định giờ đã xếp") }
+    var keepTimeFixedDescription: String { text(en: "Smart Scheduling will not suggest moving this workout during future schedule optimization.", ja: "今後のスケジュール最適化では、このワークアウトの移動を提案しません。", vi: "Xếp lịch thông minh sẽ không đề xuất dời buổi tập này trong các lần tối ưu lịch sau.") }
+    var schedulingWorkout: String { text(en: "Scheduling workout", ja: "ワークアウトを予定中", vi: "Đang xếp lịch buổi tập") }
+    func checkTime(_ time: String) -> String { text(en: "Check \(time)", ja: "\(time)を確認", vi: "Kiểm tra \(time)") }
+    func scheduleAt(_ time: String) -> String { text(en: "Schedule at \(time)", ja: "\(time)に予定", vi: "Xếp lúc \(time)") }
+    var schedule: String { text(en: "Schedule", ja: "予定", vi: "Xếp lịch") }
+    var refreshOptions: String { text(en: "Refresh options", ja: "候補を更新", vi: "Làm mới lựa chọn") }
+    var couldNotScheduleWorkout: String { text(en: "Could not schedule the workout", ja: "ワークアウトを予定できませんでした", vi: "Không thể xếp lịch buổi tập") }
+    var keepCurrent: String { text(en: "Keep current", ja: "現在のまま", vi: "Giữ nguyên") }
+
+    var cancel: String { text(en: "Cancel", ja: "キャンセル", vi: "Hủy") }
+    var done: String { text(en: "Done", ja: "完了", vi: "Xong") }
+    func candidateAccessibility(range: String, recommended: Bool, selected: Bool) -> String {
+        let states: [String?] = [
+            range,
+            text(en: "available", ja: "利用可能", vi: "còn trống"),
+            recommended ? self.recommended.lowercased() : nil,
+            selected ? self.selected.lowercased() : nil
+        ]
+        return states.compactMap { $0 }.joined(separator: ", ")
+    }
+
+    private func text(en: String, ja: String, vi: String) -> String {
+        switch language {
+        case .en: en
+        case .ja: ja
+        case .vi: vi
+        }
+    }
+}
+
+enum PlanReceiptSource {
+    case calendar
+    case moved
+    case onPlan
+}

@@ -3,7 +3,7 @@ import Foundation
 enum MarkdownBlock: Equatable {
     case heading(level: Int, text: String)
     case paragraph(String)
-    case listItem(String)
+    case listItem(marker: String, text: String)
     case quote(String)
     case code(String)
     case table(MarkdownTable)
@@ -35,7 +35,7 @@ enum MarkdownBlockParser {
                 blocks.append(.heading(level: heading.level, text: heading.text))
                 index += 1
             } else if let item = listItem(from: trimmed) {
-                blocks.append(.listItem(item))
+                blocks.append(.listItem(marker: item.marker, text: item.text))
                 index += 1
             } else if trimmed.hasPrefix(">") {
                 blocks.append(.quote(String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)))
@@ -84,15 +84,16 @@ enum MarkdownBlockParser {
         return (hashes, String(line.dropFirst(hashes + 1)))
     }
 
-    private static func listItem(from line: String) -> String? {
+    private static func listItem(from line: String) -> (marker: String, text: String)? {
         if line.hasPrefix("- ") || line.hasPrefix("* ") {
-            return String(line.dropFirst(2))
+            return ("•", String(line.dropFirst(2).drop(while: { $0 == " " })))
         }
         guard let dot = line.firstIndex(of: "."),
+              dot > line.startIndex,
               line[..<dot].allSatisfy(\.isNumber),
               line.index(after: dot) < line.endIndex,
               line[line.index(after: dot)] == " " else { return nil }
-        return String(line[line.index(dot, offsetBy: 2)...])
+        return ("\(line[..<dot]).", String(line[line.index(after: dot)...].drop(while: { $0 == " " })))
     }
 
     private static func paragraph(from lines: [String], start: Int) -> (text: String, nextIndex: Int) {
@@ -110,7 +111,7 @@ enum MarkdownBlockParser {
             paragraphLines.append(trimmed)
             index += 1
         }
-        return (paragraphLines.joined(separator: " "), index)
+        return (paragraphLines.joined(separator: "\n"), index)
     }
 
     private static func isTableRow(_ line: String) -> Bool {

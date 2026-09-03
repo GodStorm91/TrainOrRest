@@ -14,26 +14,87 @@ targets:
     type: application
     platform: iOS
     sources: [TrainOrRest]
+    dependencies:
+      - target: TrainOrRestWidget
+        embed: true
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        Release:
+          CODE_SIGN_IDENTITY: Apple Distribution
+          CODE_SIGN_STYLE: Manual
+          DEVELOPMENT_TEAM: QLUHW4PPRY
+          PROVISIONING_PROFILE_SPECIFIER: TrainOrRest App Store
     entitlements:
       path: TrainOrRest/TrainOrRest.entitlements
       properties:
         com.apple.developer.healthkit: true
         com.apple.developer.healthkit.background-delivery: true
+        com.apple.security.application-groups:
+          - group.com.khanhnguyen.TrainOrRest
     info:
       path: TrainOrRest/Info.plist
       properties:
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "202609021445"
+        GoogleCalendarOAuthClientID: "119351365161-2vtfr02trs185c4u2aah2lcomtad9m5b.apps.googleusercontent.com"
+        GoogleCalendarOAuthRedirectScheme: "com.googleusercontent.apps.119351365161-2vtfr02trs185c4u2aah2lcomtad9m5b"
+        CFBundleURLTypes:
+          - CFBundleURLSchemes:
+              - com.googleusercontent.apps.119351365161-2vtfr02trs185c4u2aah2lcomtad9m5b
         NSHealthShareUsageDescription: >-
           TrainOrRest reads your Garmin workouts and wellness data from Apple
           Health to build and adapt your training plan.
+        NSHealthUpdateUsageDescription: >-
+          TrainOrRest writes selected workout and training data to Apple Health
+          only when you choose to sync it, so your health record stays complete.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         UILaunchScreen: {}
         ITSAppUsesNonExemptEncryption: false
         UIBackgroundModes: [fetch]
         BGTaskSchedulerPermittedIdentifiers:
           - com.khanhnguyen.TrainOrRest.refresh
+  TrainOrRestWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - TrainOrRestWidget
+      - TrainOrRest/Shared
+    settings:
+      base:
+        APPLICATION_EXTENSION_API_ONLY: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.khanhnguyen.TrainOrRest.ReadinessWidget
+      configs:
+        Release:
+          CODE_SIGN_IDENTITY: Apple Distribution
+          CODE_SIGN_STYLE: Manual
+          DEVELOPMENT_TEAM: QLUHW4PPRY
+          PROVISIONING_PROFILE_SPECIFIER: TrainOrRest Widget App Store
+    entitlements:
+      path: TrainOrRestWidget/TrainOrRestWidget.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.khanhnguyen.TrainOrRest
+    info:
+      path: TrainOrRestWidget/Info.plist
+      properties:
+        CFBundleDisplayName: Readiness
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "202609021445"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
   TrainOrRestTests:
     type: bundle.unit-test
     platform: iOS
     sources: [TrainOrRestTests]
+    resources:
+      - path: TrainOrRestTests/Fixtures
+        type: folder
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES

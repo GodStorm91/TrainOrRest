@@ -1,61 +1,176 @@
 import SwiftUI
+import UIKit
 
-/// The app's tab shell with the design's raised center-FAB bar. A native
-/// TabView drives per-tab navigation state (its bar hidden); a custom bar is
-/// added via safeAreaInset so screen content insets above it correctly.
+/// Three-destination shell with a compact floating Liquid Glass dock.
 struct RootTabView: View {
-    enum Tab: Hashable { case today, trends, plan, profile }
+    enum Tab: Hashable { case calendar, chat, profile }
 
-    @State private var selection: Tab = .today
-    @State private var showGoalEntry = false
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+    @State private var selection: Tab = RootTabView.initialTab
+    @State private var isKeyboardVisible = false
+    @State private var isBottomDockHiddenByChild = false
+    @State private var pendingReviewChatRequest: CalendarReviewChatRequest?
+    @Namespace private var dockNamespace
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
 
     var body: some View {
-        TabView(selection: $selection) {
-            TodayView().tag(Tab.today)
-            NavigationStack { TrendsView() }.tag(Tab.trends)
-            NavigationStack { PlanCalendarView() }.tag(Tab.plan)
-            NavigationStack { ProfileView() }.tag(Tab.profile)
+        ZStack(alignment: .bottom) {
+            activeScreen
+                .id(selection)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .scale(scale: 0.992, anchor: .center)),
+                    removal: .opacity
+                ))
+
+            if shouldShowDock {
+                TorTabDock(selection: $selection, namespace: dockNamespace, language: language)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(10)
+            }
         }
-        .toolbar(.hidden, for: .tabBar)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            TorTabBar(selection: $selection, onCenterTap: { showGoalEntry = true })
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            withAnimation(.easeOut(duration: 0.18)) { isKeyboardVisible = true }
         }
-        .sheet(isPresented: $showGoalEntry) { GoalEntryView() }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            withAnimation(.easeOut(duration: 0.18)) { isKeyboardVisible = false }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .torSetBottomDockHidden)) { notification in
+            let hidden = notification.object as? Bool ?? false
+            withAnimation(.easeOut(duration: 0.18)) { isBottomDockHiddenByChild = hidden }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .torOpenCoachChat)) { notification in
+            guard let request = notification.object as? CalendarReviewChatRequest else { return }
+            pendingReviewChatRequest = request
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                selection = .chat
+            }
+        }
+        .animation(.smooth(duration: 0.26), value: selection)
         .tint(Theme.accent)
+    }
+
+    @ViewBuilder
+    private var activeScreen: some View {
+        switch selection {
+        case .calendar:
+            NavigationStack {
+                PlanCalendarView { activity in
+                    pendingReviewChatRequest = CalendarReviewChatRequest(activityUUID: activity.hkUUID)
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                        selection = .chat
+                    }
+                }
+            }
+        case .chat:
+            NavigationStack {
+                ChatView(
+                    reservesBottomDock: true,
+                    reviewRequest: pendingReviewChatRequest,
+                    onOpenCalendar: { _ in
+                        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                            selection = .calendar
+                        }
+                    },
+                    onReviewRequestConsumed: { request in
+                        if pendingReviewChatRequest?.id == request.id {
+                            pendingReviewChatRequest = nil
+                        }
+                    }
+                )
+            }
+        case .profile:
+            NavigationStack { ProfileView() }
+        }
+    }
+
+    private var shouldShowDock: Bool {
+        !isKeyboardVisible && !isBottomDockHiddenByChild
+    }
+
+    private static var initialTab: Tab {
+        #if DEBUG
+        switch DevSeed.requestedTab {
+        case "calendar": return .calendar
+        case "profile": return .profile
+        default: return .chat
+        }
+        #else
+        return .chat
+        #endif
     }
 }
 
-private struct TorTabBar: View {
+/// Layout constants shared between the floating dock and screens that must
+/// leave room for it (e.g. the coach composer). Dock height (56) + its 8pt
+/// bottom padding = 64 occupied; +2pt gap keeps content just above the dock.
+enum TorTabDockMetrics {
+    static let reservedBottomSpace: CGFloat = 66
+}
+
+private struct TorTabDock: View {
     @Binding var selection: RootTabView.Tab
-    let onCenterTap: () -> Void
+    let namespace: Namespace.ID
+    let language: CoachLanguage
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 0) {
-            item(.today, "Today", "house.fill")
-            item(.trends, "Trends", "chart.line.uptrend.xyaxis")
-            centerButton
-            item(.plan, "Plan", "calendar")
-            item(.profile, "Profile", "person.fill")
+        HStack(spacing: 4) {
+            item(.calendar, language.onboarding.tabTitle(.calendar), "calendar")
+            item(.chat, language.onboarding.tabTitle(.chat), "message")
+            item(.profile, language.onboarding.tabTitle(.profile), "person.crop.circle")
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 4)
-        .background(alignment: .top) {
-            Rectangle().fill(Theme.border).frame(height: 1)
-        }
-        .background(.ultraThinMaterial)
+        .padding(4)
+        .frame(maxWidth: 292)
+        .frame(height: 56)
+        .torGlass(cornerRadius: 28, tint: .graphite)
+        .overlay(
+            Capsule(style: .continuous)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+        .clipShape(Capsule(style: .continuous))
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 42)
+        // Chrome scales with Dynamic Type only up to xLarge: the 56pt pill is a
+        // fixed-height control like the system tab bar, and xLarge is the last
+        // size at which "Calendar" still fits one of its three 94pt slots.
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
+        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: selection)
     }
 
     private func item(_ tab: RootTabView.Tab, _ title: String, _ symbol: String) -> some View {
         let active = selection == tab
         return Button {
-            selection = tab
-        } label: {
-            VStack(spacing: 4) {
-                Image(systemName: symbol).font(.system(size: 21, weight: .medium))
-                Text(title).font(.system(size: 10, weight: .semibold))
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                selection = tab
             }
-            .foregroundStyle(active ? Theme.accent : Theme.faint)
+        } label: {
+            ZStack {
+                if active {
+                    Capsule(style: .continuous)
+                        .fill(Theme.accent.opacity(0.13))
+                        .matchedGeometryEffect(id: "dock-active-pill", in: namespace)
+                }
+
+                HStack(spacing: active ? 6 : 0) {
+                    Image(systemName: symbol)
+                        .font(.system(.body, design: .default, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .scaleEffect(active ? 1.04 : 1.0)
+                    if active {
+                        Text(title)
+                            .font(.system(.caption, design: .rounded, weight: .semibold))
+                            .lineLimit(1)
+                            .transition(.asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .leading)),
+                                removal: .opacity
+                            ))
+                    }
+                }
+                .foregroundStyle(active ? Theme.accent : Theme.faint)
+            }
             .frame(maxWidth: .infinity)
             .frame(height: 44)
             .contentShape(Rectangle())
@@ -63,21 +178,5 @@ private struct TorTabBar: View {
         .buttonStyle(.plain)
         .accessibilityLabel(title)
         .accessibilityAddTraits(active ? [.isSelected] : [])
-    }
-
-    private var centerButton: some View {
-        Button(action: onCenterTap) {
-            Image(systemName: "plus")
-                .font(.system(size: 24, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 52, height: 52)
-                .background(Theme.accent, in: Circle())
-                .overlay(Circle().strokeBorder(Theme.bg, lineWidth: 4))
-                .shadow(color: Theme.accent.opacity(0.5), radius: 10, y: 4)
-        }
-        .buttonStyle(.plain)
-        .frame(maxWidth: .infinity)
-        .offset(y: -18)
-        .accessibilityLabel("New race goal")
     }
 }

@@ -42,6 +42,10 @@ enum ClaudeContentBlock: Codable, Equatable {
     case image(mediaType: String, data: String)
     case toolUse(id: String, name: String, input: JSONValue)
     case toolResult(toolUseID: String, content: String, isError: Bool)
+    /// Any block this app does not model — `thinking`, `redacted_thinking`, and
+    /// future types. Kept byte-for-byte so the tool loop can replay the
+    /// assistant turn exactly; signatures and opaque data must survive intact.
+    case passthrough(JSONValue)
 
     enum CodingKeys: String, CodingKey {
         case type, text, id, name, input, content, source
@@ -54,37 +58,58 @@ enum ClaudeContentBlock: Codable, Equatable {
         case mediaType = "media_type"
     }
 
+    /// Decodes from the raw JSON object so an unrecognized block can be
+    /// preserved whole rather than collapsed into empty text.
     init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(String.self, forKey: .type) {
+        let raw = try JSONValue(from: decoder)
+        guard case .object(let fields) = raw,
+              case .string(let type)? = fields["type"] else {
+            self = .passthrough(raw)
+            return
+        }
+        switch type {
         case "text":
-            self = .text(try container.decode(String.self, forKey: .text))
+            guard case .string(let text)? = fields["text"] else { self = .passthrough(raw); return }
+            self = .text(text)
         case "image":
-            let source = try container.nestedContainer(keyedBy: SourceKeys.self, forKey: .source)
-            self = .image(
-                mediaType: try source.decode(String.self, forKey: .mediaType),
-                data: try source.decode(String.self, forKey: .data)
-            )
+            guard case .object(let source)? = fields["source"],
+                  case .string(let mediaType)? = source["media_type"],
+                  case .string(let data)? = source["data"] else {
+                self = .passthrough(raw)
+                return
+            }
+            self = .image(mediaType: mediaType, data: data)
         case "tool_use":
-            self = .toolUse(
-                id: try container.decode(String.self, forKey: .id),
-                name: try container.decode(String.self, forKey: .name),
-                input: try container.decode(JSONValue.self, forKey: .input)
-            )
+            guard case .string(let id)? = fields["id"],
+                  case .string(let name)? = fields["name"],
+                  let input = fields["input"] else {
+                self = .passthrough(raw)
+                return
+            }
+            self = .toolUse(id: id, name: name, input: input)
         case "tool_result":
-            self = .toolResult(
-                toolUseID: try container.decode(String.self, forKey: .toolUseID),
-                content: try container.decode(String.self, forKey: .content),
-                isError: try container.decodeIfPresent(Bool.self, forKey: .isError) ?? false
-            )
+            guard case .string(let toolUseID)? = fields["tool_use_id"],
+                  case .string(let content)? = fields["content"] else {
+                self = .passthrough(raw)
+                return
+            }
+            var isError = false
+            if case .bool(let flag)? = fields["is_error"] { isError = flag }
+            self = .toolResult(toolUseID: toolUseID, content: content, isError: isError)
         default:
-            self = .text("")
+            self = .passthrough(raw)
         }
     }
 
     func encode(to encoder: Encoder) throws {
+        if case .passthrough(let raw) = self {
+            try raw.encode(to: encoder)
+            return
+        }
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
+        case .passthrough:
+            return // handled above
         case .text(let text):
             try container.encode("text", forKey: .type)
             try container.encode(text, forKey: .text)

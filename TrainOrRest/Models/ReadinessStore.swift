@@ -19,6 +19,7 @@ enum ReadinessStore {
         let readiness = try computeAndPersistReadiness(in: context, today: today, calendar: calendar)
         try regenerateIfNeeded(in: context, verdict: readiness?.verdict ?? .insufficientData, today: today, calendar: calendar)
         try context.save()
+        ReadinessWidgetBridge.publish(readiness)
         return readiness
     }
 
@@ -34,7 +35,11 @@ enum ReadinessStore {
                 hrvMean7: row.hrvMean7, hrvMean28: row.hrvMean28,
                 rhrMean7: row.rhrMean7, rhrMean28: row.rhrMean28,
                 sleepLastNight: row.sleepLastNight, sleepMean14: row.sleepMean14,
-                acuteChronicRatio: row.acuteChronicRatio
+                acuteChronicRatio: row.acuteChronicRatio,
+                hrvBaseline: row.hrvBaseline ?? row.hrvMean28,
+                hrvSD: row.hrvSD,
+                rhrBaseline: row.rhrBaseline ?? row.rhrMean28,
+                rhrSD: row.rhrSD
             )
             row.score = ReadinessScore.score(snapshot: snapshot, verdict: row.verdict)
         }
@@ -47,7 +52,17 @@ enum ReadinessStore {
         today: Date,
         calendar: Calendar
     ) throws -> DailyReadiness? {
-        let wellnessRows = try context.fetch(FetchDescriptor<DailyWellness>())
+        let day = calendar.startOfDay(for: today)
+        // The engine re-evaluates up to two prior days when holding a verdict
+        // for persistence, so each window carries that slack; rows older than
+        // that never reach a verdict and stay on disk.
+        let priorDays = 2
+        let wellnessStart = calendar.date(
+            byAdding: .day, value: -(ReadinessEngine.Tuning.baselineWindowDays + priorDays), to: day
+        ) ?? .distantPast
+        let wellnessRows = try context.fetch(FetchDescriptor<DailyWellness>(
+            predicate: #Predicate { $0.date >= wellnessStart }
+        ))
         let samples = wellnessRows.map {
             WellnessSample(
                 date: $0.date,
@@ -59,7 +74,21 @@ enum ReadinessStore {
 
         let fitness = try PlanStore.currentFitness(in: context, today: today, calendar: calendar)
         let paces = fitness.map { VDOTTable.trainingPaces(vdot: $0.vdot) }
-        let loads = try context.fetch(FetchDescriptor<CompletedActivity>()).map { activity in
+        let loadStart = calendar.date(
+            byAdding: .day, value: -(TrainingLoad.Tuning.chronicWindowDays + priorDays), to: day
+        ) ?? .distantPast
+        var activities = try context.fetch(FetchDescriptor<CompletedActivity>(
+            predicate: #Predicate { $0.date >= loadStart }
+        ))
+        // ACWR only trusts history that reaches a full chronic window back; the
+        // single oldest run proves that without loading everything in between.
+        var oldestRun = FetchDescriptor<CompletedActivity>(
+            predicate: #Predicate { $0.date < loadStart },
+            sortBy: [SortDescriptor(\.date)]
+        )
+        oldestRun.fetchLimit = 1
+        activities += try context.fetch(oldestRun)
+        let loads = activities.map { activity in
             (
                 date: activity.date,
                 load: TrainingLoad.sessionLoad(
@@ -70,13 +99,26 @@ enum ReadinessStore {
             )
         }
 
-        guard !samples.isEmpty || !loads.isEmpty else { return nil }
+        let checkInHistory = try recentCheckInHistory(in: context, today: today, calendar: calendar)
+        let checkIns = todayCheckInSignals(from: checkInHistory, today: today, calendar: calendar)
+        let overrides = try recentRuleOverrides(in: context, today: today, calendar: calendar)
+        let disputedMetrics: Set<ReadinessRule> = wellnessRows.contains {
+            calendar.isDate($0.date, inSameDayAs: day) && $0.hrvDisputed
+        } ? Set<ReadinessRule>([.hrv]) : []
+        let hasStandaloneCheckIn = checkIns.contains { $0.role == .standalone }
+        guard !samples.isEmpty || !loads.isEmpty || hasStandaloneCheckIn else { return nil }
 
         let assessment = ReadinessEngine.assess(
-            wellness: samples, loads: loads, today: today, calendar: calendar
+            wellness: samples,
+            loads: loads,
+            today: today,
+            calendar: calendar,
+            checkIns: checkIns,
+            overrides: overrides,
+            checkInHistory: checkInHistory,
+            disputedMetrics: disputedMetrics
         )
 
-        let day = calendar.startOfDay(for: today)
         var descriptor = FetchDescriptor<DailyReadiness>(predicate: #Predicate { $0.date == day })
         descriptor.fetchLimit = 1
         if let existing = try context.fetch(descriptor).first {
@@ -86,6 +128,45 @@ enum ReadinessStore {
         let row = DailyReadiness(date: day, assessment: assessment, computedAt: today)
         context.insert(row)
         return row
+    }
+
+    private static func recentRuleOverrides(
+        in context: ModelContext,
+        today: Date,
+        calendar: Calendar
+    ) throws -> [(date: Date, rule: ReadinessRule)] {
+        let day = calendar.startOfDay(for: today)
+        guard let start = calendar.date(byAdding: .day, value: -14, to: day),
+              let end = calendar.date(byAdding: .day, value: 1, to: day)
+        else { return [] }
+        let descriptor = FetchDescriptor<RuleOverride>(
+            predicate: #Predicate { $0.date >= start && $0.date < end }
+        )
+        return try context.fetch(descriptor).map { (date: $0.date, rule: $0.rule) }
+    }
+
+    private static func recentCheckInHistory(
+        in context: ModelContext,
+        today: Date,
+        calendar: Calendar
+    ) throws -> [(date: Date, signals: [CheckInSignal])] {
+        let day = calendar.startOfDay(for: today)
+        guard let start = calendar.date(byAdding: .day, value: -2, to: day),
+              let end = calendar.date(byAdding: .day, value: 1, to: day)
+        else { return [] }
+        let descriptor = FetchDescriptor<DailyCheckIn>(
+            predicate: #Predicate { $0.date >= start && $0.date < end }
+        )
+        return try context.fetch(descriptor).map { (date: $0.date, signals: $0.signals) }
+    }
+
+    private static func todayCheckInSignals(
+        from history: [(date: Date, signals: [CheckInSignal])],
+        today: Date,
+        calendar: Calendar
+    ) -> [CheckInSignal] {
+        let day = calendar.startOfDay(for: today)
+        return history.first { calendar.isDate($0.date, inSameDayAs: day) }?.signals ?? []
     }
 
     // MARK: - Regeneration
@@ -140,17 +221,21 @@ enum ReadinessStore {
                 && row.kindRaw == new.workout.kind.rawValue
                 && abs(row.distanceKm - new.workout.distanceKm) < 0.05
                 && row.paceFastSecondsPerKm == new.workout.paceBand?.fastSecondsPerKm
+                && row.structure == new.workout.structure
         }
         guard !unchanged else { return }
 
         for row in replaceable {
             context.delete(row)
         }
+        var insertedWorkouts: [PlannedWorkout] = []
         for (week, workoutSpec) in incoming {
             let workout = PlannedWorkout(spec: workoutSpec, weekIndex: week.index, phase: week.phase)
             workout.plan = plan
             context.insert(workout)
+            insertedWorkouts.append(workout)
         }
+        try ShoeAssignmentService.assignAutomaticShoes(to: insertedWorkouts, in: context)
         plan.generatedAt = today
         plan.anchorDate = spec.anchorDate
         plan.weekPhasesRaw = spec.weeks.map(\.phase.rawValue)

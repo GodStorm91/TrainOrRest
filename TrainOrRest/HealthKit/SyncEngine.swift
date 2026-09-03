@@ -26,12 +26,19 @@ final class SyncEngine: ObservableObject {
     private let modelContext: ModelContext
     private var resyncRequested = false
     private let calendar: Calendar
+    private let pushService: WorkoutPushService?
     private let logger = Logger(subsystem: "com.khanhnguyen.TrainOrRest", category: "sync")
 
-    init(health: HealthKitService, modelContext: ModelContext, calendar: Calendar = .current) {
+    init(
+        health: HealthKitService,
+        modelContext: ModelContext,
+        calendar: Calendar = .current,
+        pushService: WorkoutPushService? = nil
+    ) {
         self.health = health
         self.modelContext = modelContext
         self.calendar = calendar
+        self.pushService = pushService
     }
 
     /// Registers observer queries so Garmin Connect writes trigger a sync
@@ -80,6 +87,7 @@ final class SyncEngine: ObservableObject {
             } catch {
                 logger.error("Readiness pipeline failed: \(error, privacy: .public)")
             }
+            await pushService?.reconcile()
             logger.info("Sync completed at \(Date.now, privacy: .public)")
         } catch {
             lastError = error.localizedDescription
@@ -106,6 +114,7 @@ final class SyncEngine: ObservableObject {
                 existing.maxHeartRate = summary.maxHeartRate
                 existing.avgPaceSecondsPerKm = pace
                 existing.sourceName = summary.sourceName
+                try ShoeMileageService.syncMileage(for: existing, in: modelContext)
             } else {
                 modelContext.insert(CompletedActivity(
                     hkUUID: summary.uuid,
@@ -121,6 +130,7 @@ final class SyncEngine: ObservableObject {
         }
 
         for uuid in delta.deletedUUIDs {
+            try ShoeMileageService.removeMileage(forActivityID: uuid, in: modelContext)
             if let activity = try fetchActivity(hkUUID: uuid) {
                 modelContext.delete(activity)
             }
@@ -179,7 +189,19 @@ final class SyncEngine: ObservableObject {
         async let vo2Samples = health.quantitySamples(.vo2Max, unit: vo2Unit, since: windowStart)
         async let sleepIntervals = health.asleepIntervals(since: windowStart)
 
-        let hrvByDay = WellnessReducer.firstValuePerDay(try await hrvSamples, calendar: calendar)
+        let resolvedHRVSamples = try await hrvSamples
+        let hrvByDay = WellnessReducer.firstValuePerDay(resolvedHRVSamples, calendar: calendar)
+        let hrvSamplesByDay = Dictionary(grouping: resolvedHRVSamples) {
+            calendar.startOfDay(for: $0.start)
+        }
+        let hrvResolutionsByDay = hrvSamplesByDay.compactMapValues { samples -> SourceResolution? in
+            guard let sample = samples.first else { return nil }
+            let day = calendar.startOfDay(for: sample.start)
+            return WellnessReducer.hrvSourceResolution(
+                samples: samples,
+                divergenceThreshold: hrvDivergenceThreshold(for: day, hrvByDay: hrvByDay)
+            )
+        }
         let rhrByDay = WellnessReducer.latestValuePerDay(try await rhrSamples, calendar: calendar)
         let vo2ByDay = WellnessReducer.latestValuePerDay(try await vo2Samples, calendar: calendar)
         let resolvedSleep = try await sleepIntervals
@@ -199,7 +221,12 @@ final class SyncEngine: ObservableObject {
 
         for day in allDays {
             let row = try fetchOrCreateWellness(date: day)
-            row.hrvSDNN = hrvByDay[day]
+            let hrvResolution = hrvResolutionsByDay[day]
+            row.hrvSDNN = hrvResolution?.primaryValue ?? hrvByDay[day]
+            row.hrvPrimarySource = hrvResolution?.primarySource
+            row.hrvAltValue = hrvResolution?.altValue
+            row.hrvAltSource = hrvResolution?.altSource
+            row.hrvDisputed = hrvResolution?.diverged ?? false
             row.restingHeartRate = rhrByDay[day]
             row.sleepHours = sleepByDay[day]
             row.vo2Max = vo2ByDay[day]
@@ -212,6 +239,23 @@ final class SyncEngine: ObservableObject {
         let state = try fetchOrCreateSyncState(domain: SyncState.wellnessDomain)
         state.lastSyncAt = .now
         logger.info("Wellness sync: \(allDays.count) days recomputed")
+    }
+
+    private func hrvDivergenceThreshold(for day: Date, hrvByDay: [Date: Double]) -> Double {
+        let dayStart = calendar.startOfDay(for: day)
+        let start = calendar.date(
+            byAdding: .day,
+            value: -(ReadinessEngine.Tuning.baselineWindowDays - 1),
+            to: dayStart
+        ) ?? .distantPast
+        let values = hrvByDay
+            .filter { $0.key >= start && $0.key <= dayStart }
+            .map(\.value)
+        guard values.count >= 2 else { return 5.0 }
+        let average = values.reduce(0, +) / Double(values.count)
+        let variance = values.reduce(0) { $0 + pow($1 - average, 2) } / Double(values.count)
+        let standardDeviation = sqrt(variance)
+        return standardDeviation > 0 ? standardDeviation : 5.0
     }
 
     // MARK: - Fetch helpers

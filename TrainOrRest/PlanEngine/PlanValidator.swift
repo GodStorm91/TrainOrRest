@@ -18,6 +18,10 @@ enum PlanValidator {
             case qualityTooClose
             case raceMissing
             case weeklyVolumeTooHigh
+            case duplicateWorkoutDay
+            case workoutOutsidePlanWeek
+            case invalidDistance
+            case structureDistanceMismatch
         }
 
         var kind: Kind
@@ -40,7 +44,63 @@ enum PlanValidator {
         issues += taperIssues(plan)
         issues += qualitySpacingIssues(plan, calendar: calendar)
         issues += raceIssues(plan, calendar: calendar)
+        issues += duplicateDayIssues(plan, calendar: calendar)
+        issues += planWeekIssues(plan, calendar: calendar)
+        issues += distanceIssues(plan)
         return issues
+    }
+
+    /// A day holds at most one workout, anywhere in the plan.
+    private static func duplicateDayIssues(_ plan: TrainingPlanSpec, calendar: Calendar) -> [Issue] {
+        let days = plan.weeks.flatMap(\.workouts).map { calendar.startOfDay(for: $0.date) }.sorted()
+        return zip(days, days.dropFirst()).compactMap { earlier, later in
+            guard earlier == later else { return nil }
+            return Issue(
+                kind: .duplicateWorkoutDay,
+                weekIndex: nil,
+                message: "Two workouts scheduled on \(dayString(earlier, calendar: calendar))"
+            )
+        }
+    }
+
+    /// Every workout lives in the week that actually contains its date, so week
+    /// metadata (phase, target volume) always describes the right seven days.
+    private static func planWeekIssues(_ plan: TrainingPlanSpec, calendar: Calendar) -> [Issue] {
+        plan.weeks.flatMap { week -> [Issue] in
+            guard let end = calendar.date(byAdding: .day, value: 7, to: week.startDate) else { return [] }
+            return week.workouts.compactMap { workout in
+                guard workout.date < week.startDate || workout.date >= end else { return nil }
+                return Issue(
+                    kind: .workoutOutsidePlanWeek,
+                    weekIndex: week.index,
+                    message: "Week \(week.index): \(workout.kind.rawValue) on \(dayString(workout.date, calendar: calendar)) is outside that week"
+                )
+            }
+        }
+    }
+
+    /// Distances must be real numbers above zero, and a stored structure must
+    /// account for exactly the distance the workout claims.
+    private static func distanceIssues(_ plan: TrainingPlanSpec) -> [Issue] {
+        plan.weeks.flatMap { week in
+            week.workouts.flatMap { workout -> [Issue] in
+                guard workout.distanceKm.isFinite, workout.distanceKm > 0 else {
+                    return [Issue(
+                        kind: .invalidDistance,
+                        weekIndex: week.index,
+                        message: "Week \(week.index): \(workout.kind.rawValue) has invalid distance"
+                    )]
+                }
+                guard !workout.structure.isEmpty else { return [] }
+                let structured = WorkoutStructure.totalDistanceKm(workout.structure)
+                guard abs(structured - workout.distanceKm) > volumeEpsilonKm else { return [] }
+                return [Issue(
+                    kind: .structureDistanceMismatch,
+                    weekIndex: week.index,
+                    message: "Week \(week.index): \(workout.kind.rawValue) structure covers \(structured) km but claims \(workout.distanceKm) km"
+                )]
+            }
+        }
     }
 
     private static func absoluteVolumeIssues(_ plan: TrainingPlanSpec, peakCapKm: Double?) -> [Issue] {
@@ -150,6 +210,17 @@ enum PlanValidator {
                 message: "Hard sessions \(gap) day(s) apart around \(earlier)"
             )
         }
+    }
+
+    /// Local `YYYY-MM-DD` for issue messages. The engine stays free of the
+    /// main-actor chat layer, so it formats dates itself.
+    private static func dayString(_ date: Date, calendar: Calendar) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 
     private static func raceIssues(_ plan: TrainingPlanSpec, calendar: Calendar) -> [Issue] {

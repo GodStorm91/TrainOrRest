@@ -20,9 +20,12 @@ enum VerdictNotifier {
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         guard settings.authorizationStatus == .authorized else { return }
 
+        let language = CoachLanguage.current
         let content = UNMutableNotificationContent()
-        content.title = readiness.verdict.notificationTitle
-        content.body = readiness.reasons.first ?? "All recovery signals look good."
+        content.title = language.today.notificationTitle(readiness.verdict)
+        content.body = readiness.reasonCodes.first.map(language.today.reason)
+            ?? readiness.reasons.first
+            ?? language.today.notificationDefaultBody
         content.sound = .default
 
         let request = UNNotificationRequest(
@@ -36,17 +39,6 @@ enum VerdictNotifier {
             try? context.save()
         } catch {
             // Best-effort: leave notifiedAt nil so a later refresh can retry.
-        }
-    }
-}
-
-extension ReadinessVerdict {
-    var notificationTitle: String {
-        switch self {
-        case .train: "Train today"
-        case .goEasy: "Go easy today"
-        case .rest: "Rest today"
-        case .insufficientData: "TrainOrRest"
         }
     }
 }

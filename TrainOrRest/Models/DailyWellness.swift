@@ -10,6 +10,10 @@ final class DailyWellness {
     @Attribute(.unique) var date: Date
     /// Heart-rate variability (SDNN) in milliseconds; overnight/first value of the day.
     var hrvSDNN: Double?
+    var hrvPrimarySource: String?
+    var hrvAltValue: Double?
+    var hrvAltSource: String?
+    var hrvDisputed: Bool = false
     /// Resting heart rate in beats per minute.
     var restingHeartRate: Double?
     /// Total asleep hours attributed to this date: the night ending on this
@@ -26,6 +30,10 @@ final class DailyWellness {
     init(
         date: Date,
         hrvSDNN: Double? = nil,
+        hrvPrimarySource: String? = nil,
+        hrvAltValue: Double? = nil,
+        hrvAltSource: String? = nil,
+        hrvDisputed: Bool = false,
         restingHeartRate: Double? = nil,
         sleepHours: Double? = nil,
         vo2Max: Double? = nil,
@@ -35,6 +43,10 @@ final class DailyWellness {
     ) {
         self.date = date
         self.hrvSDNN = hrvSDNN
+        self.hrvPrimarySource = hrvPrimarySource
+        self.hrvAltValue = hrvAltValue
+        self.hrvAltSource = hrvAltSource
+        self.hrvDisputed = hrvDisputed
         self.restingHeartRate = restingHeartRate
         self.sleepHours = sleepHours
         self.vo2Max = vo2Max

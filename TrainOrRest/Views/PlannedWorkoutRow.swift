@@ -3,14 +3,20 @@ import SwiftUI
 struct PlannedWorkoutRow: View {
     let workout: PlannedWorkout
 
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+
     private var isToday: Bool { Calendar.current.isDateInToday(workout.date) }
 
     private var weekday: String {
-        workout.date.formatted(.dateTime.weekday(.abbreviated)).uppercased()
+        let rawValue = Calendar.current.component(.weekday, from: workout.date)
+        let day = Weekday(rawValue: rawValue) ?? .monday
+        return language.shortName(day).uppercased()
     }
 
     private var sessionName: String {
-        let kind = workout.kind?.displayName ?? workout.kindRaw
+        let kind = workout.kind.map(language.name) ?? language.genericRunLabel
         return "\(kind) · \(Formatters.kilometers(workout.distanceKm * 1000))"
     }
 
@@ -48,13 +54,9 @@ struct PlannedWorkoutRow: View {
     @ViewBuilder
     private var statusBadge: some View {
         if isToday {
-            badge("TODAY", Theme.accent)
+            badge(language.todayLabel.uppercased(), Theme.accent)
         } else {
-            switch workout.status {
-            case .done: badge("DONE", Theme.good)
-            case .skipped: badge("SKIPPED", Theme.warn)
-            case .planned: badge("PLANNED", Theme.dim)
-            }
+            badge(language.name(workout.status).uppercased(), workout.status.color)
         }
     }
 

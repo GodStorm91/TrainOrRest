@@ -6,26 +6,30 @@ struct PlanDiffView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var changes: [PlanDiff.DayChange] = []
 
+    @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
+
+    private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+
     var body: some View {
         List {
             if changes.isEmpty {
                 ContentUnavailableView(
-                    "No Changes",
+                    language.plan.noChanges,
                     systemImage: "checkmark.circle",
-                    description: Text("Today's plan matches yesterday's schedule.")
+                    description: Text(language.plan.planMatchesYesterday)
                 )
             } else {
                 Section {
-                    Label("Changes are limited to the upcoming plan window and reviewed by local training rules.", systemImage: "checkmark.shield")
+                    Label(language.plan.changesLimitedNotice, systemImage: "checkmark.shield")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
                 ForEach(changes.indices, id: \.self) { index in
-                    DiffRow(change: changes[index])
+                    DiffRow(change: changes[index], language: language)
                 }
             }
         }
-        .navigationTitle("Plan Changes")
+        .navigationTitle(language.plan.planChangesTitle)
         .task {
             changes = (try? ReadinessStore.todaysChanges(
                 in: modelContext, today: .now, calendar: .current
@@ -36,24 +40,25 @@ struct PlanDiffView: View {
 
 private struct DiffRow: View {
     let change: PlanDiff.DayChange
+    let language: CoachLanguage
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(change.date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+            Text(language.shortWeekdayDate(change.date))
                 .font(.subheadline.weight(.semibold))
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                ChangePill(title: "Before", value: summary(change.before), symbol: "clock")
+                ChangePill(title: language.plan.beforeLabel, value: summary(change.before), symbol: "clock")
                 Image(systemName: "arrow.right")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                ChangePill(title: "Now", value: summary(change.after), symbol: "checkmark.circle")
+                ChangePill(title: language.plan.nowLabel, value: summary(change.after), symbol: "checkmark.circle")
             }
 
             VStack(alignment: .leading, spacing: 3) {
                 Label(reasonText, systemImage: reasonSymbol)
                 Label(impactText, systemImage: "chart.line.uptrend.xyaxis")
-                Label("Reviewed by local plan rules before it reached your calendar.", systemImage: "checkmark.shield")
+                Label(language.plan.reviewedByRules, systemImage: "checkmark.shield")
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -62,16 +67,16 @@ private struct DiffRow: View {
     }
 
     private func summary(_ entry: PlanDiff.Entry?) -> String {
-        guard let entry else { return "Rest" }
-        return "\(entry.kind.displayName) \(Formatters.kilometers(entry.distanceKm * 1000))"
+        guard let entry else { return language.restDayLabel }
+        return "\(language.name(entry.kind)) \(Formatters.kilometers(entry.distanceKm * 1000))"
     }
 
     private var reasonText: String {
         switch change.reason {
         case .readiness(let verdict):
-            "Triggered by today's \(verdict.cardTitle.lowercased()) readiness verdict"
+            language.plan.readinessReason(verdict)
         case .volumeRefit:
-            "Adjusted after recent completed training changed the volume fit"
+            language.plan.volumeRefitReason
         }
     }
 
@@ -89,18 +94,18 @@ private struct DiffRow: View {
         case let (before?, after?):
             let delta = after.distanceKm - before.distanceKm
             if before.kind != after.kind {
-                return "Changed intensity from \(before.kind.displayName.lowercased()) to \(after.kind.displayName.lowercased())."
+                return language.plan.intensityChanged(from: language.name(before.kind), to: language.name(after.kind))
             }
             if abs(delta) >= 0.05 {
-                return String(format: "Distance changed by %.1f km.", delta)
+                return language.plan.distanceChanged(delta)
             }
-            return "Workout kept in place with updated training details."
+            return language.plan.workoutUpdatedDetails
         case (_?, nil):
-            return "Workout removed so the day becomes recovery."
+            return language.plan.workoutRemovedRecovery
         case (nil, let after?):
-            return "Added \(after.kind.displayName.lowercased()) to keep the plan balanced."
+            return language.plan.workoutAddedBalanced(language.name(after.kind))
         case (nil, nil):
-            return "No workout impact."
+            return language.plan.noWorkoutImpact
         }
     }
 }

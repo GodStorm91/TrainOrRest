@@ -1,0 +1,46 @@
+{
+  "id": "case-02-destructive-confirmation",
+  "goldenCase": 2,
+  "request": {
+    "text": "Delete workout entries for the next two weeks.",
+    "actionType": "planMutation",
+    "threadID": "00000000-0000-0000-0000-000000000002"
+  },
+  "setup": {
+    "readinessAnchors": [],
+    "plannedWorkoutAnchors": [],
+    "workouts": [
+      { "date": "2026-01-06", "kind": "easy", "distanceKm": 10 },
+      { "date": "2026-01-08", "kind": "tempo", "distanceKm": 8 },
+      { "date": "2026-01-10", "kind": "long", "distanceKm": 16 },
+      { "date": "2026-01-11", "kind": "easy", "distanceKm": 8 }
+    ],
+    "priorTurn": null
+  },
+  "mockResponses": [
+    {
+      "stop_reason": "tool_use",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_case2",
+          "name": "propose_plan_adjustment",
+          "input": {
+            "changes": [
+              { "date": "2026-01-06", "action": "rest" },
+              { "date": "2026-01-08", "action": "rest" },
+              { "date": "2026-01-10", "action": "rest" },
+              { "date": "2026-01-11", "action": "rest" }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "expect": {
+    "actionType": "planMutation",
+    "toolNames": ["propose_plan_adjustment"],
+    "toolChoice": { "type": "auto" },
+    "confirmation": "required"
+  }
+}
