@@ -25,7 +25,10 @@ final class RunScheduleController: ObservableObject {
     private let forecast: any WeatherForecasting
     private var lastFetchKey: String?
 
-    init(forecast: any WeatherForecasting = WeatherKitForecastService()) {
+    init(forecast: any WeatherForecasting = FallbackWeatherForecastService(
+        primary: WeatherKitForecastService(),
+        fallback: OpenMeteoForecastService()
+    )) {
         self.locations = RunLocationProvider()
         self.forecast = forecast
         showsWeatherOverlay = UserDefaults.standard.bool(forKey: Self.weatherOverlayKey)

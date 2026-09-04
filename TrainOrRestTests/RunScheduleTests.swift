@@ -107,6 +107,109 @@ final class RunScheduleTests: XCTestCase {
         XCTAssertTrue(label.contains("Rain risk"), label)
     }
 
+    func testOpenMeteoMapsPercentRainAndFiltersHours() async throws {
+        let http = StubWeatherHTTP(
+            status: 200,
+            body: openMeteoBody(times: ["2026-09-04T12:00", "2026-09-04T13:00", "2026-09-05T13:00"], rain: [40, 10, 90])
+        )
+        let samples = try await OpenMeteoForecastService(session: http).forecast(
+            at: 21.0285,
+            longitude: 105.8542,
+            from: utc(2026, 9, 4, hour: 13),
+            days: 1
+        )
+        XCTAssertEqual(http.lastURL?.host, "api.open-meteo.com")
+        XCTAssertTrue(http.lastURL?.absoluteString.contains("forecast_days=1") == true)
+        XCTAssertEqual(samples.map(\.precipitationChance), [0.1])
+        XCTAssertEqual(samples.map(\.temperatureC), [21])
+    }
+
+    func testOpenMeteoThrowsUnavailableOnHTTPError() async {
+        let http = StubWeatherHTTP(status: 500, body: Data("{}".utf8))
+        do {
+            _ = try await OpenMeteoForecastService(session: http).forecast(
+                at: 21,
+                longitude: 105,
+                from: utc(2026, 9, 4, hour: 0),
+                days: 10
+            )
+            XCTFail("expected unavailable")
+        } catch let error as WeatherForecastingError {
+            XCTAssertEqual(error, .unavailable)
+        } catch {
+            XCTFail("unexpected \(error)")
+        }
+    }
+
+    func testFallbackUsesOpenMeteoWhenWeatherKitThrows() async throws {
+        let http = StubWeatherHTTP(
+            status: 200,
+            body: openMeteoBody(times: ["2026-09-04T13:00"], rain: [25])
+        )
+        let service = FallbackWeatherForecastService(
+            primary: StubForecastService(result: .failure(WeatherForecastingError.unavailable)),
+            fallback: OpenMeteoForecastService(session: http)
+        )
+        let samples = try await service.forecast(
+            at: 21,
+            longitude: 105,
+            from: utc(2026, 9, 4, hour: 13),
+            days: 1
+        )
+        XCTAssertEqual(samples.count, 1)
+        XCTAssertEqual(samples[0].precipitationChance, 0.25, accuracy: 0.0001)
+    }
+
+    func testFallbackUsesOpenMeteoWhenWeatherKitJWTFails() async throws {
+        let jwt = NSError(
+            domain: "WeatherDaemon.WDSJWTAuthenticatorServiceListener.Error",
+            code: 2
+        )
+        let http = StubWeatherHTTP(
+            status: 200,
+            body: openMeteoBody(times: ["2026-09-04T13:00"], rain: [25])
+        )
+        let service = FallbackWeatherForecastService(
+            primary: StubForecastService(result: .failure(jwt)),
+            fallback: OpenMeteoForecastService(session: http)
+        )
+        let samples = try await service.forecast(
+            at: 21,
+            longitude: 105,
+            from: utc(2026, 9, 4, hour: 13),
+            days: 1
+        )
+        XCTAssertEqual(samples.count, 1)
+        XCTAssertEqual(samples[0].precipitationChance, 0.25, accuracy: 0.0001)
+    }
+
+    func testFallbackUsesOpenMeteoWhenWeatherKitReturnsEmpty() async throws {
+        let http = StubWeatherHTTP(
+            status: 200,
+            body: openMeteoBody(times: ["2026-09-04T13:00"], rain: [0])
+        )
+        let service = FallbackWeatherForecastService(
+            primary: StubForecastService(result: .success([])),
+            fallback: OpenMeteoForecastService(session: http)
+        )
+        let samples = try await service.forecast(
+            at: 21,
+            longitude: 105,
+            from: utc(2026, 9, 4, hour: 13),
+            days: 1
+        )
+        XCTAssertEqual(samples.count, 1)
+    }
+
+    @MainActor
+    func testRefreshWeatherClearsUnavailableAfterSuccessfulFetch() async {
+        let samples = [sample(date(2026, 9, 5, hour: 8), rain: 0.1, wind: 5)]
+        let controller = RunScheduleController(forecast: StubForecastService(result: .success(samples)))
+        controller.location = RunLocation(kind: .city, name: "Hanoi", latitude: 21.0285, longitude: 105.8542)
+        await controller.refreshWeather(force: true)
+        XCTAssertNil(controller.weatherUserMessage)
+        XCTAssertEqual(controller.hourly, samples)
+    }
 
     private func makeCandidate(start: Date, end: Date, score: Int) -> SchedulingCandidate {
         SchedulingCandidate(
@@ -137,5 +240,54 @@ final class RunScheduleTests: XCTestCase {
         components.day = day
         components.hour = hour
         return calendar.date(from: components)!
+    }
+
+    private func utc(_ year: Int, _ month: Int, _ day: Int, hour: Int) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour))!
+    }
+
+    private func openMeteoBody(times: [String], rain: [Double]) -> Data {
+        let temps = Array(repeating: 21.0, count: times.count)
+        let winds = Array(repeating: 8.0, count: times.count)
+        let payload: [String: Any] = [
+            "hourly": [
+                "time": times,
+                "temperature_2m": temps,
+                "precipitation_probability": rain,
+                "wind_speed_10m": winds,
+            ]
+        ]
+        return try! JSONSerialization.data(withJSONObject: payload)
+    }
+}
+
+private final class StubWeatherHTTP: WeatherHTTPSessioning, @unchecked Sendable {
+    var status: Int
+    var body: Data
+    var lastURL: URL?
+
+    init(status: Int, body: Data) {
+        self.status = status
+        self.body = body
+    }
+
+    func data(from url: URL) async throws -> (Data, URLResponse) {
+        lastURL = url
+        return (body, HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!)
+    }
+}
+
+private struct StubForecastService: WeatherForecasting {
+    var result: Result<[HourlyWeatherSample], Error>
+
+    func forecast(
+        at latitude: Double,
+        longitude: Double,
+        from start: Date,
+        days: Int
+    ) async throws -> [HourlyWeatherSample] {
+        try result.get()
     }
 }

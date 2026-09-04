@@ -258,8 +258,13 @@ struct WorkoutDetailView: View {
     }
 
     private var scheduledWeather: SlotWeather? {
-        guard isTimed(workout.date), !runSchedule.needsWeatherSetup else { return nil }
-        return runSchedule.slotWeather(start: workout.date, end: scheduledSlotEnd)
+        guard !runSchedule.needsWeatherSetup else { return nil }
+        if isTimed(workout.date) {
+            return runSchedule.slotWeather(start: workout.date, end: scheduledSlotEnd)
+        }
+        let start = Calendar.current.startOfDay(for: workout.date)
+        guard let end = Calendar.current.date(byAdding: .day, value: 1, to: start) else { return nil }
+        return runSchedule.slotWeather(start: start, end: end)
     }
 
     private var bestSmartCandidate: SchedulingCandidate? {
