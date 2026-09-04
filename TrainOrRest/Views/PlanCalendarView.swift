@@ -20,6 +20,7 @@ struct PlanCalendarView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var pushService: WorkoutPushService
     @EnvironmentObject private var googleCalendar: GoogleCalendarSyncService
+    @EnvironmentObject private var runSchedule: RunScheduleController
     @Query private var googleConnections: [GoogleCalendarConnection]
     @Query private var googleCalendarChanges: [GoogleCalendarInboundChange]
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -38,6 +39,7 @@ struct PlanCalendarView: View {
     @State private var forceSyncStatus: ForceSyncStatus?
     @State private var isShowingGoogleCalendarStatus = false
     @State private var didCheckGoogleCalendarOnOpen = false
+    @State private var isShowingRunScheduleSetup = false
 
     private let calendar = Calendar.current
 
@@ -104,6 +106,9 @@ struct PlanCalendarView: View {
         .sheet(isPresented: $isShowingGoogleCalendarStatus) {
             GoogleCalendarStatusSheet()
         }
+        .sheet(isPresented: $isShowingRunScheduleSetup) {
+            RunScheduleSetupSheet()
+        }
         .task {
             guard !didCheckGoogleCalendarOnOpen,
                   googleConnection?.allowsSchedulingFromGoogle == true || googleConnection?.smartSchedulingEnabled == true else { return }
@@ -113,6 +118,11 @@ struct PlanCalendarView: View {
             }
             if googleConnection?.smartSchedulingEnabled == true {
                 await googleCalendar.refreshAvailability(reason: "openTrainingCalendar")
+            }
+        }
+        .task {
+            if runSchedule.showsWeatherOverlay {
+                await runSchedule.refreshWeather()
             }
         }
     }
@@ -188,10 +198,14 @@ struct PlanCalendarView: View {
                 TorEyebrow(language.plan.trainingPlanTitle).tracking(2)
                 Spacer()
                 modeToggle
+                weatherToggle
             }
             VStack(alignment: .leading, spacing: 10) {
                 TorEyebrow(language.plan.trainingPlanTitle).tracking(2)
-                modeToggle
+                HStack(spacing: 8) {
+                    modeToggle
+                    weatherToggle
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -232,6 +246,25 @@ struct PlanCalendarView: View {
         }
         .padding(3)
         .background(Theme.chip, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
+    private var weatherToggle: some View {
+        Button {
+            if runSchedule.needsSetup(smartSchedulingEnabled: googleConnection?.smartSchedulingEnabled == true) {
+                isShowingRunScheduleSetup = true
+            } else {
+                runSchedule.showsWeatherOverlay.toggle()
+                if runSchedule.showsWeatherOverlay {
+                    Task { await runSchedule.refreshWeather() }
+                }
+            }
+        } label: {
+            Image(systemName: runSchedule.showsWeatherOverlay ? "cloud.sun.fill" : "cloud.sun")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(runSchedule.showsWeatherOverlay ? Theme.accent : Theme.dim)
+                .frame(width: 44, height: 44)
+        }
+        .accessibilityLabel(language.plan.weatherOverlay)
+        .accessibilityAddTraits(runSchedule.showsWeatherOverlay ? .isSelected : [])
     }
 
     private func segment(_ option: Mode) -> some View {

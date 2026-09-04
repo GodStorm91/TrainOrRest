@@ -64,6 +64,7 @@ final class CalendarRenderPerformanceTests: XCTestCase {
         let workouts: [PlannedWorkout]
         let activities: [CompletedActivity]
         @State private var selected = Date.now
+        private let runSchedule = RunScheduleController()
 
         var body: some View {
             NavigationStack {
@@ -74,6 +75,7 @@ final class CalendarRenderPerformanceTests: XCTestCase {
                     monthAnchor: $model.anchor,
                     selectedDate: $selected
                 )
+                .environmentObject(runSchedule)
             }
         }
     }

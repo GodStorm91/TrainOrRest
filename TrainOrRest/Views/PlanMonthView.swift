@@ -16,6 +16,7 @@ struct PlanMonthView: View {
     @Query(sort: \RunningShoe.createdAt, order: .reverse) private var shoes: [RunningShoe]
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @EnvironmentObject private var runSchedule: RunScheduleController
 
     private let calendar = Calendar.current
     private let railWidth: CGFloat = 40
@@ -147,6 +148,14 @@ struct PlanMonthView: View {
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(numberColor(isToday: isToday, isPast: isPast, hasWorkout: kind != nil))
                     dayMark(kind: kind, isPast: isPast)
+                    if runSchedule.showsWeatherOverlay {
+                        let glyph = runSchedule.glyph(on: date)
+                        if glyph != .noData {
+                            Image(systemName: glyph.systemImage)
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(RunScheduleCard.color(for: glyph))
+                        }
+                    }
                 }
             }
             .aspectRatio(1, contentMode: .fit)
@@ -460,6 +469,11 @@ struct PlanMonthView: View {
             let dayWorkouts = workouts(on: selectedDate)
             let activity = completedActivity(on: selectedDate)
             VStack(alignment: .leading, spacing: 10) {
+                if runSchedule.showsWeatherOverlay, runSchedule.glyph(on: selectedDate) == .noData {
+                    Text(language.plan.weatherNoData)
+                        .font(.caption)
+                        .foregroundStyle(Theme.faint)
+                }
                 TorEyebrow(selectedDayEyebrow).tracking(2)
                 if let activity {
                     CalendarRunSummaryCard(

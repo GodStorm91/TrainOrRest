@@ -12,6 +12,8 @@ struct PlanCopy {
     var trainingPlanTitle: String { text(en: "Training Plan", ja: "トレーニングプラン", vi: "Kế hoạch tập luyện") }
     var monthMode: String { text(en: "Month", ja: "月", vi: "Tháng") }
     var weekMode: String { text(en: "Week", ja: "週", vi: "Tuần") }
+    var weatherOverlay: String { text(en: "Weather", ja: "天気", vi: "Thời tiết") }
+    var weatherNoData: String { text(en: "No weather data yet", ja: "天気データはまだありません", vi: "Chưa có dữ liệu") }
     var syncIntervals: String { text(en: "Sync intervals.icu", ja: "intervals.icuと同期", vi: "Đồng bộ intervals.icu") }
     var noPlanYet: String { text(en: "No plan yet", ja: "プランはまだありません", vi: "Chưa có kế hoạch") }
     var noPlanDescription: String { text(en: "Set a race goal and TrainOrRest builds your day-by-day training plan.", ja: "レース目標を設定すると、TrainOrRestが日ごとのトレーニングプランを作成します。", vi: "Đặt mục tiêu cuộc đua để TrainOrRest xây dựng kế hoạch tập luyện theo từng ngày.") }
@@ -304,6 +306,17 @@ struct PlanCopy {
     var workoutStillInPlan: String { text(en: "This workout still exists in your TrainOrRest plan.", ja: "このワークアウトはTrainOrRestのプランに残っています。", vi: "Buổi tập này vẫn có trong kế hoạch TrainOrRest của bạn.") }
     var addBackToGoogleCalendar: String { text(en: "Add back to Google Calendar", ja: "Google カレンダーに戻す", vi: "Thêm lại vào Google Calendar") }
     var smartScheduling: String { text(en: "Smart Scheduling", ja: "スマートスケジューリング", vi: "Xếp lịch thông minh") }
+    var runSchedule: String { text(en: "Run schedule", ja: "ラン予定", vi: "Lịch chạy") }
+    var setupRunSchedule: String { text(en: "Set up run schedule", ja: "ラン予定を設定", vi: "Thiết lập lịch chạy") }
+    var runScheduleExplainTitle: String { text(en: "Pick a run time that fits your calendar and weather", ja: "カレンダーと天気に合うラン時間を選びます", vi: "Chọn giờ chạy khớp lịch và thời tiết") }
+    var runScheduleExplainBody: String { text(en: "TrainOrRest uses Google Calendar free time, then checks the next 10 days of weather so rain and wind can move a run to a better slot.", ja: "TrainOrRestはGoogleカレンダーの空き時間を使い、今後10日の天気を確認して雨や風のときはより良い枠へ移します。", vi: "TrainOrRest dùng giờ trống trên Google Calendar, rồi xem thời tiết 10 ngày tới để mưa và gió có thể dời buổi chạy sang khung tốt hơn.") }
+    var setRunLocation: String { text(en: "Run location", ja: "ラン地点", vi: "Vị trí chạy") }
+    var currentLocation: String { text(en: "Use current location", ja: "現在地を使う", vi: "Dùng vị trí hiện tại") }
+    var searchCity: String { text(en: "Search city", ja: "都市を検索", vi: "Tìm thành phố") }
+    var rainTolerance: String { text(en: "Rain tolerance", ja: "雨の許容", vi: "Chịu mưa") }
+    var rainLow: String { text(en: "Low", ja: "低", vi: "Thấp") }
+    var rainMedium: String { text(en: "Medium", ja: "中", vi: "Vừa") }
+    var rainHigh: String { text(en: "High", ja: "高", vi: "Cao") }
     var findingTime: String { text(en: "Finding a time", ja: "時間を検索中", vi: "Đang tìm giờ") }
     var findTime: String { text(en: "Find a time", ja: "時間を探す", vi: "Tìm giờ") }
     var findTimeAccessibility: String { text(en: "Find a time", ja: "時間を探す", vi: "Tìm giờ") }

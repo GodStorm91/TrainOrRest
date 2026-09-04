@@ -11,6 +11,7 @@ struct WorkoutDetailView: View {
     @Query private var googleConnections: [GoogleCalendarConnection]
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var googleCalendar: GoogleCalendarSyncService
+    @EnvironmentObject private var runSchedule: RunScheduleController
     @State private var smartCandidates: [SchedulingCandidate] = []
     @State private var smartSchedulingMessage: String?
     @State private var isFindingSmartTime = false
@@ -19,6 +20,7 @@ struct WorkoutDetailView: View {
     @State private var customStartTime: Date?
     @State private var customValidation: CustomTimeValidation?
     @State private var keepSelectedTimeFixed = false
+    @State private var isShowingRunScheduleSetup = false
     @State private var isApplyingSmartTime = false
     @State private var smartApplyResult: SmartSchedulingApplyResult?
     @State private var smartOperationKey = UUID().uuidString
@@ -36,6 +38,9 @@ struct WorkoutDetailView: View {
                 LabeledContent(language.plan.distance, value: Formatters.kilometers(workout.distanceKm * 1000))
                 if let band = workout.paceBand {
                     LabeledContent(language.plan.pace, value: Formatters.paceBand(band))
+                }
+                if let seconds = workout.expectedDurationSeconds {
+                    LabeledContent(language.durationLabel, value: Formatters.duration(seconds))
                 }
                 Text(workout.details)
                     .font(.callout)
@@ -60,29 +65,6 @@ struct WorkoutDetailView: View {
                         googleCalendar.addBackToGoogleCalendar(workoutID: workout.uuid)
                     } label: {
                         Label(language.plan.addBackToGoogleCalendar, systemImage: "calendar.badge.plus")
-                    }
-                }
-            }
-
-            if smartSchedulingEnabled {
-                Section(language.plan.smartScheduling) {
-                    if isTimed(workout.date) {
-                        scheduledSmartSchedulingSummary
-                    } else if smartCandidates.isEmpty {
-                        Button {
-                            Task { await refreshSmartCandidates() }
-                        } label: {
-                            Label(isFindingSmartTime ? language.plan.findingTime : language.plan.findTime, systemImage: "sparkles")
-                        }
-                        .accessibilityLabel(language.plan.findTimeAccessibility)
-                        .disabled(isFindingSmartTime)
-                    } else {
-                        bestSmartSchedulingCard
-                    }
-                    if let smartSchedulingMessage {
-                        Text(smartSchedulingMessage)
-                            .font(.caption)
-                            .foregroundStyle(smartCandidates.isEmpty ? Theme.warn : Theme.good)
                     }
                 }
             }
@@ -112,6 +94,35 @@ struct WorkoutDetailView: View {
                     Text(language.plan.retiredShoeNotice)
                         .font(.caption)
                         .foregroundStyle(Theme.warn)
+                }
+            }
+
+            Section(language.plan.runSchedule) {
+                RunScheduleCard(
+                    language: language,
+                    needsSetup: runSchedule.needsSetup(smartSchedulingEnabled: smartSchedulingEnabled),
+                    weather: scheduledWeather,
+                    onSetup: { isShowingRunScheduleSetup = true }
+                )
+                if smartSchedulingEnabled && !runSchedule.needsSetup(smartSchedulingEnabled: true) {
+                    if isTimed(workout.date) {
+                        scheduledSmartSchedulingSummary
+                    } else if smartCandidates.isEmpty {
+                        Button {
+                            Task { await refreshSmartCandidates() }
+                        } label: {
+                            Label(isFindingSmartTime ? language.plan.findingTime : language.plan.findTime, systemImage: "sparkles")
+                        }
+                        .accessibilityLabel(language.plan.findTimeAccessibility)
+                        .disabled(isFindingSmartTime)
+                    } else {
+                        bestSmartSchedulingCard
+                    }
+                    if let smartSchedulingMessage {
+                        Text(smartSchedulingMessage)
+                            .font(.caption)
+                            .foregroundStyle(smartCandidates.isEmpty ? Theme.warn : Theme.good)
+                    }
                 }
             }
 
@@ -162,6 +173,9 @@ struct WorkoutDetailView: View {
                 }
             )
         }
+        .sheet(isPresented: $isShowingRunScheduleSetup) {
+            RunScheduleSetupSheet()
+        }
         .onAppear {
             NotificationCenter.default.post(name: .torSetBottomDockHidden, object: true)
         }
@@ -169,6 +183,7 @@ struct WorkoutDetailView: View {
             NotificationCenter.default.post(name: .torSetBottomDockHidden, object: false)
         }
         .task {
+            await runSchedule.refreshWeather()
             if smartSchedulingEnabled && !isTimed(workout.date) {
                 await refreshSmartCandidates()
             }
@@ -231,6 +246,18 @@ struct WorkoutDetailView: View {
     private var smartSchedulingEnabled: Bool {
         googleConnections.first?.smartSchedulingEnabled == true
     }
+    private var scheduledSlotEnd: Date {
+        Calendar.current.date(
+            byAdding: .second,
+            value: Int(SmartSchedulingEngine().requiredWorkoutDurationSeconds(for: workout)),
+            to: workout.date
+        ) ?? workout.date
+    }
+
+    private var scheduledWeather: SlotWeather? {
+        guard isTimed(workout.date), runSchedule.showsWeatherOverlay else { return nil }
+        return runSchedule.slotWeather(start: workout.date, end: scheduledSlotEnd)
+    }
 
     private var bestSmartCandidate: SchedulingCandidate? {
         smartCandidates.first
@@ -286,6 +313,11 @@ struct WorkoutDetailView: View {
             ) ?? workout.date
             Text(timeRange(workout.date, end))
                 .font(.headline)
+            if let weather = scheduledWeather {
+                Label(weather.summary, systemImage: weather.glyph.systemImage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(RunScheduleCard.color(for: weather.glyph))
+            }
             Label(language.plan.syncedWhenAvailable, systemImage: "checkmark")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -306,7 +338,10 @@ struct WorkoutDetailView: View {
         isFindingSmartTime = true
         smartSchedulingMessage = nil
         defer { isFindingSmartTime = false }
-        smartCandidates = await googleCalendar.refreshedSmartSchedulingCandidates(for: workout, sameDayOnly: true, allowLockedWorkoutUpdate: true)
+        let calendarCandidates = await googleCalendar.refreshedSmartSchedulingCandidates(for: workout, sameDayOnly: true, allowLockedWorkoutUpdate: true)
+        smartCandidates = runSchedule.showsWeatherOverlay
+            ? runSchedule.rank(calendarCandidates).map(\.candidate)
+            : calendarCandidates
         if smartCandidates.isEmpty {
             smartSchedulingMessage = language.plan.noSuitableTime(workout.date)
         } else {
@@ -406,7 +441,7 @@ struct WorkoutDetailView: View {
     }
 
     private func isTimed(_ date: Date) -> Bool {
-        !Calendar.current.isDate(date, equalTo: Calendar.current.startOfDay(for: date), toGranularity: .minute)
+        RunScheduleTime.isTimed(date)
     }
 
     private func timeText(_ date: Date) -> String {
