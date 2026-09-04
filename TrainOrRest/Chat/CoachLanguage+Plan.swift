@@ -15,7 +15,8 @@ struct PlanCopy {
     var weatherOnNoForecast: String { text(en: "Weather on · no forecast", ja: "天気オン・予報なし", vi: "Thời tiết bật · chưa có dự báo") }
     var updatingForecast: String { text(en: "Updating 10-day forecast…", ja: "10日予報を更新中…", vi: "Đang cập nhật dự báo 10 ngày…") }
     var addWeatherForRun: String { text(en: "Add weather for this run", ja: "このランの天気を追加", vi: "Thêm thời tiết cho buổi chạy") }
-    var weatherUnavailable: String { text(en: "Couldn't load forecast. Try again.", ja: "予報を読み込めませんでした。再試行してください。", vi: "Không tải được dự báo. Thử lại.") }
+    var weatherUnavailable: String { text(en: "Forecast unavailable. Plan unchanged.", ja: "予報を利用できません。プランは変更されていません。", vi: "Không có dự báo. Kế hoạch không thay đổi.") }
+    var weatherRetry: String { text(en: "Retry", ja: "再試行", vi: "Thử lại") }
     var weatherMissingLocation: String { text(en: "Set a run location to load weather.", ja: "天気を読み込むにはラン地点を設定します。", vi: "Đặt vị trí chạy để tải thời tiết.") }
     var search: String { text(en: "Search", ja: "検索", vi: "Tìm") }
     var findTimeWithCalendar: String { text(en: "Find a better time with Calendar", ja: "カレンダーでより良い時間を探す", vi: "Tìm giờ tốt hơn với Lịch") }

@@ -56,10 +56,15 @@ struct TodayWeatherEvidenceRow: View {
                 .accessibilityLabel(language.plan.updatingForecast)
             } else if let failure {
                 Button(action: onRetry) {
-                    Label(language.plan.weatherCopy(failure), systemImage: "exclamationmark.triangle")
+                    HStack(spacing: 8) {
+                        Label(language.plan.weatherCopy(failure), systemImage: "exclamationmark.triangle")
+                        Spacer(minLength: 8)
+                        Text(language.plan.weatherRetry)
+                    }
                 }
                 .foregroundStyle(Theme.warn)
                 .accessibilityLabel(language.plan.weatherCopy(failure))
+                .accessibilityHint(language.plan.weatherRetry)
             } else if let weather {
                 let summary = weather.summary(language: language)
                 Label(summary, systemImage: weather.glyph.systemImage)

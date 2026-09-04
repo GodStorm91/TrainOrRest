@@ -205,7 +205,6 @@ struct PlanMonthView: View {
         } else {
             VStack(alignment: .leading, spacing: 10) {
                 TorEyebrow(language.plan.todayCall).tracking(2)
-                weatherEvidence(on: today, workout: dayWorkouts.first)
                 if let activity {
                     CalendarRunSummaryCard(
                         activity: activity,
@@ -220,6 +219,7 @@ struct PlanMonthView: View {
                 } else {
                     todaysCallHero(workout: dayWorkouts.first)
                 }
+                weatherEvidence(on: today, workout: dayWorkouts.first)
             }
         }
     }
