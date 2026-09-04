@@ -5,7 +5,6 @@ import SwiftUI
 struct RunScheduleSetupSheet: View {
     enum Step: Int, CaseIterable {
         case explain
-        case google
         case location
         case weather
     }
@@ -28,7 +27,6 @@ struct RunScheduleSetupSheet: View {
             Group {
                 switch step {
                 case .explain: explainStep
-                case .google: googleStep
                 case .location: locationStep
                 case .weather: weatherStep
                 }
@@ -75,31 +73,10 @@ struct RunScheduleSetupSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text(language.plan.runScheduleExplainTitle)
                 .font(.title2.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
             Text(language.plan.runScheduleExplainBody)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var googleStep: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(language.plan.connectGoogleCalendar)
-                .font(.headline)
-            Text(connection.calendarName.isEmpty ? language.integrations.connectCalendarSubtitle : connection.calendarName)
-                .foregroundStyle(.secondary)
-            NavigationLink {
-                GoogleCalendarSettingsView()
-            } label: {
-                Label(
-                    connection.connectionStatus == .disconnected ? language.integrations.connectGoogleCalendar : language.integrations.googleCalendarTitle,
-                    systemImage: "calendar"
-                )
-                .frame(maxWidth: .infinity, minHeight: 44)
-            }
-            .buttonStyle(.bordered)
-            if connection.smartSchedulingEnabled {
-                Label(language.plan.smartScheduling, systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(Theme.good)
-            }
+                .foregroundStyle(Theme.dim)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -128,7 +105,7 @@ struct RunScheduleSetupSheet: View {
             HStack {
                 TextField(language.plan.searchCity, text: $cityQuery)
                     .textFieldStyle(.roundedBorder)
-                Button(language.plan.searchCity) {
+                Button(language.plan.search) {
                     Task {
                         isWorking = true
                         defer { isWorking = false }
@@ -149,39 +126,102 @@ struct RunScheduleSetupSheet: View {
             if let location = runSchedule.location {
                 Text(location.name)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.dim)
             }
-            if let message = runSchedule.weatherMessage {
-                Text(message)
-                    .font(.caption)
+            if let message = runSchedule.weatherUserMessage {
+                Text(language.plan.weatherCopy(message))
+                    .font(.footnote.weight(.medium))
                     .foregroundStyle(Theme.warn)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
     private var weatherStep: some View {
         VStack(alignment: .leading, spacing: 14) {
+            Text(language.plan.rainTolerance)
+                .font(.headline)
             Picker(language.plan.rainTolerance, selection: $runSchedule.rainTolerance) {
-                Text(language.plan.rainLow).tag(RainTolerance.low)
-                Text(language.plan.rainMedium).tag(RainTolerance.medium)
-                Text(language.plan.rainHigh).tag(RainTolerance.high)
+                Text(language.plan.rainStanceLabel(.low)).tag(RainTolerance.low)
+                Text(language.plan.rainStanceLabel(.medium)).tag(RainTolerance.medium)
+                Text(language.plan.rainStanceLabel(.high)).tag(RainTolerance.high)
             }
             .pickerStyle(.segmented)
+            .accessibilityLabel(language.plan.rainTolerance)
 
-            if runSchedule.isRefreshingWeather {
-                ProgressView()
-            } else if let sample = runSchedule.hourly.first {
-                Label(
-                    String(format: "%.0f°C · %d%% rain", sample.temperatureC, Int((sample.precipitationChance * 100).rounded())),
-                    systemImage: "cloud.sun"
-                )
-            } else {
-                Text(language.plan.weatherNoData)
-                    .foregroundStyle(.secondary)
+            Text(language.plan.rainToleranceCaption(runSchedule.rainTolerance))
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Theme.dim)
+                .fixedSize(horizontal: false, vertical: true)
+
+            weatherPreview
+
+            NavigationLink {
+                GoogleCalendarSettingsView()
+            } label: {
+                Label(language.plan.findTimeWithCalendar, systemImage: "calendar")
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            }
+            .buttonStyle(.bordered)
+            if connection.smartSchedulingEnabled {
+                Label(language.plan.smartScheduling, systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(Theme.good)
             }
         }
         .task {
             await runSchedule.refreshWeather(force: true)
+        }
+    }
+
+    @ViewBuilder
+    private var weatherPreview: some View {
+        if runSchedule.isRefreshingWeather {
+            HStack(spacing: 8) {
+                ProgressView()
+                Text(language.plan.updatingForecast)
+            }
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(Theme.dim)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .accessibilityLabel(language.plan.updatingForecast)
+        } else if let failure = runSchedule.weatherUserMessage {
+            Button {
+                Task { await runSchedule.refreshWeather(force: true) }
+            } label: {
+                Label(language.plan.weatherCopy(failure), systemImage: "exclamationmark.triangle")
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            }
+            .foregroundStyle(Theme.warn)
+        } else if let sample = runSchedule.hourly.first {
+            let preview = HourlyWeatherSample(
+                hourStart: sample.hourStart,
+                temperatureC: sample.temperatureC,
+                precipitationChance: sample.precipitationChance,
+                windKmh: sample.windKmh
+            )
+            Label(
+                language.plan.slotWeatherSummary(
+                    SlotWeather(
+                        samples: [preview],
+                        temperatureRangeC: preview.temperatureC...preview.temperatureC,
+                        precipitationMax: preview.precipitationChance,
+                        windMaxKmh: preview.windKmh,
+                        glyph: RunScheduleWeather.dayGlyph(
+                            hourly: runSchedule.hourly,
+                            on: Date(),
+                            rainTolerance: runSchedule.rainTolerance
+                        )
+                    )
+                ),
+                systemImage: "cloud.sun"
+            )
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(Theme.text)
+            .fixedSize(horizontal: false, vertical: true)
+        } else {
+            Text(language.plan.weatherOnNoForecast)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Theme.dim)
         }
     }
 
@@ -192,7 +232,6 @@ struct RunScheduleSetupSheet: View {
     private var canAdvance: Bool {
         switch step {
         case .explain: true
-        case .google: connection.smartSchedulingEnabled || connection.connectionStatus != .disconnected
         case .location: runSchedule.location != nil
         case .weather: true
         }

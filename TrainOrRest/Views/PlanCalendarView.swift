@@ -71,7 +71,10 @@ struct PlanCalendarView: View {
         .toolbar {
             if verticalSizeClass == .compact {
                 ToolbarItem(placement: .principal) {
-                    modeToggle
+                    HStack(spacing: 8) {
+                        modeToggle
+                        weatherToggle
+                    }
                 }
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -121,7 +124,7 @@ struct PlanCalendarView: View {
             }
         }
         .task {
-            if runSchedule.showsWeatherOverlay {
+            if runSchedule.setupCompleted || runSchedule.showsWeatherOverlay {
                 await runSchedule.refreshWeather()
             }
         }
@@ -158,6 +161,7 @@ struct PlanCalendarView: View {
                             monthAnchor: $monthAnchor,
                             selectedDate: $selectedDate,
                             onReviewRunInChat: onReviewRunInChat,
+                            onConfigureWeather: { isShowingRunScheduleSetup = true },
                             displaysOnlyTodaysCall: true
                         )
                         googleCalendarStatusRow
@@ -183,6 +187,7 @@ struct PlanCalendarView: View {
                 monthAnchor: $monthAnchor,
                 selectedDate: $selectedDate,
                 onReviewRunInChat: onReviewRunInChat,
+                onConfigureWeather: { isShowingRunScheduleSetup = true },
                 showsTodaysCall: !hidesTodaysCall
             )
         } else {
@@ -248,8 +253,10 @@ struct PlanCalendarView: View {
         .background(Theme.chip, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
     }
     private var weatherToggle: some View {
-        Button {
-            if runSchedule.needsSetup(smartSchedulingEnabled: googleConnection?.smartSchedulingEnabled == true) {
+        let setupNeeded = runSchedule.needsWeatherSetup
+        let selected = !setupNeeded && runSchedule.showsWeatherOverlay
+        return Button {
+            if setupNeeded {
                 isShowingRunScheduleSetup = true
             } else {
                 runSchedule.showsWeatherOverlay.toggle()
@@ -258,13 +265,29 @@ struct PlanCalendarView: View {
                 }
             }
         } label: {
-            Image(systemName: runSchedule.showsWeatherOverlay ? "cloud.sun.fill" : "cloud.sun")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(runSchedule.showsWeatherOverlay ? Theme.accent : Theme.dim)
-                .frame(width: 44, height: 44)
+            Text(language.plan.weatherOverlay)
+                .font(.caption.weight(selected ? .bold : .semibold))
+                .fixedSize(horizontal: true, vertical: false)
+                .foregroundStyle(selected ? Color.white : Theme.faint)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 5)
+                .background(
+                    selected ? Theme.accent : Theme.chip,
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .accessibilityLabel(language.plan.weatherOverlay)
-        .accessibilityAddTraits(runSchedule.showsWeatherOverlay ? .isSelected : [])
+        .accessibilityValue(
+            language.plan.weatherChipValue(
+                setupNeeded: setupNeeded,
+                overlayOn: selected,
+                hasForecast: !runSchedule.hourly.isEmpty
+            )
+        )
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func segment(_ option: Mode) -> some View {

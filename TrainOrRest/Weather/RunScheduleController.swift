@@ -19,7 +19,7 @@ final class RunScheduleController: ObservableObject {
     }
     @Published private(set) var hourly: [HourlyWeatherSample] = []
     @Published private(set) var isRefreshingWeather = false
-    @Published var weatherMessage: String?
+    @Published private(set) var weatherUserMessage: WeatherForecastingError?
 
     let locations: RunLocationProvider
     private let forecast: any WeatherForecasting
@@ -42,16 +42,14 @@ final class RunScheduleController: ObservableObject {
         UserDefaults.standard.bool(forKey: Self.setupCompletedKey) && location != nil
     }
 
+    var needsWeatherSetup: Bool { !setupCompleted }
+
     func markSetupCompleted() {
         UserDefaults.standard.set(true, forKey: Self.setupCompletedKey)
         if !showsWeatherOverlay {
             showsWeatherOverlay = true
         }
         objectWillChange.send()
-    }
-
-    func needsSetup(smartSchedulingEnabled: Bool) -> Bool {
-        !setupCompleted || !smartSchedulingEnabled
     }
 
     func captureCurrentLocation() async {
@@ -63,24 +61,29 @@ final class RunScheduleController: ObservableObject {
                 latitude: current.coordinate.latitude,
                 longitude: current.coordinate.longitude
             )
+            weatherUserMessage = nil
             await refreshWeather(force: true)
         } catch {
-            weatherMessage = error.localizedDescription
+            weatherUserMessage = .unavailable
         }
     }
 
     func searchPlace(_ query: String) async {
         do {
             location = try await locations.place(named: query)
+            weatherUserMessage = nil
             await refreshWeather(force: true)
         } catch {
-            weatherMessage = error.localizedDescription
+            weatherUserMessage = .unavailable
         }
     }
 
     func refreshWeather(force: Bool = false) async {
-        guard showsWeatherOverlay || force else { return }
-        guard let location else { return }
+        guard setupCompleted || showsWeatherOverlay || force else { return }
+        guard let location else {
+            weatherUserMessage = .missingLocation
+            return
+        }
         let key = "\(location.latitude),\(location.longitude),\(Calendar.current.startOfDay(for: .now).timeIntervalSince1970)"
         if !force, lastFetchKey == key { return }
         isRefreshingWeather = true
@@ -93,9 +96,11 @@ final class RunScheduleController: ObservableObject {
                 days: RunScheduleWeather.forecastHorizonDays
             )
             lastFetchKey = key
-            weatherMessage = nil
+            weatherUserMessage = nil
+        } catch let error as WeatherForecastingError {
+            weatherUserMessage = error
         } catch {
-            weatherMessage = error.localizedDescription
+            weatherUserMessage = .unavailable
         }
     }
 

@@ -66,6 +66,63 @@ final class RunScheduleTests: XCTestCase {
         XCTAssertTrue(RunScheduleTime.isTimed(date(2026, 9, 5, hour: 6), calendar: calendar))
     }
 
+    func testSlotWeatherSummaryLeadsWithStanceAndNumbers() {
+        let weather = SlotWeather(
+            samples: [],
+            temperatureRangeC: 18...22,
+            precipitationMax: 0.10,
+            windMaxKmh: 12,
+            glyph: .good
+        )
+        XCTAssertEqual(
+            PlanCopy(language: .en).slotWeatherSummary(weather),
+            "Clear to run · 18–22°C · 10% rain · 12 km/h"
+        )
+        XCTAssertEqual(
+            weather.summary(language: .en),
+            "Clear to run · 18–22°C · 10% rain · 12 km/h"
+        )
+        XCTAssertTrue(PlanCopy(language: .ja).slotWeatherSummary(weather).hasPrefix("走れる天気"))
+        XCTAssertTrue(PlanCopy(language: .vi).slotWeatherSummary(weather).hasPrefix("Trời ổn để chạy"))
+    }
+
+    func testRainToleranceCopyStatesTheCutoff() {
+        let copy = PlanCopy(language: .en)
+        XCTAssertEqual(copy.rainStanceLabel(.low), "Avoid rain")
+        XCTAssertEqual(copy.rainToleranceCaption(.low), "Skip slots above 15% chance of rain.")
+        XCTAssertEqual(copy.rainToleranceCaption(.medium), "Skip slots above 40% chance of rain.")
+        XCTAssertEqual(copy.rainToleranceCaption(.high), "Skip slots above 70% chance of rain.")
+    }
+
+    func testDayAccessibilityIncludesWeatherStance() {
+        let day = date(2026, 9, 5)
+        let copy = PlanCopy(language: .en)
+        let label = copy.dayAccessibility(
+            date: day,
+            kind: .easy,
+            isToday: true,
+            weatherStance: copy.weatherStance(.rainRisk)
+        )
+        XCTAssertTrue(label.contains("today"), label)
+        XCTAssertTrue(label.contains("Rain risk"), label)
+    }
+
+    func testWeatherChipValueNamesEmptyForecast() {
+        let copy = PlanCopy(language: .en)
+        XCTAssertEqual(
+            copy.weatherChipValue(setupNeeded: true, overlayOn: false, hasForecast: false),
+            "Add weather for this run"
+        )
+        XCTAssertEqual(
+            copy.weatherChipValue(setupNeeded: false, overlayOn: true, hasForecast: false),
+            "Weather on · no forecast"
+        )
+        XCTAssertEqual(
+            copy.weatherChipValue(setupNeeded: false, overlayOn: true, hasForecast: true),
+            "On"
+        )
+    }
+
     private func makeCandidate(start: Date, end: Date, score: Int) -> SchedulingCandidate {
         SchedulingCandidate(
             workoutID: UUID(),

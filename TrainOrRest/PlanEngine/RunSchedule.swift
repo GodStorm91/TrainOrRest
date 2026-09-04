@@ -49,12 +49,8 @@ struct SlotWeather: Equatable {
     var windMaxKmh: Double
     var glyph: WeatherGlyph
 
-    var summary: String {
-        let low = Int(temperatureRangeC.lowerBound.rounded())
-        let high = Int(temperatureRangeC.upperBound.rounded())
-        let rain = Int((precipitationMax * 100).rounded())
-        let wind = Int(windMaxKmh.rounded())
-        return "\(low)–\(high)°C · \(rain)% rain · \(wind) km/h wind"
+    func summary(language: CoachLanguage) -> String {
+        language.plan.slotWeatherSummary(self)
     }
 }
 

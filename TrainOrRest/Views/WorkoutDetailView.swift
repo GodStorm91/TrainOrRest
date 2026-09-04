@@ -100,11 +100,14 @@ struct WorkoutDetailView: View {
             Section(language.plan.runSchedule) {
                 RunScheduleCard(
                     language: language,
-                    needsSetup: runSchedule.needsSetup(smartSchedulingEnabled: smartSchedulingEnabled),
+                    needsSetup: runSchedule.needsWeatherSetup,
+                    isLoading: runSchedule.isRefreshingWeather,
+                    failure: runSchedule.weatherUserMessage,
                     weather: scheduledWeather,
-                    onSetup: { isShowingRunScheduleSetup = true }
+                    onSetup: { isShowingRunScheduleSetup = true },
+                    onRetry: { Task { await runSchedule.refreshWeather(force: true) } }
                 )
-                if smartSchedulingEnabled && !runSchedule.needsSetup(smartSchedulingEnabled: true) {
+                if smartSchedulingEnabled {
                     if isTimed(workout.date) {
                         scheduledSmartSchedulingSummary
                     } else if smartCandidates.isEmpty {
@@ -255,7 +258,7 @@ struct WorkoutDetailView: View {
     }
 
     private var scheduledWeather: SlotWeather? {
-        guard isTimed(workout.date), runSchedule.showsWeatherOverlay else { return nil }
+        guard isTimed(workout.date), !runSchedule.needsWeatherSetup else { return nil }
         return runSchedule.slotWeather(start: workout.date, end: scheduledSlotEnd)
     }
 
@@ -314,9 +317,10 @@ struct WorkoutDetailView: View {
             Text(timeRange(workout.date, end))
                 .font(.headline)
             if let weather = scheduledWeather {
-                Label(weather.summary, systemImage: weather.glyph.systemImage)
-                    .font(.caption.weight(.semibold))
+                Label(weather.summary(language: language), systemImage: weather.glyph.systemImage)
+                    .font(.footnote.weight(.medium))
                     .foregroundStyle(RunScheduleCard.color(for: weather.glyph))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Label(language.plan.syncedWhenAvailable, systemImage: "checkmark")
                 .font(.caption)

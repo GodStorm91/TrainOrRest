@@ -11,6 +11,7 @@ struct PlanMonthView: View {
     @Binding var monthAnchor: Date
     @Binding var selectedDate: Date
     var onReviewRunInChat: (CompletedActivity) -> Void = { _ in }
+    var onConfigureWeather: () -> Void = {}
     var showsTodaysCall = true
     var displaysOnlyTodaysCall = false
     @Query(sort: \RunningShoe.createdAt, order: .reverse) private var shoes: [RunningShoe]
@@ -148,14 +149,6 @@ struct PlanMonthView: View {
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(numberColor(isToday: isToday, isPast: isPast, hasWorkout: kind != nil))
                     dayMark(kind: kind, isPast: isPast)
-                    if runSchedule.showsWeatherOverlay {
-                        let glyph = runSchedule.glyph(on: date)
-                        if glyph != .noData {
-                            Image(systemName: glyph.systemImage)
-                                .font(.system(size: 8, weight: .semibold))
-                                .foregroundStyle(RunScheduleCard.color(for: glyph))
-                        }
-                    }
                 }
             }
             .aspectRatio(1, contentMode: .fit)
@@ -191,7 +184,98 @@ struct PlanMonthView: View {
     }
 
     private func accessibilityLabel(_ date: Date, kind: WorkoutKind?, isToday: Bool) -> String {
-        language.plan.dayAccessibility(date: date, kind: kind, isToday: isToday)
+        let stance: String?
+        if runSchedule.showsWeatherOverlay {
+            stance = language.plan.weatherStance(runSchedule.glyph(on: date))
+        } else {
+            stance = nil
+        }
+        return language.plan.dayAccessibility(date: date, kind: kind, isToday: isToday, weatherStance: stance)
+    }
+    @ViewBuilder
+    private var todaysCall: some View {
+        let today = calendar.startOfDay(for: .now)
+        let dayWorkouts = workouts(on: today)
+        let activity = completedActivity(on: today)
+        if verticalSizeClass == .compact {
+            VStack(alignment: .leading, spacing: 8) {
+                compactTodaysCall(activity: activity, workout: dayWorkouts.first)
+                weatherEvidence(on: today, workout: dayWorkouts.first)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                TorEyebrow(language.plan.todayCall).tracking(2)
+                weatherEvidence(on: today, workout: dayWorkouts.first)
+                if let activity {
+                    CalendarRunSummaryCard(
+                        activity: activity,
+                        plannedWorkout: matchedWorkout(for: activity) ?? dayWorkouts.first,
+                        compact: false,
+                        reviewDestination: ChatView(contextualCompletedActivityID: activity.hkUUID),
+                        onReview: { onReviewRunInChat(activity) }
+                    )
+                    ForEach(dayWorkouts) { workout in
+                        detailCard(workout)
+                    }
+                } else {
+                    todaysCallHero(workout: dayWorkouts.first)
+                }
+            }
+        }
+    }
+    @ViewBuilder
+    private var selectedDayDetail: some View {
+        if !calendar.isDateInToday(selectedDate) {
+            let dayWorkouts = workouts(on: selectedDate)
+            let activity = completedActivity(on: selectedDate)
+            VStack(alignment: .leading, spacing: 10) {
+                if runSchedule.showsWeatherOverlay || runSchedule.needsWeatherSetup {
+                    weatherEvidence(on: selectedDate, workout: dayWorkouts.first)
+                }
+                TorEyebrow(selectedDayEyebrow).tracking(2)
+                if let activity {
+                    CalendarRunSummaryCard(
+                        activity: activity,
+                        plannedWorkout: matchedWorkout(for: activity) ?? dayWorkouts.first,
+                        compact: false,
+                        reviewDestination: ChatView(contextualCompletedActivityID: activity.hkUUID),
+                        onReview: { onReviewRunInChat(activity) }
+                    )
+                }
+                if dayWorkouts.isEmpty && activity == nil {
+                    restCard
+                } else {
+                    ForEach(dayWorkouts) { workout in
+                        detailCard(workout)
+                    }
+                }
+            }
+        }
+    }
+
+    private func weatherEvidence(on day: Date, workout: PlannedWorkout?) -> some View {
+        TodayWeatherEvidenceRow(
+            language: language,
+            needsSetup: runSchedule.needsWeatherSetup,
+            isLoading: runSchedule.isRefreshingWeather,
+            failure: runSchedule.weatherUserMessage,
+            weather: slotWeather(on: day, workout: workout),
+            onSetup: onConfigureWeather,
+            onRetry: { Task { await runSchedule.refreshWeather(force: true) } }
+        )
+    }
+
+    private func slotWeather(on day: Date, workout: PlannedWorkout?) -> SlotWeather? {
+        if let workout, RunScheduleTime.isTimed(workout.date), calendar.isDate(workout.date, inSameDayAs: day) {
+            let duration = workout.expectedDurationSeconds ?? 3600
+            return runSchedule.slotWeather(
+                start: workout.date,
+                end: workout.date.addingTimeInterval(duration)
+            )
+        }
+        let start = calendar.startOfDay(for: day)
+        guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return nil }
+        return runSchedule.slotWeather(start: start, end: end)
     }
 
     // MARK: - Weekly rhythm
@@ -264,33 +348,6 @@ struct PlanMonthView: View {
 
     // MARK: - Selected day detail
 
-    @ViewBuilder
-    private var todaysCall: some View {
-        let today = calendar.startOfDay(for: .now)
-        let dayWorkouts = workouts(on: today)
-        let activity = completedActivity(on: today)
-        if verticalSizeClass == .compact {
-            compactTodaysCall(activity: activity, workout: dayWorkouts.first)
-        } else {
-            VStack(alignment: .leading, spacing: 10) {
-                TorEyebrow(language.plan.todayCall).tracking(2)
-                if let activity {
-                    CalendarRunSummaryCard(
-                        activity: activity,
-                        plannedWorkout: matchedWorkout(for: activity) ?? dayWorkouts.first,
-                        compact: false,
-                        reviewDestination: ChatView(contextualCompletedActivityID: activity.hkUUID),
-                        onReview: { onReviewRunInChat(activity) }
-                    )
-                    ForEach(dayWorkouts) { workout in
-                        detailCard(workout)
-                    }
-                } else {
-                    todaysCallHero(workout: dayWorkouts.first)
-                }
-            }
-        }
-    }
 
     @ViewBuilder
     private func compactTodaysCall(
@@ -463,37 +520,6 @@ struct PlanMonthView: View {
         workout.kind.map(language.plan.workoutPurpose)
     }
 
-    @ViewBuilder
-    private var selectedDayDetail: some View {
-        if !calendar.isDateInToday(selectedDate) {
-            let dayWorkouts = workouts(on: selectedDate)
-            let activity = completedActivity(on: selectedDate)
-            VStack(alignment: .leading, spacing: 10) {
-                if runSchedule.showsWeatherOverlay, runSchedule.glyph(on: selectedDate) == .noData {
-                    Text(language.plan.weatherNoData)
-                        .font(.caption)
-                        .foregroundStyle(Theme.faint)
-                }
-                TorEyebrow(selectedDayEyebrow).tracking(2)
-                if let activity {
-                    CalendarRunSummaryCard(
-                        activity: activity,
-                        plannedWorkout: matchedWorkout(for: activity) ?? dayWorkouts.first,
-                        compact: false,
-                        reviewDestination: ChatView(contextualCompletedActivityID: activity.hkUUID),
-                        onReview: { onReviewRunInChat(activity) }
-                    )
-                }
-                if dayWorkouts.isEmpty && activity == nil {
-                    restCard
-                } else {
-                    ForEach(dayWorkouts) { workout in
-                        detailCard(workout)
-                    }
-                }
-            }
-        }
-    }
 
     private var selectedDayEyebrow: String {
         language.longDate(selectedDate)
