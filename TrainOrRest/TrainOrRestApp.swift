@@ -203,6 +203,8 @@ struct RootView: View {
             ProfileView()
         case .coach:
             DevCoachLiveView()
+        case .shoes:
+            RunningShoesView()
         }
     }
     #endif

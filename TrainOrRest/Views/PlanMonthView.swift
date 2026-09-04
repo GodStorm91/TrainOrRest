@@ -458,6 +458,14 @@ struct PlanMonthView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         receiptLine(workout)
+                        if let shoe = assignedShoe(for: workout) {
+                            HStack(spacing: 5) {
+                                Image(systemName: "shoeprints.fill")
+                                Text(workout.shoeAssignmentSource == .auto ? "\(shoe.displayName) · \(language.plan.autoLabel)" : shoe.displayName)
+                            }
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Theme.dim)
+                        }
                     }
                     Spacer(minLength: 8)
                     statusBadge(workout, isToday: true)

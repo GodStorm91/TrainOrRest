@@ -6,9 +6,13 @@ struct PostRunReviewSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var activity: CompletedActivity
     let plannedWorkout: PlannedWorkout?
+    @Query(sort: \RunningShoe.createdAt, order: .reverse) private var shoes: [RunningShoe]
+    @Query private var mileageEntries: [ShoeMileageEntry]
+    @Query private var storedShoePreferences: [RunningShoePreferences]
 
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
     @State private var showDetailedReview = false
+    @State private var isChoosingShoe = false
 
     private var language: CoachLanguage {
         CoachLanguage(rawValue: languageRaw) ?? .en
@@ -19,6 +23,7 @@ struct PostRunReviewSheet: View {
             ScrollView {
                 VStack(spacing: 22) {
                     header
+                    shoeRow
                     progressBar
                     actions
                     noteEditor
@@ -36,6 +41,23 @@ struct PostRunReviewSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
+        .sheet(isPresented: $isChoosingShoe) {
+            ShoePickerSheet(
+                workoutType: ShoeWorkoutType.normalized(from: plannedWorkout?.kind),
+                shoes: shoes,
+                mileageEntries: mileageEntries,
+                recommendedShoeID: recommendedShoeID,
+                allowsAutomaticSelection: false,
+                onSelect: { shoe in
+                    activity.shoeID = shoe?.id
+                    activity.shoeAssignmentSource = shoe == nil ? .none : .manual
+                    try? ShoeMileageService.syncMileage(for: activity, in: modelContext)
+                    try? modelContext.save()
+                },
+                onAutomatic: nil
+            )
+        }
+        .onAppear(perform: copyPlannedShoeIfNeeded)
     }
 
     private var header: some View {
@@ -137,6 +159,61 @@ struct PostRunReviewSheet: View {
             .buttonStyle(PostRunActionButtonStyle())
         }
     }
+    private var shoeRow: some View {
+        Button {
+            isChoosingShoe = true
+        } label: {
+            WorkoutShoeRow(
+                shoe: assignedShoe,
+                source: activity.shoeAssignmentSource,
+                isNearMileageRange: assignedShoe.map(isNearMileageRange) ?? false
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(14)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+        .accessibilityLabel(language.plan.gear)
+    }
+
+    private var assignedShoe: RunningShoe? {
+        guard let shoeID = activity.shoeID else { return nil }
+        return shoes.first { $0.id == shoeID }
+    }
+
+    private var shoePreferences: RunningShoePreferences {
+        storedShoePreferences.first ?? RunningShoePreferences()
+    }
+
+    private var recommendedShoeID: UUID? {
+        if let shoeID = plannedWorkout?.shoeID { return shoeID }
+        return ShoeAssignmentService.selectShoeForWorkout(
+            workoutType: ShoeWorkoutType.normalized(from: plannedWorkout?.kind),
+            activeShoes: shoes,
+            preferences: shoePreferences,
+            existingShoeID: nil,
+            existingAssignmentSource: .none,
+            mileageEntries: mileageEntries
+        ).shoeID
+    }
+
+    private func isNearMileageRange(_ shoe: RunningShoe) -> Bool {
+        ShoeWearStatusService.isNearRetirement(
+            shoe,
+            ledger: mileageEntries,
+            thresholdPercent: shoePreferences.nearRetirementThresholdPercent
+        )
+    }
+
+    private func copyPlannedShoeIfNeeded() {
+        guard ShoeAssignmentService.inheritPlannedShoe(onto: activity, from: plannedWorkout) else { return }
+        try? ShoeMileageService.syncMileage(for: activity, in: modelContext)
+        try? modelContext.save()
+    }
+
 
     private var noteEditor: some View {
         VStack(alignment: .leading, spacing: 10) {

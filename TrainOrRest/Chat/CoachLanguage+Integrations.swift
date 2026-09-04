@@ -1133,6 +1133,38 @@ struct IntegrationsCopy {
         case .vi: "Dùng lại giày"
         }
     }
+    var retireShoeQuestion: String {
+        switch language {
+        case .en: "Retire this shoe?"
+        case .ja: "このシューズを引退しますか？"
+        case .vi: "Ngừng dùng đôi giày này?"
+        }
+    }
+
+    func retireShoeMessage(_ name: String) -> String {
+        switch language {
+        case .en: "\(name) leaves automatic assignment. Mileage stays in the ledger. You can reactivate it later."
+        case .ja: "\(name)は自動割り当てから外れます。走行距離は残ります。後から再使用できます。"
+        case .vi: "\(name) sẽ không còn được gán tự động. Quãng đường vẫn giữ. Bạn có thể dùng lại sau."
+        }
+    }
+
+    func shoeFormTitle(_ base: String, step: Int, of total: Int) -> String {
+        switch language {
+        case .en: "\(base) · \(step) of \(total)"
+        case .ja: "\(base) · \(step)/\(total)"
+        case .vi: "\(base) · \(step)/\(total)"
+        }
+    }
+
+    var approachingShort: String {
+        switch language {
+        case .en: "Approaching"
+        case .ja: "接近"
+        case .vi: "Sắp đến hạn"
+        }
+    }
+
 
     var approachingRecommendedMileage: String {
         switch language {

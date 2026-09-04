@@ -238,6 +238,55 @@ final class RunningShoeServiceTests: XCTestCase {
         XCTAssertEqual(ShoeWearStatusService.wearStatus(currentMileageKm: 105, expectedLifespanKm: 100), .pastRange)
     }
 
+    func testInheritPlannedShoeCopiesWhenActivityHasNone() {
+        let shoeID = UUID()
+        let planned = PlannedWorkout(
+            spec: PlannedWorkoutSpec(date: Date(), kind: .easy, distanceKm: 8, paceBand: nil, details: ""),
+            weekIndex: 0,
+            phase: .base
+        )
+        planned.shoeID = shoeID
+        planned.shoeAssignmentSource = .auto
+
+        let activity = makeActivity()
+
+        XCTAssertTrue(ShoeAssignmentService.inheritPlannedShoe(onto: activity, from: planned))
+        XCTAssertEqual(activity.shoeID, shoeID)
+        XCTAssertEqual(activity.shoeAssignmentSource, .auto)
+    }
+
+    func testInheritPlannedShoeDoesNotOverwriteExistingActivityShoe() {
+        let planned = PlannedWorkout(
+            spec: PlannedWorkoutSpec(date: Date(), kind: .easy, distanceKm: 8, paceBand: nil, details: ""),
+            weekIndex: 0,
+            phase: .base
+        )
+        planned.shoeID = UUID()
+        planned.shoeAssignmentSource = .auto
+
+        let existing = UUID()
+        let activity = makeActivity()
+        activity.shoeID = existing
+        activity.shoeAssignmentSource = .manual
+
+        XCTAssertFalse(ShoeAssignmentService.inheritPlannedShoe(onto: activity, from: planned))
+        XCTAssertEqual(activity.shoeID, existing)
+        XCTAssertEqual(activity.shoeAssignmentSource, .manual)
+    }
+
+    func testInheritPlannedShoeNoopsWithoutPlannedShoe() {
+        let planned = PlannedWorkout(
+            spec: PlannedWorkoutSpec(date: Date(), kind: .easy, distanceKm: 8, paceBand: nil, details: ""),
+            weekIndex: 0,
+            phase: .base
+        )
+        let activity = makeActivity()
+
+        XCTAssertFalse(ShoeAssignmentService.inheritPlannedShoe(onto: activity, from: planned))
+        XCTAssertFalse(ShoeAssignmentService.inheritPlannedShoe(onto: activity, from: nil))
+        XCTAssertNil(activity.shoeID)
+    }
+
     private func makeShoe(
         brand: String = "ASICS",
         model: String = "Superblast",
@@ -258,6 +307,19 @@ final class RunningShoeServiceTests: XCTestCase {
             expectedLifespanKm: expected,
             createdAt: createdAt,
             updatedAt: createdAt
+        )
+    }
+
+    private func makeActivity() -> CompletedActivity {
+        CompletedActivity(
+            hkUUID: UUID(),
+            date: Date(),
+            distanceMeters: 8000,
+            durationSeconds: 2400,
+            avgHeartRate: nil,
+            maxHeartRate: nil,
+            avgPaceSecondsPerKm: nil,
+            sourceName: "test"
         )
     }
 

@@ -126,6 +126,16 @@ enum ShoeAssignmentService {
         workout.shoeAssignmentSource = result.source
     }
 
+    /// Copies a planned workout's shoe onto a completed activity that has none.
+    /// Returns true when the activity was updated.
+    @discardableResult
+    static func inheritPlannedShoe(onto activity: CompletedActivity, from planned: PlannedWorkout?) -> Bool {
+        guard activity.shoeID == nil, let planned, planned.shoeID != nil else { return false }
+        activity.shoeID = planned.shoeID
+        activity.shoeAssignmentSource = planned.shoeAssignmentSource
+        return true
+    }
+
     private static func shouldAutoAssign(_ workout: PlannedWorkout) -> Bool {
         workout.shoeAssignmentSource != .manual
     }
