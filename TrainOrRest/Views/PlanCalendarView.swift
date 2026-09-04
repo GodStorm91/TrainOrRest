@@ -71,10 +71,7 @@ struct PlanCalendarView: View {
         .toolbar {
             if verticalSizeClass == .compact {
                 ToolbarItem(placement: .principal) {
-                    HStack(spacing: 8) {
-                        modeToggle
-                        weatherToggle
-                    }
+                    modeToggle
                 }
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -203,14 +200,10 @@ struct PlanCalendarView: View {
                 TorEyebrow(language.plan.trainingPlanTitle).tracking(2)
                 Spacer()
                 modeToggle
-                weatherToggle
             }
             VStack(alignment: .leading, spacing: 10) {
                 TorEyebrow(language.plan.trainingPlanTitle).tracking(2)
-                HStack(spacing: 8) {
-                    modeToggle
-                    weatherToggle
-                }
+                modeToggle
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -251,43 +244,6 @@ struct PlanCalendarView: View {
         }
         .padding(3)
         .background(Theme.chip, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-    }
-    private var weatherToggle: some View {
-        let setupNeeded = runSchedule.needsWeatherSetup
-        let selected = !setupNeeded && runSchedule.showsWeatherOverlay
-        return Button {
-            if setupNeeded {
-                isShowingRunScheduleSetup = true
-            } else {
-                runSchedule.showsWeatherOverlay.toggle()
-                if runSchedule.showsWeatherOverlay {
-                    Task { await runSchedule.refreshWeather() }
-                }
-            }
-        } label: {
-            Text(language.plan.weatherOverlay)
-                .font(.caption.weight(selected ? .bold : .semibold))
-                .fixedSize(horizontal: true, vertical: false)
-                .foregroundStyle(selected ? Color.white : Theme.faint)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 5)
-                .background(
-                    selected ? Theme.accent : Theme.chip,
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                )
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(language.plan.weatherOverlay)
-        .accessibilityValue(
-            language.plan.weatherChipValue(
-                setupNeeded: setupNeeded,
-                overlayOn: selected,
-                hasForecast: !runSchedule.hourly.isEmpty
-            )
-        )
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func segment(_ option: Mode) -> some View {

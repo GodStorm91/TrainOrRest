@@ -107,21 +107,6 @@ final class RunScheduleTests: XCTestCase {
         XCTAssertTrue(label.contains("Rain risk"), label)
     }
 
-    func testWeatherChipValueNamesEmptyForecast() {
-        let copy = PlanCopy(language: .en)
-        XCTAssertEqual(
-            copy.weatherChipValue(setupNeeded: true, overlayOn: false, hasForecast: false),
-            "Add weather for this run"
-        )
-        XCTAssertEqual(
-            copy.weatherChipValue(setupNeeded: false, overlayOn: true, hasForecast: false),
-            "Weather on · no forecast"
-        )
-        XCTAssertEqual(
-            copy.weatherChipValue(setupNeeded: false, overlayOn: true, hasForecast: true),
-            "On"
-        )
-    }
 
     private func makeCandidate(start: Date, end: Date, score: Int) -> SchedulingCandidate {
         SchedulingCandidate(

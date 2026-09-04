@@ -12,10 +12,7 @@ struct PlanCopy {
     var trainingPlanTitle: String { text(en: "Training Plan", ja: "トレーニングプラン", vi: "Kế hoạch tập luyện") }
     var monthMode: String { text(en: "Month", ja: "月", vi: "Tháng") }
     var weekMode: String { text(en: "Week", ja: "週", vi: "Tuần") }
-    var weatherOverlay: String { text(en: "Weather", ja: "天気", vi: "Thời tiết") }
     var weatherOnNoForecast: String { text(en: "Weather on · no forecast", ja: "天気オン・予報なし", vi: "Thời tiết bật · chưa có dự báo") }
-    var weatherOn: String { text(en: "On", ja: "オン", vi: "Bật") }
-    var weatherOff: String { text(en: "Off", ja: "オフ", vi: "Tắt") }
     var updatingForecast: String { text(en: "Updating 10-day forecast…", ja: "10日予報を更新中…", vi: "Đang cập nhật dự báo 10 ngày…") }
     var addWeatherForRun: String { text(en: "Add weather for this run", ja: "このランの天気を追加", vi: "Thêm thời tiết cho buổi chạy") }
     var weatherUnavailable: String { text(en: "Couldn't load forecast. Try again.", ja: "予報を読み込めませんでした。再試行してください。", vi: "Không tải được dự báo. Thử lại.") }
@@ -356,12 +353,6 @@ struct PlanCopy {
             vi: "\(low)–\(high)°C · \(rain)% mưa · gió \(wind) km/h"
         )
         return "\(weatherStance(weather.glyph)) · \(numbers)"
-    }
-    func weatherChipValue(setupNeeded: Bool, overlayOn: Bool, hasForecast: Bool) -> String {
-        if setupNeeded { return addWeatherForRun }
-        if overlayOn && !hasForecast { return weatherOnNoForecast }
-        if overlayOn { return weatherOn }
-        return weatherOff
     }
     func weatherCopy(_ message: WeatherForecastingError) -> String {
         switch message {
