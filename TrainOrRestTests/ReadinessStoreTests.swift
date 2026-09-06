@@ -51,6 +51,76 @@ final class ReadinessStoreTests: XCTestCase {
         XCTAssertTrue(pushableRows.allSatisfy { !$0.structure.isEmpty })
     }
 
+    func testDailyPipelineCollapsesSameDayDuplicatePlannedWorkouts() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let history = PlanEngineTestSupport.history(
+            weeks: 8,
+            runsPerWeek: 2,
+            distanceKm: 8,
+            paceSecondsPerKm: 330,
+            endingAt: today
+        )
+        for sample in history {
+            context.insert(CompletedActivity(
+                hkUUID: UUID(),
+                date: sample.date,
+                distanceMeters: sample.distanceKm * 1000,
+                durationSeconds: sample.durationSeconds,
+                avgHeartRate: nil,
+                maxHeartRate: nil,
+                avgPaceSecondsPerKm: sample.durationSeconds / sample.distanceKm,
+                sourceName: "Garmin"
+            ))
+        }
+        let fitness = try XCTUnwrap(PlanStore.currentFitness(in: context, today: today, calendar: calendar))
+        try PlanStore.replaceGoal(spec: goal, fitness: fitness, today: today, calendar: calendar, in: context)
+
+        let original = try XCTUnwrap(
+            try context.fetch(FetchDescriptor<PlannedWorkout>()).first { $0.date >= today && $0.status == .planned }
+        )
+        let shoeID = UUID()
+        original.shoeID = shoeID
+        original.manuallyOverridden = true
+        let plan = try XCTUnwrap(try PlanStore.activePlan(in: context))
+        let kind = try XCTUnwrap(original.kind)
+        let phase = try XCTUnwrap(TrainingPhase(rawValue: original.phaseRaw))
+        for _ in 0..<3 {
+            let clone = PlannedWorkout(
+                spec: PlannedWorkoutSpec(
+                    date: original.date,
+                    kind: kind,
+                    distanceKm: original.distanceKm,
+                    paceBand: original.paceBand,
+                    details: original.details,
+                    structure: original.structure
+                ),
+                weekIndex: original.weekIndex,
+                phase: phase
+            )
+            clone.manuallyOverridden = true
+            clone.plan = plan
+            context.insert(clone)
+        }
+        try context.save()
+        XCTAssertEqual(
+            try context.fetch(FetchDescriptor<PlannedWorkout>()).filter {
+                calendar.isDate($0.date, inSameDayAs: original.date) && $0.status == .planned
+            }.count,
+            4
+        )
+
+        try ReadinessStore.runDailyPipeline(in: context, today: today, calendar: calendar)
+
+        let remaining = try context.fetch(FetchDescriptor<PlannedWorkout>()).filter {
+            calendar.isDate($0.date, inSameDayAs: original.date) && $0.status == .planned
+        }
+        XCTAssertEqual(remaining.count, 1)
+        XCTAssertEqual(remaining.first?.shoeID, shoeID)
+        XCTAssertEqual(remaining.first?.uuid, original.uuid)
+    }
+
+
     private var goal: GoalSpec {
         GoalSpec(
             distance: .halfMarathon,

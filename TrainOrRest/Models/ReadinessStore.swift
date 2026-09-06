@@ -201,13 +201,28 @@ enum ReadinessStore {
         calendar: Calendar
     ) throws {
         let dayStart = calendar.startOfDay(for: today)
-        let future = try context.fetch(FetchDescriptor<PlannedWorkout>(
+        var future = try context.fetch(FetchDescriptor<PlannedWorkout>(
             predicate: #Predicate { $0.date >= dayStart },
             sortBy: [SortDescriptor(\.date)]
         ))
+        let plannedByDay = Dictionary(grouping: future.filter { $0.status == .planned }) {
+            calendar.startOfDay(for: $0.date)
+        }
+        var collapsed = Set<UUID>()
+        for group in plannedByDay.values where group.count > 1 {
+            guard let keeper = PlannedWorkout.preferredAmongDuplicates(group) else { continue }
+            for extra in group where extra.uuid != keeper.uuid {
+                collapsed.insert(extra.uuid)
+                context.delete(extra)
+            }
+        }
+        if !collapsed.isEmpty {
+            future.removeAll { collapsed.contains($0.uuid) }
+        }
         let kept = future.filter { $0.status != .planned || $0.manuallyOverridden }
         let keptDays = Set(kept.map { calendar.startOfDay(for: $0.date) })
         let replaceable = future.filter { $0.status == .planned && !$0.manuallyOverridden }
+
 
         let incoming = spec.weeks.flatMap { week in
             week.workouts

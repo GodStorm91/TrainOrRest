@@ -998,7 +998,13 @@ enum CoachTools {
         let weeks = plan.weekPhasesRaw.indices.map { index in
             let phase = TrainingPhase(rawValue: plan.weekPhasesRaw[index]) ?? .base
             let start = calendar.date(byAdding: .day, value: index * 7, to: PlanGenerator.mondayOfWeek(containing: plan.anchorDate, calendar: calendar))!
-            let rows = workouts.filter { $0.weekIndex == index }.compactMap(toSpec)
+            let weekRows = workouts.filter { $0.weekIndex == index }
+            let uniqueByDay = Dictionary(grouping: weekRows) { calendar.startOfDay(for: $0.date) }
+                .values
+                .compactMap { preferredRow(in: Array($0)) }
+                .sorted { $0.date < $1.date }
+            let rows = uniqueByDay.compactMap(toSpec)
+
             return WeekPlan(
                 startDate: start, index: index, phase: phase,
                 isDownWeek: plan.weekIsDown[index],
@@ -1010,6 +1016,10 @@ enum CoachTools {
         return TrainingPlanSpec(goal: goal, anchorDate: calendar.startOfDay(for: today), weeks: weeks)
     }
 
+    /// Makes future planned rows match `spec` without cloning.
+    /// Same-day rows are updated in place (uuid/shoe/Google link stay);
+    /// extras on a day are deleted; a move updates the source row's date
+    /// when kind and distance still match.
     private static func persist(
         _ spec: TrainingPlanSpec,
         in context: ModelContext,
@@ -1017,22 +1027,90 @@ enum CoachTools {
         calendar: Calendar
     ) throws {
         let dayStart = calendar.startOfDay(for: today)
-        let rows = try context.fetch(FetchDescriptor<PlannedWorkout>())
-        for row in rows where row.date >= dayStart && row.status == .planned && !row.manuallyOverridden {
-            context.delete(row)
-        }
         guard let plan = try PlanStore.activePlan(in: context) else { return }
         plan.weekTargetVolumesKm = spec.weeks.map(\.targetVolumeKm)
-        for week in spec.weeks {
-            for workout in week.workouts where workout.date >= dayStart {
-                let row = PlannedWorkout(spec: workout, weekIndex: week.index, phase: week.phase)
-                row.manuallyOverridden = true
-                row.plan = plan
-                context.insert(row)
+        plan.generatedAt = today
+
+        struct Desired {
+            var workout: PlannedWorkoutSpec
+            var weekIndex: Int
+            var phase: TrainingPhase
+        }
+
+        let desired: [Desired] = spec.weeks.flatMap { week in
+            week.workouts
+                .filter { $0.date >= dayStart }
+                .map { Desired(workout: $0, weekIndex: week.index, phase: week.phase) }
+        }
+
+        let rows = try context.fetch(FetchDescriptor<PlannedWorkout>())
+        let futurePlanned = rows.filter { $0.date >= dayStart && $0.status == .planned }
+        var remaining = Dictionary(grouping: futurePlanned) { calendar.startOfDay(for: $0.date) }
+        var unmatchedDesired: [Desired] = []
+
+        for item in desired {
+            let key = calendar.startOfDay(for: item.workout.date)
+            guard var group = remaining.removeValue(forKey: key),
+                  let keeper = preferredRow(in: group) else {
+                unmatchedDesired.append(item)
+                continue
+            }
+            update(keeper, from: item.workout, weekIndex: item.weekIndex, phase: item.phase)
+            for extra in group where extra.uuid != keeper.uuid {
+                context.delete(extra)
             }
         }
-        plan.generatedAt = today
+
+        var unmatchedExisting = remaining.values.flatMap { $0 }
+        var leftoverDesired: [Desired] = []
+        for item in unmatchedDesired {
+            if let index = unmatchedExisting.firstIndex(where: {
+                $0.kindRaw == item.workout.kind.rawValue
+                    && abs($0.distanceKm - item.workout.distanceKm) < 0.05
+            }) {
+                let row = unmatchedExisting.remove(at: index)
+                update(row, from: item.workout, weekIndex: item.weekIndex, phase: item.phase)
+            } else {
+                leftoverDesired.append(item)
+            }
+        }
+
+        for row in unmatchedExisting {
+            context.delete(row)
+        }
+        for item in leftoverDesired {
+            let row = PlannedWorkout(spec: item.workout, weekIndex: item.weekIndex, phase: item.phase)
+            row.manuallyOverridden = true
+            row.plan = plan
+            context.insert(row)
+        }
     }
+
+    private static func preferredRow(in group: [PlannedWorkout]) -> PlannedWorkout? {
+        PlannedWorkout.preferredAmongDuplicates(group)
+    }
+
+
+    private static func update(
+        _ row: PlannedWorkout,
+        from workout: PlannedWorkoutSpec,
+        weekIndex: Int,
+        phase: TrainingPhase
+    ) {
+        row.date = workout.date
+        row.weekIndex = weekIndex
+        row.phaseRaw = phase.rawValue
+        row.kindRaw = workout.kind.rawValue
+        row.distanceKm = workout.distanceKm
+        row.paceFastSecondsPerKm = workout.paceBand?.fastSecondsPerKm
+        row.paceSlowSecondsPerKm = workout.paceBand?.slowSecondsPerKm
+        row.details = workout.details
+        row.structure = workout.structure
+        row.manuallyOverridden = true
+        row.matchedActivityUUID = nil
+        row.isScheduleLocked = false
+    }
+
 
     private static func toSpec(_ row: PlannedWorkout) -> PlannedWorkoutSpec? {
         guard let kind = row.kind else { return nil }
