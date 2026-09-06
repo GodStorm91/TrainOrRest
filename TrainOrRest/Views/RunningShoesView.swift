@@ -179,7 +179,8 @@ struct RunningShoeRow: View {
 
     private var warningText: String? {
         switch wearStatus {
-        case .normal, .approaching: nil
+        case .normal: nil
+        case .approaching: language.integrations.approachingShort
         case .inspect: language.integrations.checkSoon
         case .pastRange: language.integrations.pastTypicalRange
         }
@@ -187,7 +188,7 @@ struct RunningShoeRow: View {
 
     private var wearColor: Color {
         switch wearStatus {
-        case .normal: Theme.accent
+        case .normal: Theme.dim
         case .approaching, .inspect, .pastRange: Theme.warn
         }
     }
@@ -229,6 +230,7 @@ struct ShoeDetailView: View {
     @Query(sort: \CompletedActivity.date, order: .reverse) private var activities: [CompletedActivity]
 
     @State private var showingEdit = false
+    @State private var isConfirmingRetire = false
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
 
     private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
@@ -266,7 +268,7 @@ struct ShoeDetailView: View {
 
                 detailSection(language.integrations.usage) {
                     ShoeMetricRow(label: language.integrations.runs, value: "\(shoeActivities.count)")
-                    ShoeMetricRow(label: language.integrations.distance, value: Formatters.kilometers(entries.map(\.distanceKm).reduce(0, +) * 1000))
+                    ShoeMetricRow(label: language.integrations.distance, value: Formatters.kilometers(mileageKm * 1000))
                     if let last = shoeActivities.first {
                         ShoeMetricRow(
                             label: language.integrations.lastRun,
@@ -293,7 +295,11 @@ struct ShoeDetailView: View {
                     .buttonStyle(.bordered)
 
                     Button(role: shoe.status == .active ? .destructive : nil) {
-                        toggleStatus()
+                        if shoe.status == .active {
+                            isConfirmingRetire = true
+                        } else {
+                            toggleStatus()
+                        }
                     } label: {
                         Label(shoe.status == .active ? language.integrations.retireShoe : language.integrations.reactivateShoe, systemImage: shoe.status == .active ? "archivebox" : "arrow.uturn.backward")
                             .frame(maxWidth: .infinity, minHeight: 46)
@@ -314,6 +320,18 @@ struct ShoeDetailView: View {
                     try? modelContext.save()
                 }
             }
+        }
+        .confirmationDialog(
+            language.integrations.retireShoeQuestion,
+            isPresented: $isConfirmingRetire,
+            titleVisibility: .visible
+        ) {
+            Button(language.integrations.retireShoe, role: .destructive) {
+                toggleStatus()
+            }
+            Button(language.cancelLabel, role: .cancel) {}
+        } message: {
+            Text(language.integrations.retireShoeMessage(shoe.displayName))
         }
     }
 
@@ -458,7 +476,11 @@ struct ShoeFormView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button(language.cancelLabel) { dismiss() }
+                if step == 0 {
+                    Button(language.cancelLabel) { dismiss() }
+                } else {
+                    Button(language.backLabel) { step -= 1 }
+                }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button(step == 2 ? language.saveLabel : language.integrations.next) {
@@ -485,10 +507,12 @@ struct ShoeFormView: View {
     }
 
     private var title: String {
+        let base: String
         switch mode {
-        case .add: language.integrations.addShoe
-        case .edit: language.editLabel
+        case .add: base = language.integrations.addShoe
+        case .edit: base = language.editLabel
         }
+        return language.integrations.shoeFormTitle(base, step: step + 1, of: 3)
     }
 
     private var canContinue: Bool {
@@ -696,7 +720,7 @@ struct WorkoutShoeRow: View {
     private var subtitle: String {
         if isNearMileageRange { return language.integrations.nearRecommendedMileageRange }
         if source == .auto { return language.integrations.automaticallySelected }
-        if shoe == nil { return language.integrations.addShoe }
+        if shoe == nil { return language.integrations.chooseShoe }
         return language.integrations.runningShoe
     }
 }

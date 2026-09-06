@@ -36,6 +36,7 @@ enum DevSeed {
         case delivery
         case profile
         case coach
+        case shoes
     }
 
     /// The requested launch screen, or `nil` for the normal tab shell.
@@ -105,6 +106,7 @@ enum DevSeed {
         applyRequestedLanguage()
         seedPlanIfRequested(context)
         seedHistoryIfRequested(context)
+        seedShoesIfRequested(context)
         if isLiveRequested { return seedLiveThread(context) }
 
         let id = threadID
@@ -164,6 +166,58 @@ enum DevSeed {
         )
         let fitness = FitnessProfile(vdot: 48, weeklyVolumeKm: 40, volumeTrend: 0, longestRecentRunKm: 16)
         try? PlanStore.replaceGoal(spec: spec, fitness: fitness, today: today, calendar: calendar, in: context)
+    }
+
+    /// `TOR_DEV_SCREEN=shoes` seeds a small closet so the list can show
+    /// approaching wear copy, a healthy pair, and a retired pair.
+    @MainActor
+    private static func seedShoesIfRequested(_ context: ModelContext) {
+        let wantsShoes = requestedScreen == .shoes
+            || ProcessInfo.processInfo.environment["TOR_DEV_PLAN"] == "1"
+        guard wantsShoes else { return }
+        let existing = (try? context.fetch(FetchDescriptor<RunningShoe>())) ?? []
+        if existing.isEmpty {
+            context.insert(RunningShoe(
+                brand: "ASICS",
+                model: "Superblast",
+                initialMileageKm: 120,
+                preferredWorkoutTypes: [.easy, .longRun],
+                primaryWorkoutType: .easy,
+                expectedLifespanKm: 600
+            ))
+            context.insert(RunningShoe(
+                brand: "Nike",
+                model: "Vaporfly",
+                initialMileageKm: 490,
+                preferredWorkoutTypes: [.tempo, .intervals],
+                primaryWorkoutType: .tempo,
+                expectedLifespanKm: 600
+            ))
+            context.insert(RunningShoe(
+                brand: "Brooks",
+                model: "Ghost",
+                initialMileageKm: 720,
+                status: .retired,
+                preferredWorkoutTypes: [.easy],
+                expectedLifespanKm: 700
+            ))
+        }
+        assignSeededShoeToToday(context)
+        try? context.save()
+    }
+
+    @MainActor
+    private static func assignSeededShoeToToday(_ context: ModelContext) {
+        let shoes = (try? context.fetch(FetchDescriptor<RunningShoe>())) ?? []
+        guard let shoe = shoes.first(where: { $0.status == .active }) else { return }
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: Date())
+        guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return }
+        let workouts = (try? context.fetch(FetchDescriptor<PlannedWorkout>())) ?? []
+        for workout in workouts where workout.date >= start && workout.date < end {
+            workout.shoeID = shoe.id
+            workout.shoeAssignmentSource = .auto
+        }
     }
 
     /// `TOR_DEV_HISTORY=1` seeds six months of wellness, runs, and readiness

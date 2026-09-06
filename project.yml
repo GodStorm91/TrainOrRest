@@ -25,6 +25,7 @@ targets:
       properties:
         com.apple.developer.healthkit: true
         com.apple.developer.healthkit.background-delivery: true
+        com.apple.developer.weatherkit: true
         com.apple.security.application-groups:
           - group.com.khanhnguyen.TrainOrRest
     info:
@@ -43,6 +44,10 @@ targets:
         NSHealthUpdateUsageDescription: >-
           TrainOrRest writes selected workout and training data to Apple Health
           only when you choose to sync it, so your health record stays complete.
+        NSLocationWhenInUseUsageDescription: >-
+          TrainOrRest uses your location to check weather for the hours you run.
+        NSLocationUsageDescription: >-
+          TrainOrRest uses your location to check weather for the hours you run.
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationPortraitUpsideDown

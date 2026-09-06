@@ -20,6 +20,7 @@ struct PlanCalendarView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var pushService: WorkoutPushService
     @EnvironmentObject private var googleCalendar: GoogleCalendarSyncService
+    @EnvironmentObject private var runSchedule: RunScheduleController
     @Query private var googleConnections: [GoogleCalendarConnection]
     @Query private var googleCalendarChanges: [GoogleCalendarInboundChange]
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -38,6 +39,7 @@ struct PlanCalendarView: View {
     @State private var forceSyncStatus: ForceSyncStatus?
     @State private var isShowingGoogleCalendarStatus = false
     @State private var didCheckGoogleCalendarOnOpen = false
+    @State private var isShowingRunScheduleSetup = false
 
     private let calendar = Calendar.current
 
@@ -104,6 +106,9 @@ struct PlanCalendarView: View {
         .sheet(isPresented: $isShowingGoogleCalendarStatus) {
             GoogleCalendarStatusSheet()
         }
+        .sheet(isPresented: $isShowingRunScheduleSetup) {
+            RunScheduleSetupSheet()
+        }
         .task {
             guard !didCheckGoogleCalendarOnOpen,
                   googleConnection?.allowsSchedulingFromGoogle == true || googleConnection?.smartSchedulingEnabled == true else { return }
@@ -113,6 +118,11 @@ struct PlanCalendarView: View {
             }
             if googleConnection?.smartSchedulingEnabled == true {
                 await googleCalendar.refreshAvailability(reason: "openTrainingCalendar")
+            }
+        }
+        .task {
+            if runSchedule.setupCompleted || runSchedule.showsWeatherOverlay {
+                await runSchedule.refreshWeather()
             }
         }
     }
@@ -148,6 +158,7 @@ struct PlanCalendarView: View {
                             monthAnchor: $monthAnchor,
                             selectedDate: $selectedDate,
                             onReviewRunInChat: onReviewRunInChat,
+                            onConfigureWeather: { isShowingRunScheduleSetup = true },
                             displaysOnlyTodaysCall: true
                         )
                         googleCalendarStatusRow
@@ -173,6 +184,7 @@ struct PlanCalendarView: View {
                 monthAnchor: $monthAnchor,
                 selectedDate: $selectedDate,
                 onReviewRunInChat: onReviewRunInChat,
+                onConfigureWeather: { isShowingRunScheduleSetup = true },
                 showsTodaysCall: !hidesTodaysCall
             )
         } else {

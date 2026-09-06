@@ -15,6 +15,7 @@ struct TrainOrRestApp: App {
     @StateObject private var chatStore: CoachChatStore
     @StateObject private var chatSession: CoachChatSessionState
     @StateObject private var replacementCoordinator: WorkoutReplacementCoordinator
+    @StateObject private var runSchedule: RunScheduleController
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -60,6 +61,7 @@ struct TrainOrRestApp: App {
         _googleCalendarService = StateObject(wrappedValue: googleCalendarService)
         _chatStore = StateObject(wrappedValue: chatStore)
         _chatSession = StateObject(wrappedValue: chatSession)
+        _runSchedule = StateObject(wrappedValue: RunScheduleController())
         _replacementCoordinator = StateObject(wrappedValue: replacementCoordinator)
 
         // Background tasks must be registered before launch finishes.
@@ -79,6 +81,7 @@ struct TrainOrRestApp: App {
                 .environmentObject(chatStore)
                 .environmentObject(chatSession)
                 .environmentObject(replacementCoordinator)
+                .environmentObject(runSchedule)
         }
         .modelContainer(container)
         .onChange(of: scenePhase) { _, phase in
@@ -200,6 +203,8 @@ struct RootView: View {
             ProfileView()
         case .coach:
             DevCoachLiveView()
+        case .shoes:
+            RunningShoesView()
         }
     }
     #endif

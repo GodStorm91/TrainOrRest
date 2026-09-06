@@ -12,6 +12,14 @@ struct PlanCopy {
     var trainingPlanTitle: String { text(en: "Training Plan", ja: "トレーニングプラン", vi: "Kế hoạch tập luyện") }
     var monthMode: String { text(en: "Month", ja: "月", vi: "Tháng") }
     var weekMode: String { text(en: "Week", ja: "週", vi: "Tuần") }
+    var weatherOnNoForecast: String { text(en: "Weather on · no forecast", ja: "天気オン・予報なし", vi: "Thời tiết bật · chưa có dự báo") }
+    var updatingForecast: String { text(en: "Updating 10-day forecast…", ja: "10日予報を更新中…", vi: "Đang cập nhật dự báo 10 ngày…") }
+    var addWeatherForRun: String { text(en: "Add weather for this run", ja: "このランの天気を追加", vi: "Thêm thời tiết cho buổi chạy") }
+    var weatherUnavailable: String { text(en: "Forecast unavailable. Plan unchanged.", ja: "予報を利用できません。プランは変更されていません。", vi: "Không có dự báo. Kế hoạch không thay đổi.") }
+    var weatherRetry: String { text(en: "Retry", ja: "再試行", vi: "Thử lại") }
+    var weatherMissingLocation: String { text(en: "Set a run location to load weather.", ja: "天気を読み込むにはラン地点を設定します。", vi: "Đặt vị trí chạy để tải thời tiết.") }
+    var search: String { text(en: "Search", ja: "検索", vi: "Tìm") }
+    var findTimeWithCalendar: String { text(en: "Find a better time with Calendar", ja: "カレンダーでより良い時間を探す", vi: "Tìm giờ tốt hơn với Lịch") }
     var syncIntervals: String { text(en: "Sync intervals.icu", ja: "intervals.icuと同期", vi: "Đồng bộ intervals.icu") }
     var noPlanYet: String { text(en: "No plan yet", ja: "プランはまだありません", vi: "Chưa có kế hoạch") }
     var noPlanDescription: String { text(en: "Set a race goal and TrainOrRest builds your day-by-day training plan.", ja: "レース目標を設定すると、TrainOrRestが日ごとのトレーニングプランを作成します。", vi: "Đặt mục tiêu cuộc đua để TrainOrRest xây dựng kế hoạch tập luyện theo từng ngày.") }
@@ -57,13 +65,16 @@ struct PlanCopy {
     func openTodayWorkoutAccessibility(_ name: String) -> String { text(en: "Open today’s \(name)", ja: "今日の\(name)を開く", vi: "Mở \(name) hôm nay") }
     var openWorkoutDetailsAccessibility: String { text(en: "Open workout details", ja: "ワークアウトの詳細を開く", vi: "Mở chi tiết buổi tập") }
     func coachActionAccessibility(_ action: String, workout: String) -> String { "\(action) \(workout)" }
-    func dayAccessibility(date: Date, kind: WorkoutKind?, isToday: Bool) -> String {
+    func dayAccessibility(date: Date, kind: WorkoutKind?, isToday: Bool, weatherStance: String? = nil) -> String {
         let name = kind.map(language.name) ?? language.restDayLabel
+        let base: String
         switch language {
-        case .en: return "\(language.shortDate(date))\(isToday ? ", today" : ""), \(name)"
-        case .ja: return "\(language.shortDate(date))\(isToday ? "、今日" : "")、\(name)"
-        case .vi: return "\(language.shortDate(date))\(isToday ? ", hôm nay" : ""), \(name)"
+        case .en: base = "\(language.shortDate(date))\(isToday ? ", today" : ""), \(name)"
+        case .ja: base = "\(language.shortDate(date))\(isToday ? "、今日" : "")、\(name)"
+        case .vi: base = "\(language.shortDate(date))\(isToday ? ", hôm nay" : ""), \(name)"
         }
+        guard let weatherStance, !weatherStance.isEmpty else { return base }
+        return "\(base), \(weatherStance)"
     }
     func weekVolumeAccessibility(_ kilometers: Int) -> String { text(en: "Week volume \(kilometers) kilometers", ja: "週の走行距離 \(kilometers) km", vi: "Khối lượng tuần \(kilometers) km") }
     func planReceipt(phase: String, source: PlanReceiptSource) -> String {
@@ -304,6 +315,52 @@ struct PlanCopy {
     var workoutStillInPlan: String { text(en: "This workout still exists in your TrainOrRest plan.", ja: "このワークアウトはTrainOrRestのプランに残っています。", vi: "Buổi tập này vẫn có trong kế hoạch TrainOrRest của bạn.") }
     var addBackToGoogleCalendar: String { text(en: "Add back to Google Calendar", ja: "Google カレンダーに戻す", vi: "Thêm lại vào Google Calendar") }
     var smartScheduling: String { text(en: "Smart Scheduling", ja: "スマートスケジューリング", vi: "Xếp lịch thông minh") }
+    var runSchedule: String { text(en: "Run schedule", ja: "ラン予定", vi: "Lịch chạy") }
+    var setupRunSchedule: String { addWeatherForRun }
+    var runScheduleExplainTitle: String { text(en: "Weather for today's run", ja: "今日のランの天気", vi: "Thời tiết buổi chạy hôm nay") }
+    var runScheduleExplainBody: String { text(en: "Set where you run. TrainOrRest loads a 10-day forecast of rain and wind so Today's Call can tell you if the slot is safe. Calendar is optional if you want a better time.", ja: "走る場所を設定します。TrainOrRestが今後10日の雨と風を読み込み、今日のメニューでその枠が走れるかを示します。より良い時間を探すならカレンダーは任意です。", vi: "Đặt nơi bạn chạy. TrainOrRest tải dự báo mưa và gió 10 ngày để Buổi tập hôm nay nói khung giờ có an toàn không. Lịch là tuỳ chọn nếu bạn muốn giờ tốt hơn.") }
+    var setRunLocation: String { text(en: "Run location", ja: "ラン地点", vi: "Vị trí chạy") }
+    var currentLocation: String { text(en: "Use current location", ja: "現在地を使う", vi: "Dùng vị trí hiện tại") }
+    var searchCity: String { text(en: "Search city", ja: "都市を検索", vi: "Tìm thành phố") }
+    var rainTolerance: String { text(en: "Rain", ja: "雨", vi: "Mưa") }
+    func rainStanceLabel(_ rain: RainTolerance) -> String {
+        switch rain {
+        case .low: text(en: "Avoid rain", ja: "雨を避ける", vi: "Tránh mưa")
+        case .medium: text(en: "Drizzle OK", ja: "小雨なら可", vi: "Mưa phùn được")
+        case .high: text(en: "Heavy only", ja: "大雨のみ", vi: "Chỉ mưa to")
+        }
+    }
+    func rainToleranceCaption(_ rain: RainTolerance) -> String {
+        let percent = Int((rain.maxPrecipitationChance * 100).rounded())
+        return text(en: "Skip slots above \(percent)% chance of rain.", ja: "降水確率\(percent)%を超える枠は外します。", vi: "Bỏ khung trên \(percent)% khả năng mưa.")
+    }
+    func weatherStance(_ glyph: WeatherGlyph) -> String {
+        switch glyph {
+        case .good: text(en: "Clear to run", ja: "走れる天気", vi: "Trời ổn để chạy")
+        case .rainRisk: text(en: "Rain risk", ja: "雨の恐れ", vi: "Có nguy cơ mưa")
+        case .strongWind: text(en: "Windy", ja: "風が強い", vi: "Gió mạnh")
+        case .noSlot: text(en: "Move this run", ja: "この時間は避ける", vi: "Nên dời buổi chạy")
+        case .noData: weatherOnNoForecast
+        }
+    }
+    func slotWeatherSummary(_ weather: SlotWeather) -> String {
+        let low = Int(weather.temperatureRangeC.lowerBound.rounded())
+        let high = Int(weather.temperatureRangeC.upperBound.rounded())
+        let rain = Int((weather.precipitationMax * 100).rounded())
+        let wind = Int(weather.windMaxKmh.rounded())
+        let numbers = text(
+            en: "\(low)–\(high)°C · \(rain)% rain · \(wind) km/h",
+            ja: "\(low)–\(high)°C · 降水 \(rain)% · 風 \(wind) km/h",
+            vi: "\(low)–\(high)°C · \(rain)% mưa · gió \(wind) km/h"
+        )
+        return "\(weatherStance(weather.glyph)) · \(numbers)"
+    }
+    func weatherCopy(_ message: WeatherForecastingError) -> String {
+        switch message {
+        case .missingLocation: weatherMissingLocation
+        case .unavailable: weatherUnavailable
+        }
+    }
     var findingTime: String { text(en: "Finding a time", ja: "時間を検索中", vi: "Đang tìm giờ") }
     var findTime: String { text(en: "Find a time", ja: "時間を探す", vi: "Tìm giờ") }
     var findTimeAccessibility: String { text(en: "Find a time", ja: "時間を探す", vi: "Tìm giờ") }
