@@ -325,6 +325,113 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertTrue(moved.manuallyOverridden)
     }
 
+    func testToolApplyDoesNotDuplicateAlreadyOverriddenWorkout() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let original = try XCTUnwrap(try plannedWorkouts(on: qualityDay, in: context).first)
+        let originalID = original.uuid
+        let shoeID = UUID()
+        original.shoeID = shoeID
+        original.manuallyOverridden = true
+        try context.save()
+
+        let proposal = PlanAdjustmentProposal(changes: [
+            .init(date: CoachContextBuilder.day(qualityDay, calendar: calendar), action: .downgrade, detail: nil)
+        ])
+        _ = try CoachTools.apply(proposal: proposal, in: context, today: today, calendar: calendar)
+        _ = try CoachTools.apply(proposal: proposal, in: context, today: today, calendar: calendar)
+
+        let workouts = try plannedWorkouts(on: qualityDay, in: context)
+        XCTAssertEqual(workouts.count, 1)
+        XCTAssertEqual(workouts.first?.uuid, originalID)
+        XCTAssertEqual(workouts.first?.shoeID, shoeID)
+        XCTAssertEqual(workouts.first?.kind, .easy)
+        XCTAssertTrue(workouts.first?.manuallyOverridden == true)
+    }
+
+    func testToolMoveOfOverriddenWorkoutLeavesSourceEmptyAndKeepsIdentity() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedEveryDayPlan(in: context)
+        let source = PlanEngineTestSupport.date(2026, 1, 9, hour: 0)
+        let target = PlanEngineTestSupport.date(2026, 1, 10, hour: 0)
+        let sourceWorkout = try XCTUnwrap(try plannedWorkouts(on: source, in: context).first)
+        let originalID = sourceWorkout.uuid
+        let shoeID = UUID()
+        sourceWorkout.shoeID = shoeID
+        sourceWorkout.manuallyOverridden = true
+        try context.save()
+
+        _ = try CoachTools.apply(
+            proposal: PlanAdjustmentProposal(changes: [
+                .init(
+                    date: CoachContextBuilder.day(source, calendar: calendar),
+                    action: .move,
+                    detail: CoachContextBuilder.day(target, calendar: calendar)
+                )
+            ]),
+            in: context,
+            today: today,
+            calendar: calendar
+        )
+
+        XCTAssertTrue(try plannedWorkouts(on: source, in: context).isEmpty)
+        let moved = try XCTUnwrap(try plannedWorkouts(on: target, in: context).first)
+        XCTAssertEqual(try plannedWorkouts(on: target, in: context).count, 1)
+        XCTAssertEqual(moved.uuid, originalID)
+        XCTAssertEqual(moved.shoeID, shoeID)
+        XCTAssertEqual(moved.kind, sourceWorkout.kind)
+        XCTAssertTrue(moved.manuallyOverridden)
+    }
+
+    func testToolApplyCollapsesSameDayDuplicatePlannedWorkouts() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let plan = try XCTUnwrap(try PlanStore.activePlan(in: context))
+        let original = try XCTUnwrap(try plannedWorkouts(on: qualityDay, in: context).first)
+        let shoeID = UUID()
+        original.shoeID = shoeID
+        original.manuallyOverridden = true
+        let kind = try XCTUnwrap(original.kind)
+        let phase = try XCTUnwrap(TrainingPhase(rawValue: original.phaseRaw))
+        for _ in 0..<3 {
+            let clone = PlannedWorkout(
+                spec: PlannedWorkoutSpec(
+                    date: original.date,
+                    kind: kind,
+                    distanceKm: original.distanceKm,
+                    paceBand: original.paceBand,
+                    details: original.details,
+                    structure: original.structure
+                ),
+                weekIndex: original.weekIndex,
+                phase: phase
+            )
+            clone.manuallyOverridden = true
+            clone.plan = plan
+            context.insert(clone)
+        }
+        try context.save()
+        XCTAssertEqual(try plannedWorkouts(on: qualityDay, in: context).count, 4)
+
+        _ = try CoachTools.apply(
+            proposal: PlanAdjustmentProposal(changes: [
+                .init(date: CoachContextBuilder.day(qualityDay, calendar: calendar), action: .downgrade, detail: nil)
+            ]),
+            in: context,
+            today: today,
+            calendar: calendar
+        )
+
+        let workouts = try plannedWorkouts(on: qualityDay, in: context)
+        XCTAssertEqual(workouts.count, 1)
+        XCTAssertEqual(workouts.first?.shoeID, shoeID)
+        XCTAssertEqual(workouts.first?.kind, .easy)
+    }
+
+
     func testToolRejectsPastWorkoutEdits() throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -1102,6 +1209,7 @@ final class ChatFeatureTests: XCTestCase {
             XCTAssertNil(try plannedWorkouts(on: target, in: context).first, "preflight must not persist moves")
         }
 
+        let sourceDates = movablePairs.map(\.0.date)
         let applied = try CoachTools.apply(
             proposal: .init(changes: changes),
             in: context,
@@ -1112,8 +1220,8 @@ final class ChatFeatureTests: XCTestCase {
         let created = try XCTUnwrap(try plannedWorkouts(on: createTarget, in: context).first)
         XCTAssertEqual(created.kind, .easy)
         XCTAssertEqual(created.distanceKm, 1, accuracy: 0.001)
-        for (source, _) in movablePairs {
-            XCTAssertNil(try plannedWorkouts(on: source.date, in: context).first)
+        for date in sourceDates {
+            XCTAssertNil(try plannedWorkouts(on: date, in: context).first)
         }
         for (_, target) in movablePairs {
             XCTAssertNotNil(try plannedWorkouts(on: target, in: context).first)

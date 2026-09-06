@@ -78,4 +78,16 @@ final class PlannedWorkout {
         let midPace = (band.fastSecondsPerKm + band.slowSecondsPerKm) / 2
         return distanceKm * midPace
     }
+
+    /// When several planned rows share a calendar day, keep the one that
+    /// still has a shoe assignment, then any manual override, then a stable uuid.
+    static func preferredAmongDuplicates(_ group: [PlannedWorkout]) -> PlannedWorkout? {
+        group.max { a, b in
+            let aScore = (a.shoeID != nil ? 2 : 0) + (a.manuallyOverridden ? 1 : 0)
+            let bScore = (b.shoeID != nil ? 2 : 0) + (b.manuallyOverridden ? 1 : 0)
+            if aScore != bScore { return aScore < bScore }
+            return a.uuid.uuidString > b.uuid.uuidString
+        }
+    }
+
 }
