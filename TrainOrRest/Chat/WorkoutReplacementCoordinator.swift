@@ -116,12 +116,19 @@ struct PendingPlanProposal: Identifiable, Equatable {
     let proposal: PlanAdjustmentProposal
     let summary: String
     let threadID: UUID?
+    let warnings: [PlanValidator.Issue]
 
-    init(proposal: PlanAdjustmentProposal, summary: String, threadID: UUID?) {
+    init(
+        proposal: PlanAdjustmentProposal,
+        summary: String,
+        threadID: UUID?,
+        warnings: [PlanValidator.Issue]
+    ) {
         self.id = UUID()
         self.proposal = proposal
         self.summary = summary
         self.threadID = threadID
+        self.warnings = warnings
     }
 }
 
@@ -174,9 +181,19 @@ final class WorkoutReplacementCoordinator: ObservableObject {
         lastConfirmationKind = .notRequired
     }
 
-    func stage(_ proposal: PlanAdjustmentProposal, summary: String, threadID: UUID?) {
+    func stage(
+        _ proposal: PlanAdjustmentProposal,
+        summary: String,
+        threadID: UUID?,
+        warnings: [PlanValidator.Issue]
+    ) {
         guard !hasPendingDecision, !isConfirming else { return }
-        pendingProposal = PendingPlanProposal(proposal: proposal, summary: summary, threadID: threadID)
+        pendingProposal = PendingPlanProposal(
+            proposal: proposal,
+            summary: summary,
+            threadID: threadID,
+            warnings: warnings
+        )
         lastError = nil
         lastConfirmationKind = .required
     }
@@ -227,7 +244,8 @@ final class WorkoutReplacementCoordinator: ObservableObject {
                 proposal: pendingProposal.proposal,
                 in: context,
                 today: now(),
-                calendar: calendar
+                calendar: calendar,
+                acknowledging: pendingProposal.warnings
             )
             context.insert(ChatMessage(
                 role: .assistant,

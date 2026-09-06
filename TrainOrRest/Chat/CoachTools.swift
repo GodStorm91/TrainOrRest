@@ -122,6 +122,12 @@ struct AppliedAdjustment: Equatable {
     var summary: String
 }
 
+struct PlanEditPreflight: Equatable {
+    var summary: String
+    var warnings: [PlanValidator.Issue]
+}
+
+
 @MainActor
 enum CoachTools {
     static let toolName = "propose_plan_adjustment"
@@ -286,7 +292,8 @@ enum CoachTools {
         proposal: PlanAdjustmentProposal,
         in context: ModelContext,
         today: Date,
-        calendar: Calendar
+        calendar: Calendar,
+        acknowledging: [PlanValidator.Issue] = []
     ) throws -> AppliedAdjustment {
         guard !proposal.changes.isEmpty else { throw ValidationError("No changes proposed.") }
         guard proposal.changes.count <= maxChangesPerProposal else {
@@ -296,7 +303,13 @@ enum CoachTools {
 
         let creates = proposal.changes.filter { $0.action == .create }
         if creates.count == proposal.changes.count {
-            return try applyCreates(creates, in: context, today: today, calendar: calendar)
+            return try applyCreates(
+                creates,
+                in: context,
+                today: today,
+                calendar: calendar,
+                acknowledging: acknowledging
+            )
         }
 
         var spec = try currentPlanSpec(in: context, today: today, calendar: calendar)
@@ -358,9 +371,7 @@ enum CoachTools {
         let issues = introducedValidationIssues(
             in: spec, comparedTo: baseline, calendar: calendar, peakCapKm: peakCap
         )
-        guard issues.isEmpty else {
-            throw ValidationError(issues.map(\.message).joined(separator: "; "))
-        }
+        try rejectUnacknowledgedIssues(issues, acknowledging: acknowledging)
 
         try persist(spec, in: context, from: today, calendar: calendar)
         try context.save()
@@ -368,16 +379,14 @@ enum CoachTools {
     }
 
     /// Read-only preflight for proposals that will be shown behind an Apply
-    /// button. The card should only appear for a proposal that can actually be
-    /// committed right now; otherwise the chat loop can reject it and ask the
-    /// model for a corrected tool call instead of making the user tap into a
-    /// toast error.
+    /// button. Structural violations refuse staging; user-overridable load
+    /// risks are returned as warnings for the confirmation card.
     static func validateForConfirmation(
         proposal: PlanAdjustmentProposal,
         in context: ModelContext,
         today: Date,
         calendar: Calendar
-    ) throws -> AppliedAdjustment {
+    ) throws -> PlanEditPreflight {
         guard !proposal.changes.isEmpty else { throw ValidationError("No changes proposed.") }
         guard proposal.changes.count <= maxChangesPerProposal else {
             throw ValidationError("At most \(maxChangesPerProposal) changes per proposal.")
@@ -395,7 +404,11 @@ enum CoachTools {
             let summary = candidatePlan.candidates
                 .map { "Created \($0.built.kind.rawValue) on \(CoachContextBuilder.day($0.date, calendar: calendar))" }
                 .joined(separator: "; ")
-            return AppliedAdjustment(summary: summary)
+            return PlanEditPreflight(
+                summary: summary,
+                warnings: try warningsForConfirmation(from: candidatePlan.issues)
+            )
+
         }
 
         var spec = try currentPlanSpec(in: context, today: today, calendar: calendar)
@@ -454,11 +467,33 @@ enum CoachTools {
         let issues = introducedValidationIssues(
             in: spec, comparedTo: baseline, calendar: calendar, peakCapKm: peakCap
         )
-        guard issues.isEmpty else {
-            throw ValidationError(issues.map(\.message).joined(separator: "; "))
-        }
+        return PlanEditPreflight(
+            summary: summaries.joined(separator: "; "),
+            warnings: try warningsForConfirmation(from: issues)
+        )
+    }
 
-        return AppliedAdjustment(summary: summaries.joined(separator: "; "))
+    private static func warningsForConfirmation(
+        from issues: [PlanValidator.Issue]
+    ) throws -> [PlanValidator.Issue] {
+        let blockingIssues = issues.filter { !$0.kind.isUserOverridableLoadRisk }
+        guard blockingIssues.isEmpty else {
+            throw ValidationError(blockingIssues.map(\.message).joined(separator: "; "))
+        }
+        return issues
+    }
+
+    private static func rejectUnacknowledgedIssues(
+        _ issues: [PlanValidator.Issue],
+        acknowledging acknowledgements: [PlanValidator.Issue]
+    ) throws {
+        let acknowledgedLoadRisks = acknowledgements.filter { $0.kind.isUserOverridableLoadRisk }
+        let remainingIssues = issues.filter {
+            !$0.kind.isUserOverridableLoadRisk || !acknowledgedLoadRisks.contains($0)
+        }
+        guard remainingIssues.isEmpty else {
+            throw ValidationError(remainingIssues.map(\.message).joined(separator: "; "))
+        }
     }
 
     /// Action-dependent field rules. The JSON Schema cannot express these, so
@@ -656,19 +691,21 @@ enum CoachTools {
         try context.save()
     }
 
-    /// Creates are validated as a whole batch against a copied plan, then
-    /// inserted as new rows only. Existing workouts are never rewritten.
+    /// Creates are assembled against a copied plan before their validation
+    /// outcome is either surfaced for confirmation or acknowledged for commit.
     private struct CreateCandidatePlan {
         var plan: TrainingPlan
         var spec: TrainingPlanSpec
         var candidates: [Candidate]
+        var issues: [PlanValidator.Issue]
     }
 
     private static func applyCreates(
         _ changes: [PlanAdjustmentProposal.Change],
         in context: ModelContext,
         today: Date,
-        calendar: Calendar
+        calendar: Calendar,
+        acknowledging: [PlanValidator.Issue]
     ) throws -> AppliedAdjustment {
         let candidatePlan = try createCandidates(
             changes,
@@ -676,6 +713,7 @@ enum CoachTools {
             today: today,
             calendar: calendar
         )
+        try rejectUnacknowledgedIssues(candidatePlan.issues, acknowledging: acknowledging)
         try insert(
             candidatePlan.candidates,
             into: candidatePlan.plan,
@@ -749,11 +787,7 @@ enum CoachTools {
         let issues = introducedValidationIssues(
             in: spec, comparedTo: baseline, calendar: calendar, peakCapKm: peakCap
         )
-        guard issues.isEmpty else {
-            throw ValidationError(issues.map(\.message).joined(separator: "; "))
-        }
-
-        return CreateCandidatePlan(plan: plan, spec: spec, candidates: candidates)
+        return CreateCandidatePlan(plan: plan, spec: spec, candidates: candidates, issues: issues)
     }
 
     /// Targeted persistence: insert the new rows and update only the affected

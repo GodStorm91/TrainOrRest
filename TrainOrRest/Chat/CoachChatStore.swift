@@ -790,7 +790,12 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
                 let summary = validated.summary.isEmpty ? CoachTools.summary(for: proposal) : validated.summary
                 assistantTurn.text = language.preparedCalendarUpdateMessage(summary: summary)
                 try context.save()
-                replacementCoordinator.stage(proposal, summary: summary, threadID: snapshot.threadID)
+                replacementCoordinator.stage(
+                    proposal,
+                    summary: summary,
+                    threadID: snapshot.threadID,
+                    warnings: validated.warnings
+                )
                 return
             } catch {
                 let message = technicalErrorMessage(error)
