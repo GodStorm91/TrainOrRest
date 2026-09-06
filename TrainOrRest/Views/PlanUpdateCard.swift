@@ -4,15 +4,26 @@ import SwiftUI
 /// Proposed/Validated/Awaits sequence and its receipt cannot drift between cards.
 struct CoachTrustLedger: View {
     let language: CoachLanguage
+    var warnings: [PlanValidator.Issue] = []
 
     @State private var showsReceipt = false
+
+    private var hasLoadWarning: Bool { !warnings.isEmpty }
 
     var body: some View {
         HStack(spacing: 6) {
             chip(language.ledgerProposedLabel, symbol: "sparkles", tint: Theme.accent)
 
             Button { showsReceipt = true } label: {
-                chip(language.ledgerValidatedLabel, symbol: "checkmark.seal", tint: Theme.good)
+                if hasLoadWarning {
+                    chip(
+                        language.ledgerValidatedWithWarningLabel,
+                        symbol: "exclamationmark.triangle.fill",
+                        tint: Theme.warn
+                    )
+                } else {
+                    chip(language.ledgerValidatedLabel, symbol: "checkmark.seal", tint: Theme.good)
+                }
             }
             .buttonStyle(.plain)
             .accessibilityLabel(language.showValidationReceiptLabel)
@@ -22,11 +33,32 @@ struct CoachTrustLedger: View {
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .sheet(isPresented: $showsReceipt) {
             ReceiptSheet(
-                title: language.validationReceiptTitle,
-                subtitle: language.validationReceiptSubtitle,
-                rows: language.planValidationChecks.map { .check($0.title, value: $0.detail) }
+                title: hasLoadWarning ? language.validationReceiptWarningTitle : language.validationReceiptTitle,
+                subtitle: hasLoadWarning ? language.validationReceiptWarningSubtitle : language.validationReceiptSubtitle,
+                rows: receiptRows
             )
         }
+    }
+
+    /// `Issue.Kind.allCases` order matches `planValidationChecks`.
+    private var receiptRows: [ReceiptSheet.Row] {
+        let checks = language.planValidationChecks
+        let kinds = PlanValidator.Issue.Kind.allCases
+        let warned = Set(warnings.map(\.kind))
+        var rows: [ReceiptSheet.Row] = []
+        for warning in warnings {
+            let title: String
+            if let index = kinds.firstIndex(of: warning.kind), index < checks.count {
+                title = checks[index].title
+            } else {
+                title = language.planLoadWarningTitle
+            }
+            rows.append(.warning(title, value: warning.message))
+        }
+        for (kind, check) in zip(kinds, checks) where !warned.contains(kind) {
+            rows.append(.check(check.title, value: check.detail))
+        }
+        return rows
     }
 
     private func chip(_ title: String, symbol: String, tint: Color) -> some View {
@@ -260,7 +292,10 @@ struct PlanProposalCard: View {
                     applyingRow
                 } else {
                     titleRow
-                    CoachTrustLedger(language: language)
+                    CoachTrustLedger(language: language, warnings: pending.warnings)
+
+                    loadWarningBanner
+
 
                     Text(pending.summary)
                         .font(.torHeading(15, .semibold))
@@ -312,6 +347,38 @@ struct PlanProposalCard: View {
         .foregroundStyle(Theme.accent)
     }
 
+    @ViewBuilder
+    private var loadWarningBanner: some View {
+        if !pending.warnings.isEmpty {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Theme.warn)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(language.planLoadWarningTitle)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Theme.warn)
+
+                    ForEach(Array(pending.warnings.enumerated()), id: \.offset) { _, warning in
+                        Text(warning.message)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Text(language.planLoadWarningConfirmHint)
+                        .font(.caption)
+                        .foregroundStyle(Theme.dim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.soft(Theme.warn), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .accessibilityElement(children: .combine)
+        }
+    }
+
     private func changeRow(_ change: PlanAdjustmentProposal.Change) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(language.planChangeActionLabel(change.action))
@@ -334,6 +401,10 @@ struct PlanProposalCard: View {
         return change.date
     }
 
+    private var applyLabel: String {
+        pending.warnings.isEmpty ? language.applyChangesLabel : language.applyDespiteLoadRiskLabel
+    }
+
     private var actions: some View {
         HStack(spacing: 8) {
             Button(action: onKeep) {
@@ -347,14 +418,22 @@ struct PlanProposalCard: View {
             .buttonStyle(.plain)
 
             Button(action: onApply) {
-                Label(language.applyChangesLabel, systemImage: "checkmark")
-                    .font(.torHeading(13, .bold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                Label(
+                    applyLabel,
+                    systemImage: pending.warnings.isEmpty ? "checkmark" : "exclamationmark.triangle.fill"
+                )
+                .font(.torHeading(13, .bold))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .padding(.horizontal, 8)
+                .background(Theme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(language.applyChangesLabel)
+            .accessibilityLabel(applyLabel)
+            .accessibilityHint(pending.warnings.isEmpty ? "" : language.planLoadWarningConfirmHint)
         }
     }
 }

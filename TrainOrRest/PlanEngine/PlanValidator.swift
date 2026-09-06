@@ -10,7 +10,7 @@ enum PlanValidator {
     static let longRunMaxFraction = 0.40
 
     struct Issue: Equatable, CustomStringConvertible {
-        enum Kind: Equatable {
+        enum Kind: Equatable, Hashable, CaseIterable {
             case workoutOnUnavailableDay
             case longRunTooLong
             case rampExceeded
@@ -233,5 +233,16 @@ enum PlanValidator {
             weekIndex: plan.weeks.last?.index,
             message: "Plan must contain exactly one race workout on race day"
         )]
+    }
+}
+
+extension PlanValidator.Issue.Kind {
+    var isUserOverridableLoadRisk: Bool {
+        switch self {
+        case .weeklyVolumeTooHigh, .rampExceeded, .taperNotMonotonic, .longRunTooLong, .qualityTooClose:
+            true
+        case .workoutOnUnavailableDay, .raceMissing, .duplicateWorkoutDay, .workoutOutsidePlanWeek, .invalidDistance, .structureDistanceMismatch:
+            false
+        }
     }
 }

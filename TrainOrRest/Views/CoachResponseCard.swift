@@ -6,6 +6,8 @@ struct CoachResponseCard: View {
     var timestamp: Date? = nil
     var followUpsConsumed: Bool = false
     var onSelectFollowUp: (CoachChoiceOption) -> Void = { _ in }
+    var onSelectRecommendation: ((CoachRecommendation) -> Void)? = nil
+
 
     @State private var showsDetail = false
     @State private var showsSources = false
@@ -103,13 +105,16 @@ struct CoachResponseCard: View {
                                     .font(.subheadline)
                                     .padding(.horizontal, 14)
                                     .padding(.vertical, 10)
-                                    .background(Theme.chip, in: Capsule())
-                                    .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
+                                    .frame(minHeight: 56)
+                                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                            .strokeBorder(Theme.border, lineWidth: 1)
+                                    )
                                     .foregroundStyle(Theme.text)
+                                    .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                             }
                             .buttonStyle(.plain)
-                            .frame(minHeight: 44)
-                            .contentShape(Capsule())
                             .accessibilityLabel(option.visibleSelectionText)
                             .accessibilityAddTraits(.isButton)
                         }
@@ -198,13 +203,34 @@ struct CoachResponseCard: View {
         language.metricInterpretation(for: metric.status, fallback: metric.interpretation)
     }
 
+    @ViewBuilder
     private func recommendationRow(_ number: Int, _ recommendation: CoachRecommendation) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text("\(number).")
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(Theme.accent)
+        if let onSelectRecommendation {
+            Button {
+                onSelectRecommendation(recommendation)
+            } label: {
+                recommendationCard(number, recommendation)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(recommendation.title)
+            .accessibilityHint(recommendation.description ?? "")
+            .accessibilityAddTraits(.isButton)
+        } else {
+            recommendationCard(number, recommendation)
+        }
+    }
 
-            VStack(alignment: .leading, spacing: 2) {
+    private func recommendationCard(_ number: Int, _ recommendation: CoachRecommendation) -> some View {
+        let hasDescription = recommendation.description?.isEmpty == false
+
+        return HStack(alignment: .top, spacing: 12) {
+            Text("\(number)")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 24, height: 24)
+                .background(Theme.soft(Theme.accent), in: Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
                 CoachGlossaryText(
                     text: recommendation.title,
                     mode: .structured,
@@ -214,7 +240,7 @@ struct CoachResponseCard: View {
                     values: glossaryValues
                 )
 
-                if let description = recommendation.description {
+                if let description = recommendation.description, !description.isEmpty {
                     CoachGlossaryText(
                         text: description,
                         mode: .structured,
@@ -225,7 +251,26 @@ struct CoachResponseCard: View {
                     )
                 }
             }
+
+            if onSelectRecommendation != nil {
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Theme.faint)
+            }
         }
+        .padding(14)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: hasDescription ? 76 : 56,
+            alignment: .leading
+        )
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func statusColor(_ status: CoachResponseStatus) -> Color {

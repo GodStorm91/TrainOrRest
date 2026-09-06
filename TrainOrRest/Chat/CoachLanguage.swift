@@ -1236,13 +1236,30 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
     var planProposalEyebrow: String { self == .vi ? "ĐỀ XUẤT CẬP NHẬT KẾ HOẠCH" : self == .ja ? "計画更新の提案" : "PROPOSED PLAN UPDATE" }
     var ledgerProposedLabel: String { self == .vi ? "Đề xuất" : self == .ja ? "提案" : "Proposed" }
     var ledgerValidatedLabel: String { self == .vi ? "Đã kiểm tra" : self == .ja ? "検証済み" : "Validated" }
+    var ledgerValidatedWithWarningLabel: String { self == .vi ? "Có cảnh báo" : self == .ja ? "注意あり" : "With warning" }
     var ledgerAwaitsLabel: String { self == .vi ? "Chờ xác nhận" : self == .ja ? "確認待ち" : "Awaits you" }
     var showValidationReceiptLabel: String { self == .vi ? "Xem biên nhận kiểm tra" : self == .ja ? "検証レシートを表示" : "Show validation receipt" }
     var validationReceiptTitle: String { self == .vi ? "Đã kiểm tra kế hoạch" : self == .ja ? "計画チェック合格" : "Plan checks passed" }
     var validationReceiptSubtitle: String { self == .vi ? "Đã kiểm tra bằng quy tắc tập luyện trên máy trước khi thay đổi kế hoạch." : self == .ja ? "変更前にデバイス内のトレーニングルールで検証済みです。" : "Checked against on-device training rules before any change." }
+    var validationReceiptWarningTitle: String { self == .vi ? "Đã kiểm tra, còn cảnh báo tải" : self == .ja ? "チェック合格（負荷の注意あり）" : "Checks passed with load warning" }
+    var validationReceiptWarningSubtitle: String { self == .vi ? "Quy tắc cấu trúc đã đạt. Rủi ro tải bên dưới cần xác nhận trước khi đổi kế hoạch." : self == .ja ? "構造ルールは合格です。計画を変える前に、以下の負荷リスクを確認してください。" : "Structural rules passed. Load risks below need confirmation before the plan changes." }
     func applyToWeekLabel(_ week: Int) -> String { self == .vi ? "Áp dụng cho tuần \(week)" : self == .ja ? "第\(week)週に適用" : "Apply to week \(week)" }
     var planChangedBannerText: String { self == .vi ? "Kế hoạch đã thay đổi sau đề xuất này, anh xem lại thay đổi mới nhé." : self == .ja ? "この提案の後に計画が変わりました。最新の変更を確認してください。" : "The plan changed after this was proposed — review the latest change." }
     var proposalNoChangeYetText: String { self == .vi ? "Chưa thay đổi kế hoạch. TrainOrRest chỉ cập nhật sau khi anh xác nhận." : self == .ja ? "計画はまだ変わりません。確認後にのみ更新されます。" : "Nothing changes yet. TrainOrRest updates only after you confirm." }
+    var planLoadWarningTitle: String {
+        self == .vi ? "Cảnh báo về tải tập luyện" : self == .ja ? "トレーニング負荷の注意" : "Training load warning"
+    }
+    var planLoadWarningConfirmHint: String {
+        self == .vi
+            ? "Hãy xem lại rủi ro trước khi áp dụng. Áp dụng nghĩa là bạn xác nhận tiếp tục."
+            : self == .ja
+                ? "適用前にリスクを確認してください。適用すると、このまま進めることを確認したことになります。"
+                : "Review the risk before applying. Applying confirms that you want to proceed."
+    }
+    var applyDespiteLoadRiskLabel: String {
+        self == .vi ? "Áp dụng dù có rủi ro tải" : self == .ja ? "負荷リスクを承知して適用" : "Apply despite load risk"
+    }
+
     func planChangeActionLabel(_ action: PlanAdjustmentProposal.Change.Action) -> String {
         switch action {
         case .swap: return self == .vi ? "Đổi" : self == .ja ? "入替" : "Swap"

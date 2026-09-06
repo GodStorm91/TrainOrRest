@@ -70,7 +70,20 @@ struct ChatBubble: View {
                         language: language,
                         timestamp: message.date,
                         followUpsConsumed: message.followUpsConsumed,
-                        onSelectFollowUp: { option in onSelectFollowUp(message, option) }
+                        onSelectFollowUp: { option in onSelectFollowUp(message, option) },
+                        onSelectRecommendation: message.interaction?.status != .pending
+                            ? { recommendation in
+                                onSelectFollowUp(
+                                    message,
+                                    CoachChoiceOption(
+                                        id: recommendation.id,
+                                        label: recommendation.title,
+                                        description: recommendation.description,
+                                        value: recommendation.title
+                                    )
+                                )
+                            }
+                            : nil
                     )
                     .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in
                         min(width * 0.8, 560)

@@ -197,6 +197,93 @@ final class CoachCreateWorkoutTests: XCTestCase {
         }
     }
 
+    func testOverridableLoadRisksStageWarningsThenRequireAcknowledgement() throws {
+        let saturday = PlanEngineTestSupport.date(2026, 1, 10, hour: 0)
+        let cases: [(name: String, changes: [PlanAdjustmentProposal.Change], kind: PlanValidator.Issue.Kind)] = [
+            ("weekly volume", [change(.easy(km: 12), on: freeDay)], .weeklyVolumeTooHigh),
+            ("quality spacing", [change(.tempo(workKm: 3), on: saturday)], .qualityTooClose)
+        ]
+
+        for (name, changes, kind) in cases {
+            let container = try seededContainer()
+            let context = container.mainContext
+            let proposal = PlanAdjustmentProposal(changes: changes)
+            let before = try snapshot(in: context)
+            let targetsBefore = try targets(in: context)
+
+            let preflight = try CoachTools.validateForConfirmation(
+                proposal: proposal,
+                in: context,
+                today: today,
+                calendar: calendar
+            )
+            XCTAssertEqual(preflight.warnings.map(\.kind), [kind], name)
+            XCTAssertFalse(preflight.summary.isEmpty, name)
+
+            XCTAssertThrowsError(
+                try CoachTools.apply(
+                    proposal: proposal,
+                    in: context,
+                    today: today,
+                    calendar: calendar
+                ),
+                "\(name) must require acknowledgement"
+            )
+            XCTAssertEqual(try snapshot(in: context), before, "\(name) must not write without acknowledgement")
+            XCTAssertEqual(try targets(in: context), targetsBefore, "\(name) must not alter targets without acknowledgement")
+
+            let applied = try CoachTools.apply(
+                proposal: proposal,
+                in: context,
+                today: today,
+                calendar: calendar,
+                acknowledging: preflight.warnings
+            )
+            XCTAssertFalse(applied.summary.isEmpty, name)
+            XCTAssertNotEqual(try snapshot(in: context), before, "\(name) must persist after acknowledgement")
+        }
+    }
+
+    func testStructuralCreateViolationsRejectPreflightAndApply() throws {
+        let cases: [(name: String, changes: [PlanAdjustmentProposal.Change])] = [
+            ("past", [change(.easy(km: 5), on: PlanEngineTestSupport.date(2026, 1, 4, hour: 0))]),
+            ("race", [change(.easy(km: 5), on: raceDay)]),
+            ("occupied", [change(.easy(km: 5), on: occupiedDay)])
+        ]
+
+        for (name, changes) in cases {
+            let container = try seededContainer()
+            let context = container.mainContext
+            let proposal = PlanAdjustmentProposal(changes: changes)
+            let before = try snapshot(in: context)
+            let targetsBefore = try targets(in: context)
+
+            XCTAssertThrowsError(
+                try CoachTools.validateForConfirmation(
+                    proposal: proposal,
+                    in: context,
+                    today: today,
+                    calendar: calendar
+                ),
+                "\(name) must not stage"
+            )
+            XCTAssertEqual(try snapshot(in: context), before, "\(name) preflight must not write")
+            XCTAssertEqual(try targets(in: context), targetsBefore, "\(name) preflight must not alter targets")
+
+            XCTAssertThrowsError(
+                try CoachTools.apply(
+                    proposal: proposal,
+                    in: context,
+                    today: today,
+                    calendar: calendar
+                ),
+                "\(name) must not apply"
+            )
+            XCTAssertEqual(try snapshot(in: context), before, "\(name) apply must not write")
+            XCTAssertEqual(try targets(in: context), targetsBefore, "\(name) apply must not alter targets")
+        }
+    }
+
     func testExplicitCreateCanTargetNormalRestDay() throws {
         let container = try seededContainer(availableDays: [.monday, .tuesday, .wednesday, .thursday, .friday, .sunday])
         let context = container.mainContext

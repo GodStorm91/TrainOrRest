@@ -1394,7 +1394,12 @@ struct ChatView: View {
             replacementCoordinator.stage(pending)
         case .proposal(let pending):
             planTransaction = nil
-            replacementCoordinator.stage(pending.proposal, summary: pending.summary, threadID: pending.threadID)
+            replacementCoordinator.stage(
+                pending.proposal,
+                summary: pending.summary,
+                threadID: pending.threadID,
+                warnings: pending.warnings
+            )
         }
     }
 

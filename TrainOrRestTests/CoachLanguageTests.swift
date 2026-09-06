@@ -48,10 +48,49 @@ final class CoachLanguageTests: XCTestCase {
         }
     }
 
+    func testPlanLoadWarningStringsExistForEveryLanguage() {
+        for language in CoachLanguage.allCases {
+            XCTAssertFalse(language.planLoadWarningTitle.isEmpty, "\(language)")
+            XCTAssertFalse(language.planLoadWarningConfirmHint.isEmpty, "\(language)")
+            XCTAssertFalse(language.ledgerValidatedWithWarningLabel.isEmpty, "\(language)")
+            XCTAssertFalse(language.validationReceiptWarningTitle.isEmpty, "\(language)")
+            XCTAssertFalse(language.validationReceiptWarningSubtitle.isEmpty, "\(language)")
+            XCTAssertFalse(language.applyDespiteLoadRiskLabel.isEmpty, "\(language)")
+            XCTAssertNotEqual(
+                language.ledgerValidatedWithWarningLabel,
+                language.ledgerValidatedLabel,
+                "\(language): warning ledger must not reuse the safe Validated chip"
+            )
+            XCTAssertNotEqual(
+                language.applyDespiteLoadRiskLabel,
+                language.applyChangesLabel,
+                "\(language): risky Apply must not reuse the safe Apply label"
+            )
+            XCTAssertNotEqual(
+                language.validationReceiptWarningTitle,
+                language.validationReceiptTitle,
+                "\(language): warning receipt must not claim Plan checks passed"
+            )
+        }
+    }
+
     func testCardActionLabelsMatchTheDesign() {
         XCTAssertEqual(CoachLanguage.en.applyChangesLabel, "Apply changes")
         XCTAssertEqual(CoachLanguage.en.keepExistingLabel(.tempo), "Keep tempo")
         XCTAssertEqual(CoachLanguage.en.keepExistingLabel(.intervals), "Keep intervals")
+    }
+
+    func testLoadWarningApplyCopyMatchesTheDesign() {
+        XCTAssertEqual(CoachLanguage.en.ledgerValidatedWithWarningLabel, "With warning")
+        XCTAssertEqual(CoachLanguage.en.validationReceiptWarningTitle, "Checks passed with load warning")
+        XCTAssertEqual(CoachLanguage.en.applyDespiteLoadRiskLabel, "Apply despite load risk")
+    }
+
+    func testValidationReceiptChecksMatchIssueKinds() {
+        XCTAssertEqual(
+            CoachLanguage.en.planValidationChecks.count,
+            PlanValidator.Issue.Kind.allCases.count
+        )
     }
 
     func testWorkoutRowTextDropsTrailingZeroDistance() {

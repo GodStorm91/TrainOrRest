@@ -6,6 +6,7 @@ struct ReceiptSheet: View {
         enum Kind: Equatable {
             case check
             case detail
+            case warning
         }
 
         let id = UUID()
@@ -23,6 +24,10 @@ struct ReceiptSheet: View {
 
         static func check(_ label: String, value: String, symbol: String? = "checkmark.circle") -> Row {
             Row(kind: .check, label: label, value: value, symbol: symbol)
+        }
+
+        static func warning(_ label: String, value: String, symbol: String? = "exclamationmark.triangle.fill") -> Row {
+            Row(kind: .warning, label: label, value: value, symbol: symbol)
         }
 
         static func detail(_ label: String, value: String, symbol: String? = nil) -> Row {
@@ -84,9 +89,12 @@ struct ReceiptSheet: View {
 
 private struct ReceiptRowView: View {
     let row: ReceiptSheet.Row
-
     private var tint: Color {
-        row.kind == .check ? Theme.good : Theme.accent
+        switch row.kind {
+        case .check: Theme.good
+        case .warning: Theme.warn
+        case .detail: Theme.accent
+        }
     }
 
     var body: some View {
@@ -116,6 +124,10 @@ private struct ReceiptRowView: View {
     }
 
     private var fallbackSymbol: String {
-        row.kind == .check ? "checkmark.circle" : "info.circle"
+        switch row.kind {
+        case .check: "checkmark.circle"
+        case .warning: "exclamationmark.triangle.fill"
+        case .detail: "info.circle"
+        }
     }
 }
