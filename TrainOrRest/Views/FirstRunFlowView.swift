@@ -1,6 +1,52 @@
 import SwiftData
 import SwiftUI
+import UIKit
 
+enum FirstRunHealthAuthorizationState: Equatable {
+    case explanation
+    case requesting
+    case denied
+    case restricted
+    case notDetermined
+    case failed(String)
+}
+
+enum FirstRunHealthAuthorizationTransition: Equatable {
+    case stay
+    case advance(showSettingsGuidance: Bool)
+}
+
+struct FirstRunHealthAuthorizationFlow {
+    private(set) var state: FirstRunHealthAuthorizationState = .explanation
+
+    mutating func beginRequest() -> Bool {
+        switch state {
+        case .explanation, .notDetermined, .failed:
+            state = .requesting
+            return true
+        case .requesting, .denied, .restricted:
+            return false
+        }
+    }
+
+    mutating func finish(
+        _ outcome: HealthAuthorizationOutcome
+    ) -> FirstRunHealthAuthorizationTransition {
+        switch outcome {
+        case .requestCompleted, .previouslyRequested:
+            return .advance(showSettingsGuidance: true)
+        case .denied:
+            state = .denied
+        case .restricted:
+            state = .restricted
+        case .notDetermined:
+            state = .notDetermined
+        case let .failed(message):
+            state = .failed(message)
+        }
+        return .stay
+    }
+}
 struct FirstRunFlowView: View {
     enum Step: Int {
         case language, welcome, health, race, hub, intervals, calendar, coach
@@ -11,8 +57,8 @@ struct FirstRunFlowView: View {
 
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
     @State private var step: Step = .language
-    @State private var isRequestingHealth = false
-
+    @State private var healthAuthorization = FirstRunHealthAuthorizationFlow()
+    @State private var showHealthSettingsGuidance = false
     private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
 
     var body: some View {
@@ -32,6 +78,7 @@ struct FirstRunFlowView: View {
         }
         .tint(Theme.accent)
         .environment(\.locale, language.uiLocale)
+        .interactiveDismissDisabled()
     }
 
     private var progress: some View {
@@ -74,6 +121,7 @@ struct FirstRunFlowView: View {
         case .race:
             FirstRunRaceStep(
                 language: language,
+                showHealthSettingsGuidance: showHealthSettingsGuidance,
                 onCreated: { step = .hub },
                 onLater: finish
             )
@@ -172,13 +220,22 @@ struct FirstRunFlowView: View {
                 .foregroundStyle(Theme.faint)
             Spacer()
             primaryButton(language.onboarding.connectAppleHealth) { step = .health }
-            textButton(language.onboarding.exploreFirst, action: finish)
         }
     }
 
     private var healthStep: some View {
+        Group {
+            switch healthAuthorization.state {
+            case .explanation, .requesting:
+                healthExplanation
+            case .denied, .restricted, .notDetermined, .failed:
+                healthFeedback
+            }
+        }
+    }
+
+    private var healthExplanation: some View {
         VStack(alignment: .leading, spacing: 0) {
-            backButton { step = .welcome }
             Text(language.onboarding.connectAppleHealth)
                 .font(.torHeading(28, .bold))
                 .foregroundStyle(Theme.text)
@@ -199,16 +256,105 @@ struct FirstRunFlowView: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(Theme.border, lineWidth: 1)
             )
-            Text(language.onboarding.healthWithoutData)
-                .font(.system(size: 14))
-                .foregroundStyle(Theme.dim)
-                .padding(.top, 12)
             Spacer()
-            primaryButton(isRequestingHealth ? nil : language.onboarding.allowHealthAccess) {
+            primaryButton(
+                healthAuthorization.state == .requesting ? nil : language.continueLabel
+            ) {
                 requestHealth()
             }
-            textButton(language.onboarding.continueWithoutHealth) { step = .race }
         }
+    }
+
+    private var healthFeedback: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Image(systemName: healthFeedbackSymbol)
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .padding(.bottom, 16)
+            Text(healthFeedbackTitle)
+                .font(.torHeading(28, .bold))
+                .foregroundStyle(Theme.text)
+                .padding(.bottom, 12)
+            Text(healthFeedbackDescription)
+                .font(.system(size: 16))
+                .foregroundStyle(Theme.dim)
+            Spacer()
+            healthFeedbackActions
+        }
+    }
+
+    private var healthFeedbackSymbol: String {
+        switch healthAuthorization.state {
+        case .denied: "heart.slash"
+        case .restricted: "lock.shield"
+        case .notDetermined, .failed: "exclamationmark.triangle"
+        case .explanation, .requesting: "heart"
+        }
+    }
+
+    private var healthFeedbackTitle: String {
+        switch healthAuthorization.state {
+        case .denied: language.onboarding.healthAccessDeniedTitle
+        case .restricted: language.onboarding.healthAccessRestrictedTitle
+        case .notDetermined: language.onboarding.healthAccessNotDeterminedTitle
+        case .failed: language.onboarding.healthAccessErrorTitle
+        case .explanation, .requesting: language.onboarding.connectAppleHealth
+        }
+    }
+
+    private var healthFeedbackDescription: String {
+        switch healthAuthorization.state {
+        case .denied:
+            language.onboarding.healthAccessDeniedDescription
+        case .restricted:
+            language.onboarding.healthAccessRestrictedDescription
+        case .notDetermined:
+            language.onboarding.healthAccessNotDeterminedDescription
+        case let .failed(message):
+            language.onboarding.healthAccessErrorDescription(message)
+        case .explanation, .requesting:
+            language.onboarding.healthDescription
+        }
+    }
+
+    @ViewBuilder
+    private var healthFeedbackActions: some View {
+        switch healthAuthorization.state {
+        case .denied:
+            openHealthSettingsButton
+            textButton(language.continueLabel) {
+                advanceAfterHealth(showSettingsGuidance: true)
+            }
+        case .restricted:
+            primaryButton(language.continueLabel) {
+                advanceAfterHealth(showSettingsGuidance: false)
+            }
+        case .notDetermined:
+            primaryButton(language.continueLabel) {
+                requestHealth()
+            }
+        case .failed:
+            primaryButton(language.retryLabel) {
+                requestHealth()
+            }
+            textButton(language.continueLabel) {
+                advanceAfterHealth(showSettingsGuidance: true)
+            }
+        case .explanation, .requesting:
+            EmptyView()
+        }
+    }
+
+    private var openHealthSettingsButton: some View {
+        Link(destination: URL(string: UIApplication.openSettingsURLString)!) {
+            Text(language.onboarding.openHealthSettings)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Theme.text)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(Theme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 20)
     }
 
     private var hub: some View {
@@ -340,12 +486,21 @@ struct FirstRunFlowView: View {
     }
 
     private func requestHealth() {
-        isRequestingHealth = true
+        guard healthAuthorization.beginRequest() else { return }
         Task {
-            defer { isRequestingHealth = false }
-            try? await health.requestAuthorization()
-            step = .race
+            let outcome = await health.requestAuthorization()
+            switch healthAuthorization.finish(outcome) {
+            case .stay:
+                break
+            case let .advance(showSettingsGuidance):
+                advanceAfterHealth(showSettingsGuidance: showSettingsGuidance)
+            }
         }
+    }
+
+    private func advanceAfterHealth(showSettingsGuidance: Bool) {
+        self.showHealthSettingsGuidance = showSettingsGuidance
+        step = .race
     }
 
     private func finish() {
@@ -356,6 +511,7 @@ struct FirstRunFlowView: View {
 
 private struct FirstRunRaceStep: View {
     let language: CoachLanguage
+    let showHealthSettingsGuidance: Bool
     let onCreated: () -> Void
     let onLater: () -> Void
 
@@ -397,6 +553,10 @@ private struct FirstRunRaceStep: View {
                 Text(language.onboarding.raceSetupDescription)
                     .font(.system(size: 16))
                     .foregroundStyle(Theme.dim)
+
+                if showHealthSettingsGuidance {
+                    healthSettingsGuidance
+                }
 
                 labeled(language.onboarding.distance) {
                     Picker(language.onboarding.distance, selection: $distance) {
@@ -502,6 +662,32 @@ private struct FirstRunRaceStep: View {
             }
         }
         .scrollIndicators(.hidden)
+    }
+
+    private var healthSettingsGuidance: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(language.onboarding.healthAccessDecidedTitle, systemImage: "heart.text.square")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Theme.text)
+            Text(language.onboarding.healthAccessDecidedDescription)
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.dim)
+                .fixedSize(horizontal: false, vertical: true)
+            Link(
+                language.onboarding.openHealthSettings,
+                destination: URL(string: UIApplication.openSettingsURLString)!
+            )
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(Theme.accent)
+            .frame(minHeight: 44)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
     }
 
     private func feasibility(_ assessment: FeasibilityCheck.Assessment) -> some View {
