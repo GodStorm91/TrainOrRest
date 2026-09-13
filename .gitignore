@@ -112,3 +112,6 @@ TrainOrRestWidget/TrainOrRestWidget.entitlements
 .agents/
 .impeccable/
 skills-lock.json
+
+# Screenshot and crash evidence from local verify runs
+.verify-artifacts/

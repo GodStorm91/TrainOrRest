@@ -1,6 +1,8 @@
+import SwiftData
 import XCTest
 @testable import TrainOrRest
 
+@MainActor
 final class RunningShoeServiceTests: XCTestCase {
     func testAutoAssignmentDisabledReturnsNone() {
         let shoe = makeShoe(types: [.easy])
@@ -165,6 +167,44 @@ final class RunningShoeServiceTests: XCTestCase {
         XCTAssertEqual(result.shoeID, active.id)
     }
 
+
+    func testUnassignedSyncedActivityGetsShoeAndMileageAutomatically() throws {
+        let schema = Schema([
+            RunningShoe.self,
+            ShoeMileageEntry.self,
+            RunningShoePreferences.self,
+            CompletedActivity.self
+        ])
+        let container = try ModelContainer(
+            for: schema,
+            configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)]
+        )
+        let context = container.mainContext
+        let shoe = makeShoe(types: [.easy], primary: .easy)
+        let activity = CompletedActivity(
+            hkUUID: UUID(),
+            date: .now,
+            distanceMeters: 8_200,
+            durationSeconds: 2_700,
+            avgHeartRate: 145,
+            maxHeartRate: 168,
+            avgPaceSecondsPerKm: 329,
+            sourceName: "Garmin"
+        )
+        context.insert(shoe)
+        context.insert(activity)
+
+        try ShoeAssignmentService.assignAutomaticShoesToUnassignedActivities(in: context)
+        try context.save()
+
+        XCTAssertEqual(activity.shoeID, shoe.id)
+        XCTAssertEqual(activity.shoeAssignmentSource, .auto)
+        XCTAssertEqual(
+            try ShoeMileageService.currentMileageKm(for: shoe, in: context),
+            8.2,
+            accuracy: 0.001
+        )
+    }
     func testActivityAddsMileage() {
         let shoe = makeShoe(initialMileage: 10)
         let activityID = UUID()
@@ -236,6 +276,21 @@ final class RunningShoeServiceTests: XCTestCase {
         XCTAssertEqual(ShoeWearStatusService.wearStatus(currentMileageKm: 99, expectedLifespanKm: 100), .inspect)
         XCTAssertEqual(ShoeWearStatusService.wearStatus(currentMileageKm: 100, expectedLifespanKm: 100), .pastRange)
         XCTAssertEqual(ShoeWearStatusService.wearStatus(currentMileageKm: 105, expectedLifespanKm: 100), .pastRange)
+    }
+
+    func testReminderStagesStartAtInspectionAndReplacementThresholds() {
+        XCTAssertEqual(
+            ShoeWearStatusService.reminderStage(currentMileageKm: 89, expectedLifespanKm: 100),
+            .none
+        )
+        XCTAssertEqual(
+            ShoeWearStatusService.reminderStage(currentMileageKm: 90, expectedLifespanKm: 100),
+            .inspect
+        )
+        XCTAssertEqual(
+            ShoeWearStatusService.reminderStage(currentMileageKm: 100, expectedLifespanKm: 100),
+            .replace
+        )
     }
 
     private func makeShoe(
