@@ -147,11 +147,17 @@ struct RootView: View {
             case .checking:
                 ProgressView()
             case .unavailable:
-                ContentUnavailableView(
-                    language.onboarding.healthDataUnavailableTitle,
-                    systemImage: "heart.slash",
-                    description: Text(language.onboarding.healthDataUnavailableDescription)
-                )
+                VStack(spacing: 20) {
+                    ContentUnavailableView(
+                        language.onboarding.healthDataUnavailableTitle,
+                        systemImage: "heart.slash",
+                        description: Text(language.onboarding.healthDataUnavailableDescription)
+                    )
+                    Button(language.continueLabel, action: activate)
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.accent)
+                }
+                .padding()
             case .firstRun:
                 FirstRunFlowView(health: health, onFinished: activate)
             case .ready:

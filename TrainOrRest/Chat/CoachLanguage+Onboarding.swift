@@ -85,67 +85,127 @@ struct OnboardingCopy {
         }
     }
 
-    var exploreFirst: String {
-        switch language {
-        case .en: "Explore first"
-        case .ja: "まずは見る"
-        case .vi: "Khám phá trước"
-        }
-    }
 
     var healthDescription: String {
         switch language {
-        case .en: "Garmin runs, sleep, HRV, and resting heart rate arrive through Apple Health. TrainOrRest only reads. It does not write back."
-        case .ja: "Garminのラン、睡眠、HRV、安静時心拍数はApple Healthから取得します。TrainOrRestは読み取り専用で、書き込みはしません。"
-        case .vi: "Chạy bộ Garmin, giấc ngủ, HRV và nhịp tim nghỉ được đưa vào qua Apple Health. TrainOrRest chỉ đọc dữ liệu, không ghi ngược lại."
+        case .en: "TrainOrRest reads running workouts, heart rate, HRV, resting heart rate, VO₂ max, walking and running distance, and sleep from Apple Health to calculate readiness and build or adapt your training plan. TrainOrRest does not write data to Apple Health."
+        case .ja: "TrainOrRestはApple Healthからランニングワークアウト、心拍数、HRV、安静時心拍数、VO₂ max、歩行・走行距離、睡眠を読み取り、コンディションの算出とトレーニングプランの作成・調整に使用します。Apple Healthへの書き込みは行いません。"
+        case .vi: "TrainOrRest đọc các buổi chạy, nhịp tim, HRV, nhịp tim nghỉ, VO₂ max, quãng đường đi bộ và chạy, cùng dữ liệu giấc ngủ từ Apple Health để tính mức sẵn sàng và tạo hoặc điều chỉnh kế hoạch tập luyện. TrainOrRest không ghi dữ liệu vào Apple Health."
         }
     }
 
     var healthReadPermission: String {
         switch language {
-        case .en: "Workouts, heart rate, HRV, sleep, resting HR"
-        case .ja: "ワークアウト、心拍数、HRV、睡眠、安静時心拍数"
-        case .vi: "Buổi tập, nhịp tim, HRV, giấc ngủ, nhịp tim nghỉ"
+        case .en: "Running workouts, heart rate, HRV, resting heart rate, VO₂ max, distance, and sleep"
+        case .ja: "ランニングワークアウト、心拍数、HRV、安静時心拍数、VO₂ max、距離、睡眠"
+        case .vi: "Buổi chạy, nhịp tim, HRV, nhịp tim nghỉ, VO₂ max, quãng đường và giấc ngủ"
         }
     }
 
     var healthNoWritePermission: String {
         switch language {
-        case .en: "No writes to Apple Health or Garmin"
-        case .ja: "Apple HealthやGarminには書き込みません"
+        case .en: "Writes no data to Apple Health or Garmin"
+        case .ja: "Apple HealthやGarminへデータを書き込みません"
         case .vi: "Không ghi dữ liệu vào Apple Health hoặc Garmin"
         }
     }
 
     var healthNoAccountPermission: String {
         switch language {
-        case .en: "No account. Later connections stay optional."
-        case .ja: "アカウント不要。ほかの連携も後から任意で設定できます。"
-        case .vi: "Không cần tài khoản. Các kết nối khác vẫn là tùy chọn."
+        case .en: "No account or external connection required"
+        case .ja: "アカウントや外部サービス連携は不要です"
+        case .vi: "Không cần tài khoản hay kết nối dịch vụ ngoài"
         }
     }
 
-    var healthWithoutData: String {
+
+
+
+    var healthAccessDeniedTitle: String {
         switch language {
-        case .en: "Without Health, Today can still name a session but cannot show readiness receipts."
-        case .ja: "HealthなしでもTodayでセッションの提案はできますが、コンディションの根拠は表示できません。"
-        case .vi: "Không có Health, Today vẫn có thể đề xuất buổi tập nhưng không hiển thị cơ sở thể trạng."
+        case .en: "Health access is off"
+        case .ja: "Healthへのアクセスがオフです"
+        case .vi: "Quyền truy cập Health đang tắt"
         }
     }
 
-    var allowHealthAccess: String {
+    var healthAccessDeniedDescription: String {
         switch language {
-        case .en: "Allow Health access"
-        case .ja: "Healthへのアクセスを許可"
-        case .vi: "Cho phép truy cập Health"
+        case .en: "TrainOrRest will not ask again. Open Settings to enable the Apple Health categories you want to share, or continue with plan, calendar, and Coach features."
+        case .ja: "TrainOrRestから再度リクエストすることはありません。設定で共有するApple Healthの項目を有効にするか、プラン、カレンダー、Coachの機能を続けて利用できます。"
+        case .vi: "TrainOrRest sẽ không yêu cầu lại. Mở Cài đặt để bật các danh mục Apple Health bạn muốn chia sẻ, hoặc tiếp tục dùng kế hoạch, lịch và Coach."
         }
     }
 
-    var continueWithoutHealth: String {
+    var healthAccessRestrictedTitle: String {
         switch language {
-        case .en: "Continue without it"
-        case .ja: "接続せずに続ける"
-        case .vi: "Tiếp tục không kết nối"
+        case .en: "Health access is restricted"
+        case .ja: "Healthへのアクセスが制限されています"
+        case .vi: "Quyền truy cập Health bị hạn chế"
+        }
+    }
+
+    var healthAccessRestrictedDescription: String {
+        switch language {
+        case .en: "This device does not allow TrainOrRest to request Apple Health data. You can continue using plan, calendar, and Coach features; readiness and imported runs will remain unavailable."
+        case .ja: "このデバイスではTrainOrRestがApple Healthデータをリクエストできません。プラン、カレンダー、Coachは利用できますが、コンディションとランの読み込みは利用できません。"
+        case .vi: "Thiết bị này không cho phép TrainOrRest yêu cầu dữ liệu Apple Health. Bạn vẫn có thể dùng kế hoạch, lịch và Coach; mức sẵn sàng và các buổi chạy nhập sẽ không khả dụng."
+        }
+    }
+
+    var healthAccessNotDeterminedTitle: String {
+        switch language {
+        case .en: "Health access needs a decision"
+        case .ja: "Healthへのアクセスを選択してください"
+        case .vi: "Cần quyết định quyền truy cập Health"
+        }
+    }
+
+    var healthAccessNotDeterminedDescription: String {
+        switch language {
+        case .en: "Apple Health has not completed the permission decision. Continue to open the native permission request."
+        case .ja: "Apple Healthの権限選択が完了していません。「続ける」を押すと標準の権限リクエストが開きます。"
+        case .vi: "Apple Health chưa hoàn tất quyết định quyền. Chọn Tiếp tục để mở yêu cầu quyền của hệ thống."
+        }
+    }
+
+    var healthAccessErrorTitle: String {
+        switch language {
+        case .en: "Health access could not be requested"
+        case .ja: "Healthへのアクセスをリクエストできませんでした"
+        case .vi: "Không thể yêu cầu quyền truy cập Health"
+        }
+    }
+
+    func healthAccessErrorDescription(_ detail: String) -> String {
+        switch language {
+        case .en: "Apple Health returned an error: \(detail). Retry the native request, or continue with features that do not use Health data."
+        case .ja: "Apple Healthでエラーが発生しました：\(detail)。標準の権限リクエストを再試行するか、Healthデータを使用しない機能を続けて利用できます。"
+        case .vi: "Apple Health trả về lỗi: \(detail). Hãy thử lại yêu cầu quyền của hệ thống, hoặc tiếp tục với các tính năng không dùng dữ liệu Health."
+        }
+    }
+
+    var healthAccessDecidedTitle: String {
+        switch language {
+        case .en: "Apple Health access recorded"
+        case .ja: "Apple Healthのアクセス設定を保存しました"
+        case .vi: "Đã ghi nhận quyền truy cập Apple Health"
+        }
+    }
+
+    var healthAccessDecidedDescription: String {
+        switch language {
+        case .en: "Apple controls each Health category separately. If you declined any requested data, enable it in Settings. TrainOrRest will not repeatedly show the permission request."
+        case .ja: "AppleはHealthの各項目を個別に管理します。リクエストしたデータを許可しなかった場合は、設定から有効にできます。TrainOrRestが権限リクエストを繰り返し表示することはありません。"
+        case .vi: "Apple quản lý riêng từng danh mục Health. Nếu bạn đã từ chối dữ liệu được yêu cầu, hãy bật lại trong Cài đặt. TrainOrRest sẽ không liên tục hiển thị yêu cầu quyền."
+        }
+    }
+
+    var openHealthSettings: String {
+        switch language {
+        case .en: "Open Settings"
+        case .ja: "設定を開く"
+        case .vi: "Mở Cài đặt"
         }
     }
 
