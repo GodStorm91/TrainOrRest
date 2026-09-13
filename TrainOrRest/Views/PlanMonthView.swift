@@ -20,13 +20,19 @@ struct PlanMonthView: View {
     @EnvironmentObject private var runSchedule: RunScheduleController
 
     private let calendar = Calendar.current
-    private let railWidth: CGFloat = 40
+    @ScaledMetric(relativeTo: .caption2) private var railWidth: CGFloat = 52
+    private let summaryGutterWidth: CGFloat = 13
 
     var body: some View {
         if displaysOnlyTodaysCall {
             todaysCall
         } else {
-            let index = MonthIndex(anchor: monthAnchor, workouts: workouts, calendar: calendar)
+            let index = MonthIndex(
+                anchor: monthAnchor,
+                workouts: workouts,
+                activities: completedActivities,
+                calendar: calendar
+            )
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if showsTodaysCall {
@@ -38,7 +44,7 @@ struct PlanMonthView: View {
                             weekdayRow
                             grid(index)
                         }
-                        .frame(maxWidth: 7 * 96 + railWidth, alignment: .leading)
+                        .frame(maxWidth: 7 * 96 + summaryGutterWidth + railWidth, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .center)
                     } else {
                         weekdayRow
@@ -100,11 +106,27 @@ struct PlanMonthView: View {
                     .foregroundStyle(Theme.faint)
                     .frame(maxWidth: .infinity)
             }
-            Text("KM")
+            summarySeparator
+            Text(language.plan.weekVolumeHeader)
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(Theme.faint)
+                .foregroundStyle(Theme.dim)
                 .frame(width: railWidth, alignment: .leading)
+                .accessibilityAddTraits(.isHeader)
         }
+    }
+
+    /// Splits the seven day columns from the week summary so the rail never
+    /// reads as an eighth weekday.
+    private var summarySeparator: some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: 6)
+            Rectangle()
+                .fill(Theme.line)
+                .frame(width: 1)
+            Color.clear.frame(width: 6)
+        }
+        .frame(width: summaryGutterWidth)
+        .accessibilityHidden(true)
     }
 
     private func grid(_ index: MonthIndex) -> some View {
@@ -121,7 +143,8 @@ struct PlanMonthView: View {
                                 .frame(maxWidth: .infinity)
                         }
                     }
-                    weekLoadRail(km: index.weekLoads[row], peak: index.peakWeekLoad)
+                    summarySeparator
+                    weekLoadRail(index.weekVolumes[row])
                 }
             }
         }
@@ -281,34 +304,41 @@ struct PlanMonthView: View {
     // MARK: - Weekly rhythm
 
     /// Lookup tables built once per body evaluation so the grid's cells and
-    /// rails do not each rescan every planned workout. Month cells grouped
-    /// into calendar weeks carry their own planned volume — the training
-    /// block's rhythm, read down the month.
+    /// rails do not each rescan every planned workout and completed run.
     private struct MonthIndex {
         let weekRows: [[Date?]]
-        /// Planned kilometers per week row, in `weekRows` order.
-        let weekLoads: [Double]
-        /// The heaviest week in the month, used to scale the volume bars.
-        let peakWeekLoad: Double
+        /// Planned vs completed kilometers per week row, in `weekRows` order.
+        let weekVolumes: [MonthGrid.WeekVolume]
         private let workoutsByDay: [Date: [PlannedWorkout]]
         private let calendar: Calendar
 
-        init(anchor: Date, workouts: [PlannedWorkout], calendar: Calendar) {
+        init(
+            anchor: Date,
+            workouts: [PlannedWorkout],
+            activities: [CompletedActivity],
+            calendar: Calendar
+        ) {
             let cells = MonthGrid.cells(for: anchor, calendar: calendar)
             let rows = stride(from: 0, to: cells.count, by: 7).map {
                 Array(cells[$0..<min($0 + 7, cells.count)])
             }
             let byDay = Dictionary(grouping: workouts) { calendar.startOfDay(for: $0.date) }
-            let loads = rows.map { week in
-                week.compactMap { $0 }.reduce(0) { sum, day in
-                    sum + (byDay[calendar.startOfDay(for: day)] ?? []).reduce(0) { $0 + $1.distanceKm }
-                }
+            let plannedByDay = byDay.mapValues { $0.reduce(0) { $0 + $1.distanceKm } }
+            let completedByDay = Dictionary(grouping: activities) {
+                calendar.startOfDay(for: $0.date)
+            }.mapValues { group in
+                group.reduce(0) { $0 + ($1.distanceMeters ?? 0) / 1000 }
             }
             self.calendar = calendar
             weekRows = rows
             workoutsByDay = byDay
-            weekLoads = loads
-            peakWeekLoad = loads.max() ?? 0
+            weekVolumes = rows.map { week in
+                MonthGrid.weekVolume(
+                    days: week.compactMap { $0 }.map { calendar.startOfDay(for: $0) },
+                    plannedKmByDay: plannedByDay,
+                    completedKmByDay: completedByDay
+                )
+            }
         }
 
         func firstKind(on date: Date) -> WorkoutKind? {
@@ -316,34 +346,53 @@ struct PlanMonthView: View {
         }
     }
 
-    /// A week's planned volume: a number plus a cyan bar scaled to the peak
-    /// week, so build, recovery, and taper weeks read as a shape down the rail.
+    /// Week summary: completed over planned, with a cyan fill toward this
+    /// week's plan. Not scaled to other weeks — that bar had no unit.
     @ViewBuilder
-    private func weekLoadRail(km: Double, peak: Double) -> some View {
-        if km > 0 {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("\(Int(km.rounded()))")
-                    .font(.caption2.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.dim)
-                    .fixedSize(horizontal: false, vertical: true)
-                Capsule()
-                    .fill(Theme.data)
-                    .frame(width: barWidth(km, peak: peak), height: 3)
+    private func weekLoadRail(_ volume: MonthGrid.WeekVolume) -> some View {
+        if volume.hasWork {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(volume.displayLabel)
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(volume.plannedKm > 0 && volume.completedKm > 0 ? Theme.text : Theme.dim)
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
+                if volume.plannedKm > 0 {
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Theme.line)
+                            .frame(width: railWidth - 4, height: 3)
+                        Capsule()
+                            .fill(Theme.data)
+                            .frame(width: fillWidth(volume), height: 3)
+                    }
+                }
             }
             .frame(width: railWidth, alignment: .leading)
             .frame(maxHeight: .infinity, alignment: .center)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(language.plan.weekVolumeAccessibility(Int(km.rounded())))
+            .accessibilityLabel(volumeAccessibility(volume))
         } else {
             Color.clear.frame(width: railWidth)
         }
     }
 
-    private func barWidth(_ km: Double, peak: Double) -> CGFloat {
-        guard peak > 0 else { return 0 }
+
+    private func fillWidth(_ volume: MonthGrid.WeekVolume) -> CGFloat {
         let maxBar = railWidth - 4
-        return max(4, CGFloat(km / peak) * maxBar)
+        guard volume.progress > 0 else { return 0 }
+        return max(4, maxBar * CGFloat(volume.progress))
+    }
+
+    private func volumeAccessibility(_ volume: MonthGrid.WeekVolume) -> String {
+        if volume.completedKm > 0 {
+            language.plan.weekVolumeAccessibility(
+                completed: volume.completedDisplay,
+                planned: volume.plannedDisplay
+            )
+        } else {
+            language.plan.weekVolumePlannedAccessibility(volume.plannedDisplay)
+        }
     }
 
     // MARK: - Selected day detail

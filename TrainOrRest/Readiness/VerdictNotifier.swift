@@ -8,6 +8,7 @@ import UserNotifications
 enum VerdictNotifier {
     /// Safe to call on every launch; the system prompt shows only once.
     static func requestPermission() async {
+        if ProcessInfo.processInfo.environment["TOR_DEV_SEED"] == "1" { return }
         _ = try? await UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound])
     }

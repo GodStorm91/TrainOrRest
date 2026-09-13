@@ -36,4 +36,44 @@ enum MonthGrid {
         let shift = calendar.firstWeekday - 1
         return Array(symbols[shift...] + symbols[..<shift])
     }
+
+    /// Planned vs completed kilometers for the days actually shown in a week
+    /// row. Blank leading/trailing cells are not in `days`, so a partial first
+    /// or last week of the month only counts what the grid displays.
+    struct WeekVolume: Equatable {
+        var plannedKm: Double
+        var completedKm: Double
+
+        var plannedDisplay: Int { Int(plannedKm.rounded()) }
+        var completedDisplay: Int { Int(completedKm.rounded()) }
+        var hasWork: Bool { plannedKm > 0 || completedKm > 0 }
+
+        var displayLabel: String {
+            if plannedKm > 0 && completedKm > 0 {
+                "\(completedDisplay)/\(plannedDisplay)"
+            } else if completedKm > 0 {
+                "\(completedDisplay)"
+            } else {
+                "\(plannedDisplay)"
+            }
+        }
+
+        /// Fill toward this week's plan, capped at 1. Over-distance stays in
+        /// the numbers; the bar does not grow past the track.
+        var progress: Double {
+            guard plannedKm > 0 else { return completedKm > 0 ? 1 : 0 }
+            return min(1, completedKm / plannedKm)
+        }
+    }
+
+    static func weekVolume(
+        days: [Date],
+        plannedKmByDay: [Date: Double],
+        completedKmByDay: [Date: Double]
+    ) -> WeekVolume {
+        WeekVolume(
+            plannedKm: days.reduce(0) { $0 + (plannedKmByDay[$1] ?? 0) },
+            completedKm: days.reduce(0) { $0 + (completedKmByDay[$1] ?? 0) }
+        )
+    }
 }

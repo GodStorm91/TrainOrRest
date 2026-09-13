@@ -76,7 +76,21 @@ struct PlanCopy {
         guard let weatherStance, !weatherStance.isEmpty else { return base }
         return "\(base), \(weatherStance)"
     }
-    func weekVolumeAccessibility(_ kilometers: Int) -> String { text(en: "Week volume \(kilometers) kilometers", ja: "週の走行距離 \(kilometers) km", vi: "Khối lượng tuần \(kilometers) km") }
+    var weekVolumeHeader: String { text(en: "Week", ja: "週", vi: "Tuần") }
+    func weekVolumeAccessibility(completed: Int, planned: Int) -> String {
+        text(
+            en: "\(completed) of \(planned) kilometers this week",
+            ja: "今週 \(completed) / \(planned) km",
+            vi: "Tuần này \(completed) / \(planned) km"
+        )
+    }
+    func weekVolumePlannedAccessibility(_ kilometers: Int) -> String {
+        text(
+            en: "\(kilometers) kilometers planned this week",
+            ja: "今週の予定 \(kilometers) km",
+            vi: "Tuần này dự kiến \(kilometers) km"
+        )
+    }
     func planReceipt(phase: String, source: PlanReceiptSource) -> String {
         switch (language, source) {
         case (.en, .calendar): "\(phase) phase · synced from calendar"
