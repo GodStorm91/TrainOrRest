@@ -51,4 +51,79 @@ final class MonthGridTests: XCTestCase {
         XCTAssertNotNil(cells.first ?? nil)
         XCTAssertEqual(cells.compactMap { $0 }.count, 28)
     }
+
+    func testWeekVolumeSumsOnlyVisibleDays() {
+        let sunday = date(2026, 9, 6)
+        let monday = date(2026, 9, 7)
+        let nextSunday = date(2026, 9, 13)
+        let volume = MonthGrid.weekVolume(
+            days: [sunday, monday],
+            plannedKmByDay: [sunday: 14, monday: 8, nextSunday: 99],
+            completedKmByDay: [sunday: 12.4]
+        )
+        XCTAssertEqual(volume.plannedKm, 22)
+        XCTAssertEqual(volume.completedKm, 12.4)
+        XCTAssertEqual(volume.plannedDisplay, 22)
+        XCTAssertEqual(volume.completedDisplay, 12)
+        XCTAssertTrue(volume.hasWork)
+        XCTAssertEqual(volume.displayLabel, "12/22")
+    }
+
+    func testWeekVolumeProgressIsTowardThisWeeksPlan() {
+        let day = date(2026, 9, 6)
+        let half = MonthGrid.weekVolume(
+            days: [day],
+            plannedKmByDay: [day: 40],
+            completedKmByDay: [day: 10]
+        )
+        XCTAssertEqual(half.progress, 0.25, accuracy: 0.0001)
+
+        let over = MonthGrid.weekVolume(
+            days: [day],
+            plannedKmByDay: [day: 10],
+            completedKmByDay: [day: 15]
+        )
+        XCTAssertEqual(over.progress, 1, accuracy: 0.0001)
+        XCTAssertEqual(over.completedDisplay, 15)
+        XCTAssertEqual(over.plannedDisplay, 10)
+        XCTAssertEqual(over.displayLabel, "15/10")
+    }
+
+    func testWeekVolumeFutureWeekHasNoProgress() {
+        let day = date(2026, 9, 20)
+        let volume = MonthGrid.weekVolume(
+            days: [day],
+            plannedKmByDay: [day: 37],
+            completedKmByDay: [:]
+        )
+        XCTAssertEqual(volume.progress, 0)
+        XCTAssertEqual(volume.plannedDisplay, 37)
+        XCTAssertEqual(volume.completedDisplay, 0)
+        XCTAssertEqual(volume.displayLabel, "37")
+        XCTAssertTrue(volume.hasWork)
+    }
+
+    func testWeekVolumeUnplannedCompletedRunStillCounts() {
+        let day = date(2026, 9, 6)
+        let volume = MonthGrid.weekVolume(
+            days: [day],
+            plannedKmByDay: [:],
+            completedKmByDay: [day: 8]
+        )
+        XCTAssertEqual(volume.plannedKm, 0)
+        XCTAssertEqual(volume.completedDisplay, 8)
+        XCTAssertEqual(volume.progress, 1)
+        XCTAssertTrue(volume.hasWork)
+        XCTAssertEqual(volume.displayLabel, "8")
+    }
+
+    func testWeekVolumeEmptyRowHasNoWork() {
+        let volume = MonthGrid.weekVolume(
+            days: [date(2026, 9, 1)],
+            plannedKmByDay: [:],
+            completedKmByDay: [:]
+        )
+        XCTAssertFalse(volume.hasWork)
+        XCTAssertEqual(volume.progress, 0)
+    }
 }
