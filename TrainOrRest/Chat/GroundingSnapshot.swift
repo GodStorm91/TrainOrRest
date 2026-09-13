@@ -75,11 +75,11 @@ enum CoachGrounding {
         calendar: Calendar
     ) throws -> GroundingSnapshot {
         let readiness = try todayReadiness(in: context, today: today, calendar: calendar)
-        let plan = try PlanStore.activePlan(in: context)
+        let planRevision = try CoachPlanRevision.current(in: context)
         let summary = try GroundingSummaryEncoder.summary(
             evidence: evidence,
             readiness: readiness,
-            plan: plan,
+            planRevision: planRevision,
             plannedWorkouts: plannedWorkouts(in: context, today: today, calendar: calendar),
             workoutSummary: workoutSummary(for: evidence.workout, in: context, calendar: calendar),
             today: today,
@@ -89,7 +89,7 @@ enum CoachGrounding {
             id: UUID(),
             timestamp: today,
             readinessVersion: readiness.map { isoString($0.computedAt) } ?? "none",
-            planVersion: plan.map { isoString($0.generatedAt) } ?? "none",
+            planVersion: planRevision,
             evidence: evidence,
             summary: summary
         )
@@ -170,7 +170,7 @@ private enum GroundingSummaryEncoder {
     static func summary(
         evidence: EvidenceSelection,
         readiness: DailyReadiness?,
-        plan: TrainingPlan?,
+        planRevision: String,
         plannedWorkouts: [PlannedWorkout],
         workoutSummary: String?,
         today: Date,
@@ -188,7 +188,7 @@ private enum GroundingSummaryEncoder {
             lines.append("Photo: attached; metadata stripped before send.")
         }
         let readinessVersion = readiness.map { CoachGrounding.isoString($0.computedAt) } ?? "none"
-        let planVersion = plan.map { CoachGrounding.isoString($0.generatedAt) } ?? "none"
+        let planVersion = planRevision
         lines.append("Versions: readiness \(readinessVersion); plan \(planVersion).")
         return lines.joined(separator: "\n")
     }

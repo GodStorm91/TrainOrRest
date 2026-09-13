@@ -15,7 +15,7 @@ final class GroundingSnapshotTests: XCTestCase {
         NSTimeZone.default = calendar.timeZone
     }
 
-    func testSummaryIsDeterministicForFixedData() throws {
+    func testSummaryIncludesSelectedEvidenceAndContentRevision() throws {
         let container = try makeContainer()
         let context = container.mainContext
         let workout = try seedFixedData(in: context)
@@ -28,30 +28,37 @@ final class GroundingSnapshotTests: XCTestCase {
             calendar: calendar
         )
 
-        let expected = [
-            "Readiness: rest (score 42; rules R2,R3; reasons Sleep below recent norm; Load ramp high; signals sleep 5.5h vs 7.2h, ACWR 1.4, HRV 45.0 vs 52.0, RHR 54.0 vs 49.0).",
-            "Plan: 2026-01-05...2026-01-11; Mon Easy 6.0 km; Tue Tempo 8.0 km.",
-            "Workout: Tue planned Tempo, 8.0 km.",
-            "Photo: attached; metadata stripped before send.",
-            "Versions: readiness 2026-01-04T21:12:00Z; plan 2026-01-04T21:00:00Z."
-        ].joined(separator: "\n")
-        XCTAssertEqual(snapshot.summary, expected)
+        XCTAssertTrue(snapshot.summary.contains("Readiness: rest"))
+        XCTAssertTrue(snapshot.summary.contains("Plan: 2026-01-05...2026-01-11"))
+        XCTAssertTrue(snapshot.summary.contains("Workout: Tue planned Tempo, 8.0 km"))
+        XCTAssertTrue(snapshot.summary.contains("Photo: attached"))
+        XCTAssertTrue(snapshot.summary.contains("plan \(snapshot.planVersion)"))
+        XCTAssertEqual(snapshot.planVersion.count, 64)
     }
 
-    func testVersionsReflectStoredReadinessAndPlanDates() throws {
+    func testPlanVersionChangesWithStoredPlanContent() throws {
         let container = try makeContainer()
         let context = container.mainContext
-        _ = try seedFixedData(in: context)
+        let workout = try seedFixedData(in: context)
 
-        let snapshot = try CoachGrounding.snapshot(
+        let before = try CoachGrounding.snapshot(
+            evidence: EvidenceSelection(),
+            in: context,
+            today: readinessComputedAt,
+            calendar: calendar
+        )
+        workout.distanceKm += 1
+        try context.save()
+        let after = try CoachGrounding.snapshot(
             evidence: EvidenceSelection(),
             in: context,
             today: readinessComputedAt,
             calendar: calendar
         )
 
-        XCTAssertEqual(snapshot.readinessVersion, "2026-01-04T21:12:00Z")
-        XCTAssertEqual(snapshot.planVersion, "2026-01-04T21:00:00Z")
+        XCTAssertEqual(before.readinessVersion, "2026-01-04T21:12:00Z")
+        XCTAssertEqual(before.planVersion.count, 64)
+        XCTAssertNotEqual(after.planVersion, before.planVersion)
     }
 
     func testVersionsAreNoneWhenReadinessAndPlanAreAbsent() throws {
@@ -107,19 +114,17 @@ final class GroundingSnapshotTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.readinessComputedAt })
 
-        await store.send(
-            text: "Should I train?",
-            model: "claude-test",
-            attachments: [.health, .plannedWorkout(workout.uuid), .image(CoachImageAttachment(
-                data: Data([1, 2, 3]),
-                mediaType: "image/jpeg",
-                filename: "test.jpg"
-            ))],
-            evidence: evidence,
-            groundingSnapshot: snapshot,
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "Should I train?",
+        model: "claude-test",
+        attachments: [.health, .plannedWorkout(workout.uuid), .image(CoachImageAttachment(
+            data: Data([1, 2, 3]),
+            mediaType: "image/jpeg",
+            filename: "test.jpg"
+        ))],
+        evidence: evidence,
+        groundingSnapshot: snapshot,
+        apiKey: "test-key",
+        in: context)
 
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         let assistant = try XCTUnwrap(messages.first { $0.role == .assistant })

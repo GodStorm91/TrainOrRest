@@ -6,236 +6,248 @@ import XCTest
 final class WorkoutReplacementTests: XCTestCase {
     private let calendar = PlanEngineTestSupport.calendar
     private let today = PlanEngineTestSupport.date(2026, 1, 5)
-    private let occupiedDay = PlanEngineTestSupport.date(2026, 1, 7, hour: 0)
+    private let occupiedDay = PlanEngineTestSupport.date(2026, 1, 7)
 
-    func testStagingOccupiedWorkoutReplacementDoesNotPersist() throws {
-        let container = try makeContainer()
-        let pending = try pendingReplacement(in: container.mainContext)
-        let before = try snapshot(in: ModelContext(container))
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
-
-        coordinator.stage(pending)
-
-        XCTAssertEqual(coordinator.pending, pending)
-        XCTAssertEqual(try snapshot(in: ModelContext(container)), before)
-        XCTAssertTrue(try messages(in: ModelContext(container)).isEmpty)
-    }
-
-    /// The plan-update card renders these fields, so they must describe the real
-    /// before/after workouts and the real change to the week's target volume.
-    func testStagedReplacementCarriesRealBeforeAfterAndVolumeDelta() throws {
+    func testPreparingReplacementIsReadOnlyAndCarriesExactDiff() throws {
         let container = try makeContainer()
         let context = container.mainContext
+        let before = try snapshot(in: context)
         let existing = try XCTUnwrap(workout(on: occupiedDay, in: context))
-        let existingKind = try XCTUnwrap(existing.kind)
-        let existingDistance = existing.distanceKm
 
-        let pending = try pendingReplacement(in: context)
+        let candidate = try replacementCandidate(in: context)
 
-        XCTAssertEqual(pending.existing.kind, existingKind)
-        XCTAssertEqual(pending.existing.distanceKm, existingDistance, accuracy: 0.001)
-        XCTAssertEqual(
-            pending.volumeDeltaKm,
-            pending.proposed.distanceKm - pending.existing.distanceKm,
-            accuracy: 0.051,
-            "the card's footer delta must match what the engine applies to the week target"
-        )
-    }
-
-    func testCanStageEasyWorkoutReplacementToThreshold() throws {
-        let container = try makeContainer()
-        let context = container.mainContext
-        let existing = try XCTUnwrap(workout(on: occupiedDay, in: context))
-        existing.kindRaw = WorkoutKind.easy.rawValue
-        existing.details = "Easy run at E pace"
-        try context.save()
-        let threshold = PlanAdjustmentProposal.CreateWorkout(
-            kind: "threshold",
-            blocks: [.init(repeatCount: 1, steps: [
-                .init(role: "warm_up", targetType: "distance_km", targetValue: 2, paceZone: "easy"),
-                .init(role: "work", targetType: "distance_km", targetValue: 4, paceZone: "threshold"),
-                .init(role: "cool_down", targetType: "distance_km", targetValue: 2, paceZone: "easy")
-            ])]
-        )
-
-        let pending = try pendingReplacement(workout: threshold, date: occupiedDay, in: context)
-
-        XCTAssertEqual(pending.existing.kind, .easy)
-        XCTAssertEqual(pending.proposed.kind, .threshold)
-        XCTAssertEqual(pending.proposed.distanceKm, 8, accuracy: 0.001)
-    }
-
-
-    func testConfirmationPreservesIdentityReplacesFieldsAndWritesAudit() throws {
-        let container = try makeContainer()
-        let context = container.mainContext
-        let existing = try XCTUnwrap(workout(on: occupiedDay, in: context))
-        existing.matchedActivityUUID = UUID()
-        try context.save()
-        let pending = try pendingReplacement(in: context)
-        let oldID = existing.uuid
-        let oldDetails = existing.details
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
-
-        coordinator.stage(pending)
-        coordinator.confirm(pending.id)
-
-        let verification = ModelContext(container)
-        let replaced = try XCTUnwrap(workout(on: occupiedDay, in: verification))
-        XCTAssertEqual(replaced.uuid, oldID)
-        XCTAssertEqual(replaced.kind, .easy)
-        XCTAssertEqual(replaced.distanceKm, 5, accuracy: 0.001)
-        XCTAssertNotEqual(replaced.details, oldDetails)
-        XCTAssertEqual(replaced.structure.flatMap(\.steps).map(\.role), [.work])
-        XCTAssertNotNil(replaced.paceBand)
-        XCTAssertEqual(replaced.status, .planned)
-        XCTAssertTrue(replaced.manuallyOverridden)
-        XCTAssertNil(replaced.matchedActivityUUID)
-
-        let audit = try XCTUnwrap(messages(in: verification).first)
-        XCTAssertEqual(audit.role, .assistant)
-        XCTAssertEqual(audit.text, pending.successMessage)
-        XCTAssertEqual(audit.appliedAdjustment, pending.appliedSummary)
-    }
-
-    func testCancelledConfirmationWritesNothing() throws {
-        let container = try makeContainer()
-        let pending = try pendingReplacement(in: container.mainContext)
-        let before = try snapshot(in: ModelContext(container))
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
-
-        coordinator.stage(pending)
-        coordinator.cancel()
-        coordinator.confirm(pending.id)
-
-        XCTAssertNil(coordinator.pending)
-        XCTAssertEqual(try snapshot(in: ModelContext(container)), before)
-        XCTAssertTrue(try messages(in: ModelContext(container)).isEmpty)
-    }
-
-    func testStaleConfirmationThrowsTypedErrorWritesNothingAndCanRediffCurrentWorkout() throws {
-        let container = try makeContainer()
-        let context = container.mainContext
-        let pending = try pendingReplacement(in: context)
-        let existing = try XCTUnwrap(workout(on: occupiedDay, in: context))
-        existing.distanceKm += 1
-        existing.details = "Changed after confirmation was offered"
-        let currentDistance = existing.distanceKm
-        let currentKind = try XCTUnwrap(existing.kind)
-        try context.save()
-        let before = try snapshot(in: ModelContext(container))
-
-        XCTAssertThrowsError(try CoachTools.confirmReplacement(
-            pending,
-            in: ModelContext(container),
-            today: today,
-            calendar: calendar
-        )) { error in
-            XCTAssertEqual(error as? CoachTools.ReplacementError, .staleTarget)
-            XCTAssertEqual(error.localizedDescription, CoachTools.staleReplacementMessage)
+        XCTAssertEqual(try snapshot(in: context), before)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<PlanEdit>()).isEmpty)
+        guard case .replacement(_, let shownBefore, let shownAfter, _, let volumeDelta) = candidate.presentation else {
+            return XCTFail("Expected a replacement presentation")
         }
-
-        XCTAssertEqual(try snapshot(in: ModelContext(container)), before)
-        XCTAssertTrue(try messages(in: ModelContext(container)).isEmpty)
-        XCTAssertTrue(try planEdits(in: ModelContext(container)).isEmpty)
-
-        let fresh = try rebuildPending(from: pending, in: ModelContext(container))
-        XCTAssertEqual(fresh.existing.kind, currentKind)
-        XCTAssertEqual(fresh.existing.distanceKm, currentDistance, accuracy: 0.001)
-        XCTAssertFalse(fresh.planChangedSinceProposed)
+        XCTAssertEqual(shownBefore.kind, existing.kind)
+        XCTAssertEqual(shownBefore.distanceKm, existing.distanceKm, accuracy: 0.001)
+        XCTAssertEqual(volumeDelta, shownAfter.distanceKm - shownBefore.distanceKm, accuracy: 0.051)
+        let operation = try XCTUnwrap(candidate.transaction.operations.first)
+        XCTAssertEqual(operation.before?.uuid, existing.uuid)
+        XCTAssertEqual(operation.after?.uuid, existing.uuid)
     }
 
-    func testCoordinatorRestagesFreshDiffWhenPlanChangedSinceProposal() throws {
+    func testCommitAppliesStoredSnapshotAndWritesRevertibleReceipt() throws {
         let container = try makeContainer()
         let context = container.mainContext
-        let pending = try pendingReplacement(in: context)
+        let existing = try XCTUnwrap(workout(on: occupiedDay, in: context))
+        existing.scheduleUpdatedAt = Date(timeIntervalSinceReferenceDate: 800_000_000.0004)
+        try context.save()
+        let original = PlanWorkoutReceiptSnapshot(workout: existing)
+        let before = try snapshot(in: context)
+        let candidate = try replacementCandidate(in: context)
+        let expectedAfter = try XCTUnwrap(candidate.transaction.operations.first?.after)
+
+        let result = try CoachPlanCandidateEngine.commit(
+            candidate,
+            in: context,
+            today: today,
+            calendar: calendar,
+            language: .en
+        )
+        guard case .applied(let receipt) = result else { return XCTFail("Expected commit") }
+
+        let changed = try XCTUnwrap(workout(on: occupiedDay, in: context))
+        XCTAssertEqual(PlanWorkoutReceiptSnapshot(workout: changed), expectedAfter)
+        let edit = try XCTUnwrap(context.fetch(FetchDescriptor<PlanEdit>()).first)
+        XCTAssertEqual(edit.id, receipt.id)
+        XCTAssertEqual(edit.summaryText, candidate.summary)
+        XCTAssertEqual(edit.basePlanRevision, candidate.baseRevision)
+        XCTAssertNotNil(edit.appliedPlanRevision)
+        XCTAssertNotNil(edit.operationData)
+
+        try PlanEditStore.revert(edit.id, in: context, today: today, calendar: calendar)
+        XCTAssertEqual(try snapshot(in: context), before)
+        XCTAssertEqual(PlanWorkoutReceiptSnapshot(workout: try XCTUnwrap(workout(on: occupiedDay, in: context))), original)
+        XCTAssertEqual(edit.revertedAt, today)
+    }
+
+    func testCommitRestagesFreshCandidateWhenRevisionChanged() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let candidate = try replacementCandidate(in: context)
         let existing = try XCTUnwrap(workout(on: occupiedDay, in: context))
         existing.distanceKm += 1.5
-        let currentDistance = existing.distanceKm
         try context.save()
-        let before = try snapshot(in: ModelContext(container))
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
+        let beforeCommit = try snapshot(in: context)
 
-        coordinator.stage(pending)
-        coordinator.confirm(pending.id)
+        let result = try CoachPlanCandidateEngine.commit(
+            candidate,
+            in: context,
+            today: today,
+            calendar: calendar,
+            language: .en
+        )
+        guard case .stale(let fresh) = result else { return XCTFail("Expected stale candidate") }
 
-        let restaged = try XCTUnwrap(coordinator.pending)
-        XCTAssertTrue(restaged.planChangedSinceProposed)
-        XCTAssertEqual(restaged.existing.distanceKm, currentDistance, accuracy: 0.001)
-        XCTAssertNil(coordinator.lastError)
-        XCTAssertEqual(try snapshot(in: ModelContext(container)), before)
-        XCTAssertTrue(try messages(in: ModelContext(container)).isEmpty)
-        XCTAssertTrue(try planEdits(in: ModelContext(container)).isEmpty)
+        XCTAssertTrue(fresh.changedSinceProposed)
+        XCTAssertNotEqual(fresh.baseRevision, candidate.baseRevision)
+        XCTAssertEqual(try snapshot(in: context), beforeCommit)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<PlanEdit>()).isEmpty)
     }
 
-    func testRebuildRestagesWhenStaleTargetBecameCompleted() throws {
+    func testStoreCancellationLeavesPlanUntouched() throws {
         let container = try makeContainer()
         let context = container.mainContext
-        let pending = try pendingReplacement(in: context)
-        let existing = try XCTUnwrap(workout(on: occupiedDay, in: context))
-        existing.status = .done
-        try context.save()
+        let before = try snapshot(in: context)
+        let candidate = try replacementCandidate(in: context)
+        let store = CoachChatStore(calendar: calendar, now: { self.today })
 
-        XCTAssertThrowsError(try CoachTools.confirmReplacement(
-            pending,
-            in: ModelContext(container),
-            today: today,
-            calendar: calendar
-        )) { error in
-            XCTAssertEqual(error as? CoachTools.ReplacementError, .staleTarget)
+        store.stagePlanCandidate(candidate)
+        store.cancelPlanCandidate()
+        guard case .ignored = store.confirmPlanCandidate(candidate.id, in: context) else {
+            return XCTFail("Cancelled candidate must not commit")
         }
-        let rebuilt = try XCTUnwrap(try rebuildPendingOptional(from: pending, in: ModelContext(container)))
-        XCTAssertEqual(rebuilt.expected.statusRaw, WorkoutStatus.done.rawValue)
-        XCTAssertEqual(rebuilt.expected.uuid, existing.uuid)
+
+        XCTAssertEqual(try snapshot(in: context), before)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<PlanEdit>()).isEmpty)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<ChatMessage>()).isEmpty)
     }
 
-    private func pendingReplacement(in context: ModelContext) throws -> PendingWorkoutReplacement {
+    func testStoreRestagesStaleCandidateThenCommitsOneReceipt() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let candidate = try replacementCandidate(in: context)
+        let store = CoachChatStore(calendar: calendar, now: { self.today })
+        store.stagePlanCandidate(candidate)
+
+        let existing = try XCTUnwrap(workout(on: occupiedDay, in: context))
+        existing.distanceKm += 1.5
+        try context.save()
+
+        guard case .stale = store.confirmPlanCandidate(candidate.id, in: context) else {
+            return XCTFail("Expected the store to restage a stale candidate")
+        }
+        let fresh = try XCTUnwrap(store.pendingPlanCandidate)
+        XCTAssertTrue(fresh.changedSinceProposed)
+        XCTAssertNotEqual(fresh.id, candidate.id)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<PlanEdit>()).isEmpty)
+
+        guard case .applied(let receipt) = store.confirmPlanCandidate(fresh.id, in: context) else {
+            return XCTFail("Expected the refreshed candidate to commit")
+        }
+        XCTAssertNil(store.pendingPlanCandidate)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<PlanEdit>()).map(\.id), [receipt.id])
+        XCTAssertEqual(try context.fetch(FetchDescriptor<ChatMessage>()).count, 1)
+    }
+
+    func testStoreReceiptRestoresPreCommitPlan() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let before = try snapshot(in: context)
+        let candidate = try replacementCandidate(in: context)
+        let store = CoachChatStore(calendar: calendar, now: { self.today })
+        store.stagePlanCandidate(candidate)
+
+        guard case .applied(let receipt) = store.confirmPlanCandidate(candidate.id, in: context) else {
+            return XCTFail("Expected the staged candidate to commit")
+        }
+        try PlanEditStore.revert(receipt.id, in: context, today: today, calendar: calendar)
+
+        XCTAssertEqual(try snapshot(in: context), before)
+    }
+
+    func testStoreKeepsCandidateWhenStaleProposalNoLongerApplies() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let candidate = try replacementCandidate(in: context)
+        let store = CoachChatStore(calendar: calendar, now: { self.today })
+        store.stagePlanCandidate(candidate)
+
+        context.delete(try XCTUnwrap(workout(on: occupiedDay, in: context)))
+        try context.save()
+
+        guard case .failed = store.confirmPlanCandidate(candidate.id, in: context) else {
+            return XCTFail("Expected stale revalidation to reject the obsolete proposal")
+        }
+        XCTAssertEqual(store.pendingPlanCandidate?.id, candidate.id)
+        XCTAssertNotNil(store.lastError)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<PlanEdit>()).isEmpty)
+    }
+
+    func testSuccessfulConfirmationClearsOlderTurnError() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let candidate = try replacementCandidate(in: context)
+        let store = CoachChatStore(calendar: calendar, now: { self.today })
+        store.stagePlanCandidate(candidate)
+        store.lastError = "Previous send was blocked."
+
+        guard case .applied = store.confirmPlanCandidate(candidate.id, in: context) else {
+            return XCTFail("Expected confirmation to ignore an older turn error")
+        }
+        XCTAssertNil(store.lastError)
+    }
+
+    func testPendingCandidateBlocksInteractionBeforeResolution() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let candidate = try replacementCandidate(in: context)
+        let store = CoachChatStore(calendar: calendar, now: { self.today })
+        store.stagePlanCandidate(candidate)
+        let interaction = CoachResponseInteraction(
+            id: "next-step",
+            type: .singleChoice,
+            title: "Next step",
+            options: [
+                CoachChoiceOption(id: "keep", label: "Keep", description: nil, value: "Keep"),
+                CoachChoiceOption(id: "change", label: "Change", description: nil, value: "Change")
+            ],
+            allowOther: false,
+            status: .pending
+        )
+        let assistant = ChatMessage(
+            role: .assistant,
+            text: "Choose",
+            date: today,
+            status: .completed,
+            interaction: interaction
+        )
+        context.insert(assistant)
+        try context.save()
+
+        let didSend = await store.submit(
+            CoachTurnRequest(
+                text: "Change",
+                model: "claude-test",
+                origin: .interaction(
+                    messageID: assistant.turnID,
+                    interactionID: interaction.id,
+                    selectedOptionID: "change",
+                    isCustomResponse: false
+                )
+            ),
+            apiKey: "test-key",
+            in: context
+        )
+
+        XCTAssertFalse(didSend)
+        XCTAssertEqual(assistant.interaction?.status, .pending)
+        XCTAssertEqual(store.pendingPlanCandidate?.id, candidate.id)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<PlanEdit>()).isEmpty)
+    }
+
+    private func replacementCandidate(in context: ModelContext) throws -> CoachPlanCandidate {
         let workout = PlanAdjustmentProposal.CreateWorkout(
             kind: "easy",
             blocks: [.init(repeatCount: 1, steps: [.init(
                 role: "work", targetType: "distance_km", targetValue: 5, paceZone: "easy"
             )])]
         )
-        return try pendingReplacement(workout: workout, date: occupiedDay, in: context)
-    }
-
-    private func rebuildPending(
-        from pending: PendingWorkoutReplacement,
-        in context: ModelContext
-    ) throws -> PendingWorkoutReplacement {
-        try XCTUnwrap(try rebuildPendingOptional(from: pending, in: context))
-    }
-
-    private func rebuildPendingOptional(
-        from pending: PendingWorkoutReplacement,
-        in context: ModelContext
-    ) throws -> PendingWorkoutReplacement? {
-        try CoachTools.pendingReplacement(
-            for: PlanAdjustmentProposal(changes: [.init(
-                date: CoachContextBuilder.day(pending.date, calendar: calendar),
-                action: .create,
+        return try CoachPlanCandidateEngine.prepare(
+            proposal: PlanAdjustmentProposal(changes: [.init(
+                date: CoachContextBuilder.day(occupiedDay, calendar: calendar),
+                action: .replace,
                 detail: nil,
-                workout: pending.payload
+                workout: workout
             )]),
             in: context,
             today: today,
             calendar: calendar,
             language: .en
         )
-    }
-
-    private func pendingReplacement(
-        workout: PlanAdjustmentProposal.CreateWorkout,
-        date: Date,
-        in context: ModelContext
-    ) throws -> PendingWorkoutReplacement {
-        let proposal = PlanAdjustmentProposal(changes: [.init(
-            date: CoachContextBuilder.day(date, calendar: calendar),
-            action: .create, detail: nil, workout: workout
-        )])
-        return try XCTUnwrap(try CoachTools.pendingReplacement(
-            for: proposal, in: context, today: today, calendar: calendar, language: .en
-        ))
     }
 
     private func makeContainer() throws -> ModelContainer {
@@ -245,7 +257,8 @@ final class WorkoutReplacementTests: XCTestCase {
             PlanSnapshot.self, ChatThread.self, ChatMessage.self, CoachRequestSnapshot.self, PlanEdit.self
         ])
         let container = try ModelContainer(
-            for: schema, configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)]
+            for: schema,
+            configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)]
         )
         for step in 0..<11 {
             container.mainContext.insert(CompletedActivity(
@@ -261,13 +274,21 @@ final class WorkoutReplacementTests: XCTestCase {
         }
         try container.mainContext.save()
         let goal = GoalSpec(
-            distance: .halfMarathon, targetTimeSeconds: 105 * 60,
+            distance: .halfMarathon,
+            targetTimeSeconds: 105 * 60,
             raceDate: PlanEngineTestSupport.date(2026, 1, 25),
-            availableDays: Set(Weekday.allCases), longRunDay: .sunday
+            availableDays: Set(Weekday.allCases),
+            longRunDay: .sunday
         )
         let fitness = try PlanStore.currentFitness(in: container.mainContext, today: today, calendar: calendar)
             ?? FitnessProfile(vdot: 44, weeklyVolumeKm: 30, volumeTrend: 0, longestRecentRunKm: 12)
-        try PlanStore.replaceGoal(spec: goal, fitness: fitness, today: today, calendar: calendar, in: container.mainContext)
+        try PlanStore.replaceGoal(
+            spec: goal,
+            fitness: fitness,
+            today: today,
+            calendar: calendar,
+            in: container.mainContext
+        )
         return container
     }
 
@@ -277,18 +298,16 @@ final class WorkoutReplacementTests: XCTestCase {
         }
     }
 
-    private func messages(in context: ModelContext) throws -> [ChatMessage] {
-        try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
-    }
-
-    private func planEdits(in context: ModelContext) throws -> [PlanEdit] {
-        try context.fetch(FetchDescriptor<PlanEdit>(sortBy: [SortDescriptor(\.appliedAt)]))
-    }
-
     private func snapshot(in context: ModelContext) throws -> [Row] {
         try context.fetch(FetchDescriptor<PlannedWorkout>(sortBy: [SortDescriptor(\.date)])).map {
-            Row(id: $0.uuid, kind: $0.kindRaw, distance: $0.distanceKm, details: $0.details,
-                overridden: $0.manuallyOverridden, matched: $0.matchedActivityUUID)
+            Row(
+                id: $0.uuid,
+                kind: $0.kindRaw,
+                distance: $0.distanceKm,
+                details: $0.details,
+                overridden: $0.manuallyOverridden,
+                matched: $0.matchedActivityUUID
+            )
         }
     }
 

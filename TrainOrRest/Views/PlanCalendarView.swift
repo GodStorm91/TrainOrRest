@@ -508,7 +508,10 @@ private struct RecentCoachChangesView: View {
     }
 
     private func summary(for edit: PlanEdit) -> String {
-        language.plan.workoutChangeSummary(
+        if let summary = edit.summaryText {
+            return summary
+        }
+        return language.plan.workoutChangeSummary(
             beforeKind: kindName(edit.kindRaw),
             beforeDistance: km(edit.distanceKm),
             afterKind: kindName(edit.afterKindRaw),

@@ -41,7 +41,7 @@ final class CoachInteractionStateTests: XCTestCase {
         let suggestion = promptSuggestion()
 
         store.setPromptSuggestionStatus(.consumed, for: suggestion, in: context)
-        let didSend = await store.send(text: suggestion.prompt, model: "claude-test", apiKey: "test-key", threadID: suggestion.conversationId, in: context)
+        let didSend = await store.submitTestTurn(text: suggestion.prompt, model: "claude-test", apiKey: "test-key", threadID: suggestion.conversationId, in: context)
         if !didSend {
             store.setPromptSuggestionStatus(.available, for: suggestion, in: context)
         }
@@ -57,7 +57,7 @@ final class CoachInteractionStateTests: XCTestCase {
         let client = InteractionMockCoachClient(responses: [.choiceResponse])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Review this run.", model: "claude-test", apiKey: "test-key", threadID: conversationID, in: context)
+        await store.submitTestTurn(text: "Review this run.", model: "claude-test", apiKey: "test-key", threadID: conversationID, in: context)
 
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertEqual(assistant.text, "Buổi chạy nhìn chung phù hợp với tiến trình hiện tại. Bạn muốn tiếp tục thế nào?")
@@ -72,7 +72,7 @@ final class CoachInteractionStateTests: XCTestCase {
         let client = InteractionMockCoachClient(responses: [.textOnly])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "What should I do?", model: "claude-test", apiKey: "test-key", threadID: conversationID, in: context)
+        await store.submitTestTurn(text: "What should I do?", model: "claude-test", apiKey: "test-key", threadID: conversationID, in: context)
 
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertNil(assistant.interaction)
@@ -85,15 +85,13 @@ final class CoachInteractionStateTests: XCTestCase {
         let client = InteractionMockCoachClient(responses: [.textOnly])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "Propose a concrete adjustment. Do not modify the calendar directly.",
-            model: "claude-test",
-            apiKey: "test-key",
-            threadID: conversationID,
-            actionTypeOverride: .readOnly,
-            expectedResponseInteraction: choiceInteraction(id: "goal_plan_adjustment_next_step"),
-            in: context
-        )
+        await store.submitTestTurn(text: "Propose a concrete adjustment. Do not modify the calendar directly.",
+        model: "claude-test",
+        apiKey: "test-key",
+        threadID: conversationID,
+        actionTypeOverride: .readOnly,
+        expectedResponseInteraction: choiceInteraction(id: "goal_plan_adjustment_next_step"),
+        in: context)
 
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertEqual(assistant.text, "Run easy today.")
@@ -109,7 +107,7 @@ final class CoachInteractionStateTests: XCTestCase {
         let client = InteractionMockCoachClient(responses: [.choiceResponse])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Review this run.", model: "claude-test", apiKey: "test-key", threadID: conversationID, in: context)
+        await store.submitTestTurn(text: "Review this run.", model: "claude-test", apiKey: "test-key", threadID: conversationID, in: context)
 
         let request = try XCTUnwrap(client.requests.last)
         XCTAssertEqual(request.tools.map(\.name), [CoachToolCatalog.coachResponseName, CoachToolCatalog.planEditDraftName])
@@ -123,15 +121,13 @@ final class CoachInteractionStateTests: XCTestCase {
         let client = InteractionMockCoachClient(responses: [.choiceResponse])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "Propose a concrete adjustment. Do not modify the calendar directly.",
-            model: "claude-test",
-            apiKey: "test-key",
-            threadID: conversationID,
-            actionTypeOverride: .readOnly,
-            expectedResponseInteraction: choiceInteraction(id: "goal_plan_adjustment_next_step"),
-            in: context
-        )
+        await store.submitTestTurn(text: "Propose a concrete adjustment. Do not modify the calendar directly.",
+        model: "claude-test",
+        apiKey: "test-key",
+        threadID: conversationID,
+        actionTypeOverride: .readOnly,
+        expectedResponseInteraction: choiceInteraction(id: "goal_plan_adjustment_next_step"),
+        in: context)
 
         let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
         XCTAssertEqual(snapshot.actionType, .readOnly)
@@ -162,21 +158,19 @@ final class CoachInteractionStateTests: XCTestCase {
         Raw structured context: {"remainingWeeks":8,"target":"3:59:00"}
         """
 
-        await store.send(
-            text: modelPrompt,
-            model: "claude-test",
-            apiKey: "test-key",
-            threadID: conversationID,
-            actionTypeOverride: .readOnly,
-            displayText: "Hãy đề xuất điều chỉnh kế hoạch 8 tuần còn lại.",
-            contextSnapshotId: "goal-assessment-sub4",
-            contextItems: [
-                CoachContextItem(type: .raceGoal, label: "Mục tiêu Sub-4"),
-                CoachContextItem(type: .remainingPlan, label: "8 tuần còn lại"),
-                CoachContextItem(type: .trainingPlan, label: "Kế hoạch hiện tại")
-            ],
-            in: context
-        )
+        await store.submitTestTurn(text: modelPrompt,
+        model: "claude-test",
+        apiKey: "test-key",
+        threadID: conversationID,
+        actionTypeOverride: .readOnly,
+        displayText: "Hãy đề xuất điều chỉnh kế hoạch 8 tuần còn lại.",
+        contextSnapshotId: "goal-assessment-sub4",
+        contextItems: [
+            CoachContextItem(type: .raceGoal, label: "Mục tiêu Sub-4"),
+            CoachContextItem(type: .remainingPlan, label: "8 tuần còn lại"),
+            CoachContextItem(type: .trainingPlan, label: "Kế hoạch hiện tại")
+        ],
+        in: context)
 
         let user = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).first { $0.role == .user })
         let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
@@ -196,13 +190,11 @@ final class CoachInteractionStateTests: XCTestCase {
         let client = InteractionMockCoachClient(responses: [.textOnly])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        let didSend = await store.send(
-            text: "Review this run.",
-            model: "claude-test",
-            apiKey: "test-key",
-            threadID: conversationID,
-            in: context
-        )
+        let didSend = await store.submitTestTurn(text: "Review this run.",
+        model: "claude-test",
+        apiKey: "test-key",
+        threadID: conversationID,
+        in: context)
 
         XCTAssertTrue(didSend)
         guard case .completed(let messageId) = store.generationState else {
@@ -225,15 +217,13 @@ final class CoachInteractionStateTests: XCTestCase {
 
         let option = choiceInteraction().options[1]
         _ = store.resolveInteraction(messageID: assistant.turnID, selectedOptionId: option.id, in: context)
-        await store.send(
-            text: option.value,
-            model: "claude-test",
-            apiKey: "test-key",
-            threadID: conversationID,
-            interactionId: "post_run_next_step",
-            selectedOptionId: "adjust_plan",
-            in: context
-        )
+        await store.submitTestTurn(text: option.value,
+        model: "claude-test",
+        apiKey: "test-key",
+        threadID: conversationID,
+        interactionId: "post_run_next_step",
+        selectedOptionId: "adjust_plan",
+        in: context)
 
         let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
         XCTAssertEqual(snapshot.messageText, "Hãy đề xuất cách điều chỉnh các buổi tập tiếp theo.")
@@ -300,15 +290,13 @@ final class CoachInteractionStateTests: XCTestCase {
         try context.save()
 
         _ = store.resolveInteraction(messageID: assistant.turnID, selectedOptionId: nil, resolvedWithOther: true, in: context)
-        await store.send(
-            text: "Tăng nhẹ volume tuần sau.",
-            model: "claude-test",
-            apiKey: "test-key",
-            threadID: conversationID,
-            interactionId: "post_run_next_step",
-            isCustomInteractionResponse: true,
-            in: context
-        )
+        await store.submitTestTurn(text: "Tăng nhẹ volume tuần sau.",
+        model: "claude-test",
+        apiKey: "test-key",
+        threadID: conversationID,
+        interactionId: "post_run_next_step",
+        isCustomInteractionResponse: true,
+        in: context)
 
         XCTAssertEqual(assistant.interaction?.status, .resolved)
         XCTAssertEqual(assistant.interaction?.resolvedWithOther, true)
@@ -328,15 +316,13 @@ final class CoachInteractionStateTests: XCTestCase {
         try context.save()
 
         _ = store.resolveInteraction(messageID: assistant.turnID, selectedOptionId: "adjust_plan", in: context)
-        let didSend = await store.send(
-            text: original.options[1].value,
-            model: "claude-test",
-            apiKey: "test-key",
-            threadID: conversationID,
-            interactionId: original.id,
-            selectedOptionId: "adjust_plan",
-            in: context
-        )
+        let didSend = await store.submitTestTurn(text: original.options[1].value,
+        model: "claude-test",
+        apiKey: "test-key",
+        threadID: conversationID,
+        interactionId: original.id,
+        selectedOptionId: "adjust_plan",
+        in: context)
         if !didSend {
             store.restoreInteraction(messageID: assistant.turnID, interaction: original, in: context)
         }
@@ -353,8 +339,8 @@ final class CoachInteractionStateTests: XCTestCase {
         let client = InteractionMockCoachClient(responses: [.delayedText, .textOnly])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        async let first: Bool = store.send(text: "Review this run.", model: "claude-test", apiKey: "test-key", threadID: conversationID, in: context)
-        async let second: Bool = store.send(text: "Review this run.", model: "claude-test", apiKey: "test-key", threadID: conversationID, in: context)
+        async let first: Bool = store.submitTestTurn(text: "Review this run.", model: "claude-test", apiKey: "test-key", threadID: conversationID, in: context)
+        async let second: Bool = store.submitTestTurn(text: "Review this run.", model: "claude-test", apiKey: "test-key", threadID: conversationID, in: context)
         _ = await (first, second)
 
         let userMessages = try context.fetch(FetchDescriptor<ChatMessage>()).filter { $0.role == .user }

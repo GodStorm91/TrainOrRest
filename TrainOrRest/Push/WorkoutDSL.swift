@@ -34,9 +34,9 @@ enum WorkoutDSL {
         case .long:
             "Long Run - \(formatDistance(WorkoutStructure.totalDistanceKm(structure)))"
         case .tempo:
-            "Tempo - \(formatDistance(workDistance(in: structure))) @ T pace"
+            "Tempo - \(formatDistance(workDistance(in: structure)))\(paceSuffix(" @ T pace", structure))"
         case .threshold:
-            "Threshold - \(formatDistance(workDistance(in: structure))) @ T pace"
+            "Threshold - \(formatDistance(workDistance(in: structure)))\(paceSuffix(" @ T pace", structure))"
         case .intervals:
             intervalEventName(structure)
         case .race:
@@ -49,7 +49,7 @@ enum WorkoutDSL {
     }
 
     private static func block(kind: WorkoutKind, group: WorkoutStepGroup, index: Int) -> String {
-        let lines = group.steps.map(stepLine)
+        let lines = group.steps.map { stepLine($0, kind: kind) }
         guard !lines.isEmpty else { return "" }
         if let title = groupTitle(kind: kind, group: group, index: index) {
             return ([title] + lines).joined(separator: "\n")
@@ -87,15 +87,34 @@ enum WorkoutDSL {
         }
     }
 
-    private static func stepLine(_ step: WorkoutStep) -> String {
+    private static func stepLine(_ step: WorkoutStep, kind: WorkoutKind) -> String {
         let target = step.distanceKm.map { formatDistance($0) }
             ?? step.durationSeconds.map { formatDuration($0) }
             ?? "0s"
-        // Always send a pace target: an easy/long run built without current
-        // fitness has no band, and a distance-only line reaches the watch with
-        // no pace. Fall back to a conservative easy pace so the target is set.
-        let paceBand = step.paceBand ?? WorkoutStructure.fallbackEasyBand
-        return "- \(target) \(formatPaceBand(paceBand))"
+        if let paceBand = step.paceBand {
+            return "- \(target) \(formatPaceBand(paceBand))"
+        }
+        // Quality work built without current fitness has no band. Sending the
+        // easy fallback would tell the watch to run tempo at easy pace, so the
+        // work step goes out distance-only and the runner paces by effort.
+        if step.role == .work, hasQualityWork(kind) {
+            return "- \(target)"
+        }
+        // Easy, long, warm-up, cool-down, and recovery steps still get a pace
+        // target: a distance-only line reaches the watch with no pace at all.
+        return "- \(target) \(formatPaceBand(WorkoutStructure.fallbackEasyBand))"
+    }
+
+    private static func hasQualityWork(_ kind: WorkoutKind) -> Bool {
+        switch kind {
+        case .tempo, .threshold, .intervals: true
+        case .easy, .long, .race: false
+        }
+    }
+
+    /// Pace label for the event name, only when the work steps carry a band.
+    private static func paceSuffix(_ suffix: String, _ structure: [WorkoutStepGroup]) -> String {
+        WorkoutStructure.workHasPaceBand(structure) ? suffix : ""
     }
 
     private static func intervalEventName(_ structure: [WorkoutStepGroup]) -> String {
@@ -104,7 +123,7 @@ enum WorkoutDSL {
               let distance = work.distanceKm else {
             return "Intervals - \(formatDistance(workDistance(in: structure)))"
         }
-        return "Intervals - \(group.repeatCount) x \(formatDistance(distance)) @ I pace"
+        return "Intervals - \(group.repeatCount) x \(formatDistance(distance))\(paceSuffix(" @ I pace", structure))"
     }
 
     private static func workDistance(in structure: [WorkoutStepGroup]) -> Double {

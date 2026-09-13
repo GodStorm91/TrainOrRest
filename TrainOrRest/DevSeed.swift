@@ -3,17 +3,11 @@ import Foundation
 import SwiftData
 import UIKit
 
-/// DEBUG-only launch seam used for visual verification of the coach chat.
+/// DEBUG-only launch seam used for deterministic visual verification.
 ///
-/// The app is onboarding-gated and its Coach screen is not scriptable in the
-/// simulator, so there is otherwise no way to screenshot rendered assistant
-/// markdown. When the process is launched with `TOR_DEV_SEED=1` (see the
-/// `--seed` path in `scripts/smoke.sh`) this seam:
-///   1. marks onboarding complete so `RootView` lands on `.ready`,
-///   2. preloads an API key so `ChatView` shows the message feed instead of
-///      `missingKeyView`, and
-///   3. inserts a deterministic coach thread whose assistant turns exercise the
-///      ordered/unordered list + multi-line rendering paths.
+/// The app is onboarding-gated and deep screens are not scriptable in the
+/// simulator. `TOR_DEV_SEED=1` bypasses onboarding, preloads safe local data,
+/// and can route directly to a screen selected with `TOR_DEV_SCREEN`.
 ///
 /// The whole type is compiled out of release builds by `#if DEBUG`.
 enum DevSeed {
@@ -36,6 +30,7 @@ enum DevSeed {
         case delivery
         case profile
         case coach
+        case shoes
     }
 
     /// The requested launch screen, or `nil` for the normal tab shell.
@@ -50,6 +45,25 @@ enum DevSeed {
     /// verified against the provider.
     static var isLiveRequested: Bool {
         isRequested && ProcessInfo.processInfo.environment["TOR_DEV_LIVE"] == "1"
+    }
+
+    /// `TOR_DEV_LIVE_EDIT=1` with `TOR_DEV_LIVE=1` and `TOR_DEV_PLAN=1` opens the
+    /// live turn in "Edit with Coach" context on the next planned easy run so
+    /// the plan-edit card can be verified against the provider.
+    static var isLiveEditRequested: Bool {
+        isLiveRequested && ProcessInfo.processInfo.environment["TOR_DEV_LIVE_EDIT"] == "1"
+    }
+
+    /// The workout the live edit turn attaches: the first planned, unlocked
+    /// easy run on or after today.
+    @MainActor
+    static func liveEditWorkoutID(_ context: ModelContext) -> UUID? {
+        guard isLiveEditRequested else { return nil }
+        let start = Calendar.current.startOfDay(for: Date())
+        let rows = (try? context.fetch(FetchDescriptor<PlannedWorkout>(sortBy: [SortDescriptor(\.date)]))) ?? []
+        return rows.first {
+            $0.date >= start && $0.status == .planned && $0.kind == .easy && !$0.isScheduleLocked
+        }?.uuid
     }
 
     /// `TOR_DEV_TAB=calendar|chat|profile` picks the tab the seeded shell
@@ -105,6 +119,7 @@ enum DevSeed {
         applyRequestedLanguage()
         seedPlanIfRequested(context)
         seedHistoryIfRequested(context)
+        seedShoesIfRequested(context)
         if isLiveRequested { return seedLiveThread(context) }
 
         let id = threadID
@@ -134,6 +149,50 @@ enum DevSeed {
         }
         try? context.save()
         return id
+    }
+
+    @MainActor
+    private static func seedShoesIfRequested(_ context: ModelContext) {
+        guard requestedScreen?.rawValue == DevScreen.shoes.rawValue else { return }
+        let hasShoes = (try? context.fetch(FetchDescriptor<RunningShoe>()).isEmpty == false) ?? false
+        if !hasShoes {
+            let now = Date()
+            context.insert(RunningShoe(
+                brand: "ASICS",
+                model: "Gel-Nimbus 27",
+                nickname: "Daily comfort",
+                purchaseDate: now.addingTimeInterval(-120 * 86_400),
+                initialMileageKm: 392,
+                preferredWorkoutTypes: [.recovery, .easy, .longRun],
+                primaryWorkoutType: .easy,
+                expectedLifespanKm: 700,
+                createdAt: now.addingTimeInterval(-120 * 86_400)
+            ))
+            context.insert(RunningShoe(
+                brand: "New Balance",
+                model: "FuelCell Rebel v5",
+                nickname: "Speed day",
+                purchaseDate: now.addingTimeInterval(-65 * 86_400),
+                initialMileageKm: 188,
+                preferredWorkoutTypes: [.tempo, .threshold, .intervals],
+                primaryWorkoutType: .tempo,
+                expectedLifespanKm: 550,
+                createdAt: now.addingTimeInterval(-65 * 86_400)
+            ))
+            context.insert(RunningShoe(
+                brand: "Nike",
+                model: "Pegasus 41",
+                nickname: "Inspect now",
+                purchaseDate: now.addingTimeInterval(-250 * 86_400),
+                initialMileageKm: 563,
+                preferredWorkoutTypes: [.easy, .steady],
+                primaryWorkoutType: .steady,
+                expectedLifespanKm: 600,
+                createdAt: now.addingTimeInterval(-250 * 86_400)
+            ))
+        }
+        try? ShoeAssignmentService.reassignFutureAutomaticWorkouts(in: context)
+        try? context.save()
     }
 
     private static func preloadAPIKey() {

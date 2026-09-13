@@ -1270,6 +1270,15 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         case .replace: return self == .vi ? "Thay" : self == .ja ? "置換" : "Replace"
         }
     }
+
+    /// Quality work built before six runs in 28 days exist has no pace band.
+    func paceUnavailableNote(kind: WorkoutKind) -> String {
+        switch self {
+        case .en: "Not enough recent runs to set a \(shortKindName(kind)) pace. Run this by effort; TrainOrRest fills paces in once it has 6 runs in 28 days."
+        case .ja: "最近のランが足りないため\(kindName(kind))のペースを設定できません。感覚を目安に走ってください。28日間に6本のランが揃うと TrainOrRest がペースを補います。"
+        case .vi: "Chưa đủ buổi chạy gần đây để đặt pace cho \(shortKindName(kind)). Anh chạy theo cảm giác; TrainOrRest sẽ điền pace khi có 6 buổi trong 28 ngày."
+        }
+    }
     var planValidationChecks: [(title: String, detail: String)] {
         switch self {
         case .en: return [
@@ -1283,7 +1292,8 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
             ("No duplicate workout day", "Each date has at most one workout."),
             ("Workout stays inside plan week", "The workout date matches its plan week."),
             ("Distances valid", "Workout distances are finite and above zero."),
-            ("Structure matches distance", "Structured steps add up to the workout distance.")
+            ("Structure matches distance", "Structured steps add up to the workout distance."),
+            ("Pace data", "Pace bands are set when enough recent runs exist.")
         ]
         case .ja: return [
             ("利用可能日を使用", "利用不可の日に練習を入れません。"),
@@ -1296,7 +1306,8 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
             ("練習日の重複なし", "各日付の練習は最大1つです。"),
             ("計画週の内側", "練習の日付は計画週と一致します。"),
             ("距離が有効", "練習距離は有限かつ0より大きい値です。"),
-            ("構成が距離と一致", "構成ステップの合計が練習距離と一致します。")
+            ("構成が距離と一致", "構成ステップの合計が練習距離と一致します。"),
+            ("ペースデータ", "十分な最近のランがあるときにペース帯を設定します。")
         ]
         case .vi: return [
             ("Dùng ngày khả dụng", "Không đặt bài vào ngày không khả dụng."),
@@ -1309,7 +1320,8 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
             ("Không trùng ngày tập", "Mỗi ngày có tối đa một buổi tập."),
             ("Bài nằm trong tuần kế hoạch", "Ngày của buổi tập khớp với tuần kế hoạch."),
             ("Cự ly hợp lệ", "Cự ly buổi tập hữu hạn và lớn hơn 0."),
-            ("Cấu trúc khớp cự ly", "Các bước cấu trúc cộng lại đúng bằng cự ly buổi tập.")
+            ("Cấu trúc khớp cự ly", "Các bước cấu trúc cộng lại đúng bằng cự ly buổi tập."),
+            ("Dữ liệu pace", "Vùng pace được đặt khi có đủ buổi chạy gần đây.")
         ]
         }
     }

@@ -23,7 +23,6 @@ struct ChatView: View {
     @Query(sort: \CompletedActivity.date, order: .reverse) private var completedActivities: [CompletedActivity]
     @EnvironmentObject private var chatStore: CoachChatStore
     @EnvironmentObject private var chatSession: CoachChatSessionState
-    @EnvironmentObject private var replacementCoordinator: WorkoutReplacementCoordinator
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var draft = ""
@@ -788,32 +787,36 @@ struct ChatView: View {
                             onOpenCalendar(planTransaction?.calendarDate)
                         }
                     },
-                    onUndo: { planTransaction = nil },
+                    onUndo: revertPlanEdit,
                     onRetry: retryPlanTransaction,
                     onDismiss: { planTransaction = nil }
                 )
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
-            } else if let pending = replacementCoordinator.pending {
-                PlanUpdateCard(
-                    pending: pending,
-                    language: language,
-                    isApplying: replacementCoordinator.isConfirming,
-                    onApply: { applyReplacement(pending) },
-                    onKeep: { replacementCoordinator.cancel() },
-                    onAskWhy: {
-                        replacementCoordinator.cancel()
-                        draft = language.whySwapPrompt
+            } else if let candidate = chatStore.pendingPlanCandidate {
+                Group {
+                    switch candidate.presentation {
+                    case .replacement:
+                        PlanUpdateCard(
+                            candidate: candidate,
+                            language: language,
+                            isApplying: chatStore.isConfirmingPlanCandidate,
+                            onApply: { applyPlanCandidate(candidate) },
+                            onKeep: { chatStore.cancelPlanCandidate() },
+                            onAskWhy: {
+                                chatStore.cancelPlanCandidate()
+                                draft = language.whySwapPrompt
+                            }
+                        )
+                    case .proposal:
+                        PlanProposalCard(
+                            candidate: candidate,
+                            language: language,
+                            isApplying: chatStore.isConfirmingPlanCandidate,
+                            onApply: { applyPlanCandidate(candidate) },
+                            onKeep: { chatStore.cancelPlanCandidate() }
+                        )
                     }
-                )
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
-            } else if let pending = replacementCoordinator.pendingProposal {
-                PlanProposalCard(
-                    pending: pending,
-                    language: language,
-                    isApplying: replacementCoordinator.isConfirming,
-                    onApply: { applyProposal(pending) },
-                    onKeep: { replacementCoordinator.cancel() }
-                )
+                }
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             } else if shouldShowContextualSuggestions {
                 CoachAskNextStrip(
@@ -842,8 +845,7 @@ struct ChatView: View {
         .padding(.top, 8)
         .padding(.bottom, isSoftwareKeyboardVisible ? 6 : (reservesBottomDock ? TorTabDockMetrics.reservedBottomSpace : 8))
         .background(.clear)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: replacementCoordinator.pending)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: replacementCoordinator.pendingProposal)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: chatStore.pendingPlanCandidate?.id)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: isSoftwareKeyboardVisible)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: scrollState.hasUnseenContent)
     }
@@ -873,8 +875,8 @@ struct ChatView: View {
             && !hasActiveInlineFailure
             && !isSoftwareKeyboardVisible
             && !chatStore.isSending
-            && !replacementCoordinator.hasPendingDecision
-            && !replacementCoordinator.isConfirming
+            && !chatStore.hasPendingPlanDecision
+            && !chatStore.isConfirmingPlanCandidate
             && messages.count <= 2
             && !visibleContextualPromptSuggestions.isEmpty
     }
@@ -883,8 +885,8 @@ struct ChatView: View {
         !draftRelativeDateSuggestions.isEmpty
             && !hasActiveInlineFailure
             && !chatStore.isSending
-            && !replacementCoordinator.hasPendingDecision
-            && !replacementCoordinator.isConfirming
+            && !chatStore.hasPendingPlanDecision
+            && !chatStore.isConfirmingPlanCandidate
     }
 
     private var draftRelativeDateSuggestions: [String] {
@@ -1023,7 +1025,7 @@ struct ChatView: View {
                 .lineLimit(1...5)
                 .padding(.vertical, 12)
                 .focused($composerFocused)
-                .disabled((replacementCoordinator.hasPendingDecision || replacementCoordinator.isConfirming) && pendingOtherResponse == nil)
+                .disabled(chatStore.hasPendingPlanDecision || chatStore.isConfirmingPlanCandidate)
 
             if isSoftwareKeyboardVisible {
                 Button {
@@ -1111,8 +1113,8 @@ struct ChatView: View {
     private var isSendDisabled: Bool {
         draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || chatStore.isSending
-            || (replacementCoordinator.hasPendingDecision && pendingOtherResponse == nil)
-            || replacementCoordinator.isConfirming
+            || chatStore.hasPendingPlanDecision
+            || chatStore.isConfirmingPlanCandidate
     }
 
     private var todayReadiness: DailyReadiness? {
@@ -1184,18 +1186,16 @@ struct ChatView: View {
     }
 
     private func send() {
-        let text = draft
-        let attachments = currentAttachments
         let pending = PendingCoachSend(
-            text: text,
-            attachments: attachments,
+            text: draft,
+            model: model,
+            attachments: currentAttachments,
             evidence: evidence,
-            interactionId: pendingOtherResponse?.interactionID,
-            selectedOptionId: nil,
+            interactionID: pendingOtherResponse?.interactionID,
+            selectedOptionID: nil,
             isCustomInteractionResponse: pendingOtherResponse != nil,
             interactionMessageID: pendingOtherResponse?.messageID,
-            actionTypeOverride: draft == draftActionTypeOverridePrompt ? draftActionTypeOverride : nil,
-            focusComposerAfterSend: false
+            actionTypeOverride: draft == draftActionTypeOverridePrompt ? draftActionTypeOverride : nil
         )
         guard coachEvidenceReviewed else {
             presentEvidenceReview(confirming: pending)
@@ -1205,19 +1205,10 @@ struct ChatView: View {
     }
 
     private func performSend(_ pending: PendingCoachSend) {
-        let previousInteraction = pending.interactionMessageID.flatMap { id in
-            messages.first(where: { $0.turnID == id })?.interaction
-        }
-        if let messageID = pending.interactionMessageID {
-            _ = chatStore.resolveInteraction(
-                messageID: messageID,
-                selectedOptionId: pending.selectedOptionId,
-                resolvedWithOther: pending.isCustomInteractionResponse,
-                in: modelContext
-            )
-        }
-        let reviewedSnapshot = pending.reviewedSnapshot
-        let threadID = chatSession.activeThreadID ?? createNewThread()
+        guard !chatStore.hasPendingPlanDecision, !chatStore.isConfirmingPlanCandidate else { return }
+        var request = pending.request
+        request.groundingSnapshot = pending.reviewedSnapshot
+        request.threadID = chatSession.activeThreadID ?? createNewThread()
         draft = ""
         draftActionTypeOverride = nil
         draftActionTypeOverridePrompt = nil
@@ -1226,51 +1217,39 @@ struct ChatView: View {
         clearImageAttachment()
         composerFocused = pending.focusComposerAfterSend
         Task {
-            let didSend = await chatStore.send(
-                text: pending.text,
-                model: model,
-                attachments: pending.attachments,
-                evidence: pending.evidence,
-                groundingSnapshot: reviewedSnapshot,
-                threadID: threadID,
-                interactionId: pending.interactionId,
-                selectedOptionId: pending.selectedOptionId,
-                isCustomInteractionResponse: pending.isCustomInteractionResponse,
-                actionTypeOverride: pending.actionTypeOverride,
-                expectedResponseInteraction: pending.expectedResponseInteraction,
-                displayText: pending.displayText,
-                contextSnapshotId: pending.contextSnapshotId,
-                contextItems: pending.contextItems,
-                in: modelContext
-            )
+            _ = await chatStore.submit(request, in: modelContext)
             await MainActor.run {
-                if !didSend, let previousInteraction, let messageID = pending.interactionMessageID {
-                    chatStore.restoreInteraction(messageID: messageID, interaction: previousInteraction, in: modelContext)
-                }
                 composerFocused = pending.focusComposerAfterSend
             }
         }
     }
 
     private func submitPromptSuggestion(_ suggestion: CoachPromptSuggestion) {
-        guard !submittingPromptSuggestionKeys.contains(suggestion.scopeKey), !chatStore.isSending else { return }
+        guard !submittingPromptSuggestionKeys.contains(suggestion.scopeKey),
+              !chatStore.isSending,
+              !chatStore.hasPendingPlanDecision,
+              !chatStore.isConfirmingPlanCandidate else { return }
         submittingPromptSuggestionKeys.insert(suggestion.scopeKey)
-        chatStore.setPromptSuggestionStatus(.consumed, for: suggestion, in: modelContext)
-        let attachments = currentAttachments
-        let pending = PendingCoachSend(text: suggestion.prompt, attachments: attachments, evidence: evidence)
+        let pending = PendingCoachSend(
+            text: suggestion.prompt,
+            model: model,
+            attachments: currentAttachments,
+            evidence: evidence,
+            promptSuggestion: suggestion
+        )
         Task {
-            let didSend = await sendAlreadyReviewed(pending)
+            _ = await sendAlreadyReviewed(pending)
             await MainActor.run {
-                submittingPromptSuggestionKeys.remove(suggestion.scopeKey)
-                if !didSend {
-                    chatStore.setPromptSuggestionStatus(.available, for: suggestion, in: modelContext)
-                }
+                _ = submittingPromptSuggestionKeys.remove(suggestion.scopeKey)
             }
         }
     }
 
     private func sendAlreadyReviewed(_ pending: PendingCoachSend) async -> Bool {
-        let threadID = chatSession.activeThreadID ?? createNewThread()
+        guard !chatStore.hasPendingPlanDecision, !chatStore.isConfirmingPlanCandidate else { return false }
+        var request = pending.request
+        request.groundingSnapshot = pending.reviewedSnapshot
+        request.threadID = chatSession.activeThreadID ?? createNewThread()
         await MainActor.run {
             draft = ""
             pendingOtherResponse = nil
@@ -1278,82 +1257,62 @@ struct ChatView: View {
             clearImageAttachment()
             composerFocused = pending.focusComposerAfterSend
         }
-        return await chatStore.send(
-            text: pending.text,
-            model: model,
-            attachments: pending.attachments,
-            evidence: pending.evidence,
-            groundingSnapshot: pending.reviewedSnapshot,
-            threadID: threadID,
-            interactionId: pending.interactionId,
-            selectedOptionId: pending.selectedOptionId,
-            isCustomInteractionResponse: pending.isCustomInteractionResponse,
-            actionTypeOverride: pending.actionTypeOverride,
-            expectedResponseInteraction: pending.expectedResponseInteraction,
-            displayText: pending.displayText,
-            contextSnapshotId: pending.contextSnapshotId,
-            contextItems: pending.contextItems,
-            in: modelContext
-        )
+        return await chatStore.submit(request, in: modelContext)
     }
 
     private func selectInteractionOption(_ message: ChatMessage, option: CoachChoiceOption) {
-        guard submittingInteractionID == nil,
+        guard !chatStore.hasPendingPlanDecision,
+              !chatStore.isConfirmingPlanCandidate,
+              submittingInteractionID == nil,
               let interaction = message.interaction,
               interaction.status == .pending,
               interaction.id == newestPendingInteractionID else { return }
         submittingInteractionID = interaction.id
-        let previousInteraction = interaction
-        _ = chatStore.resolveInteraction(
-            messageID: message.turnID,
-            selectedOptionId: option.id,
-            in: modelContext
-        )
         let pending = PendingCoachSend(
             text: option.submissionText,
+            model: model,
             attachments: currentAttachments,
             evidence: evidence,
-            interactionId: interaction.id,
-            selectedOptionId: option.id,
+            interactionID: interaction.id,
+            selectedOptionID: option.id,
             interactionMessageID: message.turnID,
             displayText: option.visibleSelectionText
         )
         Task {
-            let didSend = await sendAlreadyReviewed(pending)
+            _ = await sendAlreadyReviewed(pending)
             await MainActor.run {
                 submittingInteractionID = nil
-                if !didSend {
-                    chatStore.restoreInteraction(messageID: message.turnID, interaction: previousInteraction, in: modelContext)
-                }
             }
         }
     }
 
     private func selectFollowUp(_ message: ChatMessage, option: CoachChoiceOption) {
-        guard submittingFollowUpMessageID == nil, !message.followUpsConsumed else { return }
+        guard !chatStore.hasPendingPlanDecision,
+              !chatStore.isConfirmingPlanCandidate,
+              submittingFollowUpMessageID == nil,
+              !message.followUpsConsumed else { return }
         submittingFollowUpMessageID = message.turnID
-        message.followUpsConsumed = true
-        try? modelContext.save()
         let pending = PendingCoachSend(
             text: option.submissionText,
+            model: model,
             attachments: currentAttachments,
             evidence: evidence,
+            followUpMessageID: message.turnID,
             displayText: option.visibleSelectionText
         )
         Task {
-            let didSend = await sendAlreadyReviewed(pending)
+            _ = await sendAlreadyReviewed(pending)
             await MainActor.run {
                 submittingFollowUpMessageID = nil
-                if !didSend {
-                    message.followUpsConsumed = false
-                    try? modelContext.save()
-                }
             }
         }
     }
 
     private func selectInteractionOther(_ message: ChatMessage, interaction: CoachResponseInteraction) {
-        guard interaction.status == .pending, interaction.id == newestPendingInteractionID else { return }
+        guard !chatStore.hasPendingPlanDecision,
+              !chatStore.isConfirmingPlanCandidate,
+              interaction.status == .pending,
+              interaction.id == newestPendingInteractionID else { return }
         pendingOtherResponse = PendingOtherCoachResponse(
             messageID: message.turnID,
             interactionID: interaction.id,
@@ -1362,44 +1321,54 @@ struct ChatView: View {
         composerFocused = true
     }
 
-    private func applyReplacement(_ pending: PendingWorkoutReplacement) {
+    private func applyPlanCandidate(_ candidate: CoachPlanCandidate) {
+        guard chatStore.pendingPlanCandidate?.id == candidate.id,
+              !chatStore.isConfirmingPlanCandidate else { return }
+        let previousTransaction = planTransaction
         planTransaction = .applying(title: language.updatingPlanTitle)
-        replacementCoordinator.confirm(pending.id)
-        if let error = replacementCoordinator.lastError {
-            planTransaction = .failure(userMessage: userFacingPlanError(error), technicalDetails: error, retry: .replacement(pending))
-        } else if replacementCoordinator.pending != nil {
+        switch chatStore.confirmPlanCandidate(candidate.id, in: modelContext) {
+        case .applied(let receipt):
+            planTransaction = .success(
+                summary: receipt.summary,
+                date: receipt.primaryDate,
+                editID: receipt.id
+            )
+        case .stale:
             planTransaction = nil
-        } else {
-            planTransaction = .success(summary: pending.successMessage, date: pending.date, undo: .safe)
+        case .ignored:
+            planTransaction = previousTransaction
+        case .failed:
+            let error = chatStore.lastError ?? language.planUnchangedMessage
+            planTransaction = .failure(
+                userMessage: userFacingPlanError(error),
+                technicalDetails: error,
+                retry: .candidate(candidate)
+            )
         }
     }
 
-    private func applyProposal(_ pending: PendingPlanProposal) {
-        planTransaction = .applying(title: language.updatingPlanTitle)
-        replacementCoordinator.confirmProposal(pending.id)
-        if let error = replacementCoordinator.lastError {
-            planTransaction = .failure(userMessage: userFacingPlanError(error), technicalDetails: error, retry: .proposal(pending))
-        } else if replacementCoordinator.pendingProposal != nil {
+    private func revertPlanEdit(_ editID: UUID) {
+        do {
+            try PlanEditStore.revert(editID, in: modelContext, today: Date(), calendar: calendar)
             planTransaction = nil
-        } else {
-            planTransaction = .success(summary: pending.summary, date: nil, undo: .unsafe)
+        } catch {
+            let detail = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            planTransaction = .failure(
+                userMessage: userFacingPlanError(detail),
+                technicalDetails: detail,
+                retry: .revert(editID)
+            )
         }
     }
 
     private func retryPlanTransaction() {
         guard case .failure(_, _, let retry) = planTransaction else { return }
         switch retry {
-        case .replacement(let pending):
+        case .candidate(let candidate):
             planTransaction = nil
-            replacementCoordinator.stage(pending)
-        case .proposal(let pending):
-            planTransaction = nil
-            replacementCoordinator.stage(
-                pending.proposal,
-                summary: pending.summary,
-                threadID: pending.threadID,
-                warnings: pending.warnings
-            )
+            chatStore.stagePlanCandidate(candidate)
+        case .revert(let editID):
+            revertPlanEdit(editID)
         }
     }
 
@@ -1415,7 +1384,7 @@ struct ChatView: View {
     }
 
     private func presentEvidenceReview(confirming pending: PendingCoachSend?) {
-        let selectedEvidence = pending?.evidence ?? evidence
+        let selectedEvidence = pending?.request.evidence ?? evidence
         do {
             let snapshot = try CoachGrounding.snapshot(
                 evidence: selectedEvidence,
@@ -1424,22 +1393,9 @@ struct ChatView: View {
                 calendar: calendar
             )
             let pendingWithSnapshot = pending.map {
-                PendingCoachSend(
-                    text: $0.text,
-                    attachments: $0.attachments,
-                    evidence: $0.evidence,
-                    reviewedSnapshot: snapshot,
-                    interactionId: $0.interactionId,
-                    selectedOptionId: $0.selectedOptionId,
-                    isCustomInteractionResponse: $0.isCustomInteractionResponse,
-                    interactionMessageID: $0.interactionMessageID,
-                    actionTypeOverride: $0.actionTypeOverride,
-                    expectedResponseInteraction: $0.expectedResponseInteraction,
-                    displayText: $0.displayText,
-                    contextSnapshotId: $0.contextSnapshotId,
-                    contextItems: $0.contextItems,
-                    focusComposerAfterSend: $0.focusComposerAfterSend
-                )
+                var submission = $0
+                submission.reviewedSnapshot = snapshot
+                return submission
             }
             evidenceReview = EvidenceReviewPresentation(snapshot: snapshot, pendingSend: pendingWithSnapshot)
         } catch {
@@ -1512,12 +1468,13 @@ struct ChatView: View {
                 composerFocused = false
                 let pending = PendingCoachSend(
                     text: request.prompt,
+                    model: model,
                     attachments: currentAttachments,
                     evidence: evidence,
                     actionTypeOverride: request.actionTypeOverride,
                     expectedResponseInteraction: request.expectedResponseInteraction,
                     displayText: request.displayText,
-                    contextSnapshotId: request.contextSnapshotId,
+                    contextSnapshotID: request.contextSnapshotId,
                     contextItems: request.contextItems,
                     focusComposerAfterSend: request.shouldFocusComposer
                 )
@@ -2278,20 +2235,59 @@ private struct ChatHistorySheet: View {
 
 private struct PendingCoachSend: Identifiable {
     let id = UUID()
-    let text: String
-    let attachments: [CoachContextAttachment]
-    let evidence: EvidenceSelection
-    var reviewedSnapshot: GroundingSnapshot? = nil
-    var interactionId: String? = nil
-    var selectedOptionId: String? = nil
-    var isCustomInteractionResponse = false
-    var interactionMessageID: UUID? = nil
-    var actionTypeOverride: CoachRequestActionType? = nil
-    var expectedResponseInteraction: CoachResponseInteraction? = nil
-    var displayText: String? = nil
-    var contextSnapshotId: String? = nil
-    var contextItems: [CoachContextItem] = []
-    var focusComposerAfterSend = false
+    var request: CoachTurnRequest
+    var reviewedSnapshot: GroundingSnapshot?
+    var focusComposerAfterSend: Bool
+
+    init(
+        text: String,
+        model: String,
+        attachments: [CoachContextAttachment],
+        evidence: EvidenceSelection,
+        reviewedSnapshot: GroundingSnapshot? = nil,
+        interactionID: String? = nil,
+        selectedOptionID: String? = nil,
+        isCustomInteractionResponse: Bool = false,
+        interactionMessageID: UUID? = nil,
+        promptSuggestion: CoachPromptSuggestion? = nil,
+        followUpMessageID: UUID? = nil,
+        actionTypeOverride: CoachRequestActionType? = nil,
+        expectedResponseInteraction: CoachResponseInteraction? = nil,
+        displayText: String? = nil,
+        contextSnapshotID: String? = nil,
+        contextItems: [CoachContextItem] = [],
+        focusComposerAfterSend: Bool = false
+    ) {
+        let origin: CoachTurnOrigin
+        if let promptSuggestion {
+            origin = .promptSuggestion(promptSuggestion)
+        } else if let followUpMessageID {
+            origin = .followUp(messageID: followUpMessageID)
+        } else if let interactionID {
+            origin = .interaction(
+                messageID: interactionMessageID,
+                interactionID: interactionID,
+                selectedOptionID: selectedOptionID,
+                isCustomResponse: isCustomInteractionResponse
+            )
+        } else {
+            origin = .composer
+        }
+        request = CoachTurnRequest(
+            text: text,
+            model: model,
+            attachments: attachments,
+            evidence: evidence,
+            origin: origin,
+            actionTypeOverride: actionTypeOverride,
+            expectedResponseInteraction: expectedResponseInteraction,
+            displayText: displayText,
+            contextSnapshotID: contextSnapshotID,
+            contextItems: contextItems
+        )
+        self.reviewedSnapshot = reviewedSnapshot
+        self.focusComposerAfterSend = focusComposerAfterSend
+    }
 }
 
 private struct EvidenceReviewPresentation: Identifiable {
@@ -2306,19 +2302,14 @@ private struct PendingOtherCoachResponse: Equatable {
     var placeholder: String
 }
 
-private enum ChatPlanRetry: Equatable {
-    case replacement(PendingWorkoutReplacement)
-    case proposal(PendingPlanProposal)
+private enum ChatPlanRetry {
+    case candidate(CoachPlanCandidate)
+    case revert(UUID)
 }
 
-private enum ChatPlanUndo: Equatable {
-    case safe
-    case unsafe
-}
-
-private enum ChatPlanTransaction: Equatable {
+private enum ChatPlanTransaction {
     case applying(title: String)
-    case success(summary: String, date: Date?, undo: ChatPlanUndo)
+    case success(summary: String, date: Date?, editID: UUID)
     case failure(userMessage: String, technicalDetails: String, retry: ChatPlanRetry)
 
     var calendarDate: Date? {
@@ -2380,7 +2371,7 @@ private struct PlanTransactionCard: View {
     let transaction: ChatPlanTransaction
     let language: CoachLanguage
     let onViewCalendar: () -> Void
-    let onUndo: () -> Void
+    let onUndo: (UUID) -> Void
     let onRetry: () -> Void
     let onDismiss: () -> Void
 
@@ -2398,7 +2389,7 @@ private struct PlanTransactionCard: View {
                             .foregroundStyle(Theme.text)
                     }
                     .frame(maxWidth: .infinity, minHeight: 86, alignment: .leading)
-                case .success(let summary, let date, let undo):
+                case .success(let summary, let date, let editID):
                     Label(language.planCardUpdatedTitle, systemImage: "checkmark.circle.fill")
                         .font(.torHeading(15, .bold))
                         .foregroundStyle(Theme.good)
@@ -2412,9 +2403,12 @@ private struct PlanTransactionCard: View {
                     }
                     HStack(spacing: 8) {
                         transactionButton(language.viewInCalendarLabel, systemImage: "calendar", prominent: true, action: onViewCalendar)
-                        if undo == .safe {
-                            transactionButton(language.undoLabel, systemImage: "arrow.uturn.backward", prominent: false, action: onUndo)
-                        }
+                        transactionButton(
+                            language.undoLabel,
+                            systemImage: "arrow.uturn.backward",
+                            prominent: false,
+                            action: { onUndo(editID) }
+                        )
                     }
                 case .failure(let userMessage, let technicalDetails, _):
                     Label(failureTitle(for: technicalDetails), systemImage: "exclamationmark.triangle.fill")

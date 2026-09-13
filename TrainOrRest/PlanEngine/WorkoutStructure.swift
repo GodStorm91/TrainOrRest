@@ -54,6 +54,13 @@ enum WorkoutStructure {
         ]
     }
 
+    /// True when every work step carries a pace band. Quality work built
+    /// without current fitness has none, and its labels must say so.
+    static func workHasPaceBand(_ structure: [WorkoutStepGroup]) -> Bool {
+        let work = structure.flatMap(\.steps).filter { $0.role == .work }
+        return !work.isEmpty && work.allSatisfy { $0.paceBand != nil }
+    }
+
     static func easyRun(distanceKm: Double, paces: TrainingPaces) -> [WorkoutStepGroup] {
         run(distanceKm: distanceKm, paceBand: paces.easy)
     }
@@ -102,8 +109,9 @@ enum WorkoutProse {
             if let warmUp = steps.first(where: { $0.role == .warmUp })?.distanceKm {
                 parts.append("\(formatKm(warmUp)) km warm-up")
             }
-            let workKm = steps.first { $0.role == .work }?.distanceKm ?? 0
-            parts.append("\(formatKm(workKm)) km at T pace")
+            let work = steps.first { $0.role == .work }
+            let workKm = work?.distanceKm ?? 0
+            parts.append("\(formatKm(workKm)) km \(work?.paceBand == nil ? "by effort" : "at T pace")")
             if let coolDown = steps.first(where: { $0.role == .coolDown })?.distanceKm {
                 parts.append("\(formatKm(coolDown)) km cool-down")
             }
@@ -116,8 +124,9 @@ enum WorkoutProse {
             }
             let workGroup = structure.first { $0.steps.contains { $0.role == .work } }
             let reps = workGroup?.repeatCount ?? 0
-            let repKm = workGroup?.steps.first { $0.role == .work }?.distanceKm ?? 0
-            var core = "\(reps) × \(formatKm(repKm)) km at I pace"
+            let work = workGroup?.steps.first { $0.role == .work }
+            let repKm = work?.distanceKm ?? 0
+            var core = "\(reps) × \(formatKm(repKm)) km \(work?.paceBand == nil ? "by effort" : "at I pace")"
             if let recovery = workGroup?.steps.first(where: { $0.role == .recovery })?.durationSeconds {
                 core += " (\(recoveryPhrase(recovery)))"
             }

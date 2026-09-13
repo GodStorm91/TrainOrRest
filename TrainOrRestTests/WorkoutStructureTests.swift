@@ -120,7 +120,6 @@ final class WorkoutStructureTests: XCTestCase {
         let cases: [(String, WorkoutRecipe, TrainingPaces?)] = [
             ("race", WorkoutRecipe(kind: .race, blocks: [.init(repeatCount: 1, steps: [.distance(.work, 5, .easy)])]), paces),
             ("tempo work at easy pace", WorkoutFactory.tempoRecipe(tempoKm: 5).replacingWorkZone(.easy), paces),
-            ("quality without fitness", WorkoutFactory.tempoRecipe(tempoKm: 5), nil),
             ("zero target", WorkoutRecipe(kind: .easy, blocks: [.init(repeatCount: 1, steps: [.distance(.work, 0, .easy)])]), paces),
             ("distance over cap", WorkoutRecipe(kind: .easy, blocks: [.init(repeatCount: 1, steps: [.distance(.work, 500, .easy)])]), paces),
             ("repeat over cap", WorkoutRecipe(kind: .easy, blocks: [.init(repeatCount: 99, steps: [.distance(.work, 1, .easy)])]), paces)
@@ -135,6 +134,21 @@ final class WorkoutStructureTests: XCTestCase {
         let built = try WorkoutFactory.build(WorkoutFactory.singleRun(kind: .easy, distanceKm: 6), paces: nil)
         XCTAssertNil(built.paceBand)
         XCTAssertEqual(built.distanceKm, 6, accuracy: 0.001)
+    }
+
+    /// Quality work also builds without fitness. The band is missing and the
+    /// prose says so, instead of the app refusing the workout.
+    func testQualityWithoutFitnessBuildsUnpaced() throws {
+        let built = try WorkoutFactory.build(WorkoutFactory.tempoRecipe(tempoKm: 5), paces: nil)
+        XCTAssertEqual(built.kind, .tempo)
+        XCTAssertNil(built.paceBand)
+        XCTAssertTrue(built.structure.flatMap(\.steps).allSatisfy { $0.paceBand == nil })
+        XCTAssertFalse(WorkoutStructure.workHasPaceBand(built.structure))
+        XCTAssertEqual(built.details, "2 km warm-up · 5 km by effort · 2 km cool-down")
+
+        let paced = try WorkoutFactory.build(WorkoutFactory.tempoRecipe(tempoKm: 5), paces: paces)
+        XCTAssertTrue(WorkoutStructure.workHasPaceBand(paced.structure))
+        XCTAssertEqual(paced.details, "2 km warm-up · 5 km at T pace · 2 km cool-down")
     }
 
     func testStructuredDurationUsesPerStepPace() {
