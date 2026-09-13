@@ -1,0 +1,17 @@
+flowchart TD
+  A[TrainOrRestApp init] --> B[SwiftData ModelContainer]
+  B --> C[SyncEngine + WorkoutPushService + CoachChatStore]
+  C --> D[HealthKit observers]
+  C --> E[BG refresh task]
+  D --> F[RootView]
+  F --> G{HealthKit ready?}
+  G -->|no| H[Unavailable / permission state]
+  G -->|needs request| I[Connect Apple Health]
+  I --> J[Request authorization]
+  J --> K[Sync all]
+  K --> L[RootTabView]
+  G -->|yes| L
+  L --> M[Today]
+  L --> N[Plan]
+  L --> O[Trends]
+  L --> P[Coach]

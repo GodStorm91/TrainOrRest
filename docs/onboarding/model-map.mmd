@@ -1,0 +1,10 @@
+erDiagram
+  Goal ||--o{ TrainingPlan : creates
+  TrainingPlan ||--o{ PlannedWorkout : contains
+  TrainingPlan ||--o{ PlanSnapshot : snapshots
+  TrainingPlan ||--o{ PlanEdit : journals
+  CompletedActivity ||--o{ PlannedWorkout : auto_matches
+  DailyWellness ||--o{ DailyReadiness : informs
+  DailyCheckIn ||--o{ DailyReadiness : corroborates
+  ChatThread ||--o{ ChatMessage : contains
+  SyncState ||--|| CompletedActivity : anchors
