@@ -3,9 +3,11 @@ import SwiftUI
 
 struct RunningShoesView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Query(sort: \RunningShoe.createdAt, order: .reverse) private var shoes: [RunningShoe]
     @Query private var mileageEntries: [ShoeMileageEntry]
     @Query(sort: \PlannedWorkout.date) private var workouts: [PlannedWorkout]
+    @Query private var storedPreferences: [RunningShoePreferences]
 
     @State private var showingAddShoe = false
     @State private var showingSettings = false
@@ -14,8 +16,32 @@ struct RunningShoesView: View {
 
     private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
 
-    private var activeShoes: [RunningShoe] { shoes.filter { $0.status == .active } }
+    private var activeShoes: [RunningShoe] {
+        shoes
+            .filter { $0.status == .active }
+            .sorted {
+                let left = wearPriority(for: $0)
+                let right = wearPriority(for: $1)
+                if left != right { return left > right }
+                return $0.createdAt > $1.createdAt
+            }
+    }
     private var retiredShoes: [RunningShoe] { shoes.filter { $0.status == .retired } }
+    private var preferences: RunningShoePreferences? { storedPreferences.first }
+    private var totalActiveMileageKm: Double { activeShoes.map(mileage).reduce(0, +) }
+    private var upcomingWorkout: PlannedWorkout? {
+        let today = Calendar.current.startOfDay(for: .now)
+        return workouts.first { $0.status == .planned && $0.date >= today }
+    }
+    private var attentionShoe: RunningShoe? {
+        activeShoes.first {
+            let status = ShoeWearStatusService.wearStatus(
+                currentMileageKm: mileage(for: $0),
+                expectedLifespanKm: $0.expectedLifespanKm
+            )
+            return status == .inspect || status == .pastRange
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -23,6 +49,10 @@ struct RunningShoesView: View {
                 if shoes.isEmpty {
                     emptyState
                 } else {
+                    rotationOverview
+                    if let attentionShoe {
+                        attentionBanner(for: attentionShoe)
+                    }
                     shoeSection(language.integrations.active, shoes: activeShoes)
                     if !retiredShoes.isEmpty {
                         DisclosureGroup(language.integrations.retiredShoes(retiredShoes.count)) {
@@ -51,8 +81,10 @@ struct RunningShoesView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
             }
-            .padding(16)
+            .padding(.horizontal, TorLayout.screenGutter(horizontalSizeClass))
+            .padding(.vertical, 16)
             .padding(.bottom, 86)
+            .torReadableColumn()
         }
         .background(Theme.bg)
         .navigationTitle(language.integrations.runningShoes)
@@ -73,6 +105,7 @@ struct RunningShoesView: View {
                     modelContext.insert(shoe)
                     try? ShoeAssignmentService.reassignFutureAutomaticWorkouts(in: modelContext)
                     try? modelContext.save()
+                    Task { await ShoeWearNotifier.notifyIfNeeded(in: modelContext) }
                 }
             }
         }
@@ -95,6 +128,116 @@ struct RunningShoesView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    private var rotationOverview: some View {
+        TorCard {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .firstTextBaseline) {
+                    Label(language.integrations.automaticRotation, systemImage: "arrow.triangle.2.circlepath")
+                        .font(.headline)
+                        .foregroundStyle(Theme.text)
+                    Spacer()
+                    Text((preferences?.shoeAutoAssignmentEnabled ?? true)
+                        ? language.integrations.automaticRotationOn
+                        : language.integrations.automaticRotationOff)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle((preferences?.shoeAutoAssignmentEnabled ?? true) ? Theme.good : Theme.faint)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(Theme.chip, in: Capsule())
+                }
+
+                Text(language.integrations.automaticMileageExplanation)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Label(language.integrations.activeShoeCount(activeShoes.count), systemImage: "shoeprints.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                    Spacer(minLength: 8)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(Formatters.kilometers(totalActiveMileageKm * 1000))
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Theme.text)
+                            .monospacedDigit()
+                        Text(language.integrations.totalLogged)
+                            .font(.caption)
+                            .foregroundStyle(Theme.dim)
+                    }
+                }
+
+                if let workout = upcomingWorkout,
+                   let kind = workout.kind,
+                   let shoeID = workout.shoeID,
+                   let shoe = shoes.first(where: { $0.id == shoeID }) {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(language.integrations.nextShoeAssignment)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Theme.dim)
+                        Text(language.integrations.shoeAssignedForWorkout(
+                            shoe.displayName,
+                            workoutName: language.name(kind)
+                        ))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.text)
+                        Text(workout.date.formatted(
+                            .dateTime.weekday(.abbreviated).month(.abbreviated).day().locale(language.uiLocale)
+                        ))
+                            .font(.caption)
+                            .foregroundStyle(Theme.faint)
+                    }
+                }
+            }
+        }
+    }
+
+    private func attentionBanner(for shoe: RunningShoe) -> some View {
+        let mileageKm = mileage(for: shoe)
+        let status = ShoeWearStatusService.wearStatus(
+            currentMileageKm: mileageKm,
+            expectedLifespanKm: shoe.expectedLifespanKm
+        )
+        return NavigationLink {
+            ShoeDetailView(shoe: shoe)
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: status == .pastRange ? "exclamationmark.triangle.fill" : "wrench.and.screwdriver.fill")
+                    .font(.headline)
+                    .foregroundStyle(Theme.warn)
+                    .frame(width: 32, height: 32)
+                    .background(Theme.soft(Theme.warn), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(status == .pastRange
+                        ? language.integrations.shoeReplacementReminderTitle(shoe.displayName)
+                        : language.integrations.shoeInspectionReminderTitle(shoe.displayName))
+                        .font(.headline)
+                        .foregroundStyle(Theme.text)
+                    Text(status == .pastRange
+                        ? language.integrations.pastRangeMessage
+                        : language.integrations.inspectShoeMessage)
+                        .font(.caption)
+                        .foregroundStyle(Theme.dim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Theme.faint)
+                    .padding(.top, 4)
+            }
+            .padding(14)
+            .background(Theme.soft(Theme.warn), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Theme.warn.opacity(0.28), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func shoeSection(_ title: String, shoes: [RunningShoe]) -> some View {
@@ -121,6 +264,18 @@ struct RunningShoesView: View {
     private func mileage(for shoe: RunningShoe) -> Double {
         ShoeMileageService.currentMileageKm(for: shoe, ledger: mileageEntries)
     }
+
+    private func wearPriority(for shoe: RunningShoe) -> Int {
+        switch ShoeWearStatusService.wearStatus(
+            currentMileageKm: mileage(for: shoe),
+            expectedLifespanKm: shoe.expectedLifespanKm
+        ) {
+        case .normal: 0
+        case .approaching: 1
+        case .inspect: 2
+        case .pastRange: 3
+        }
+    }
 }
 
 struct RunningShoeRow: View {
@@ -137,44 +292,58 @@ struct RunningShoeRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "shoeprints.fill")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(wearColor)
-                .frame(width: 38, height: 38)
-                .background(Theme.soft(wearColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Image(systemName: "shoeprints.fill")
+                    .font(.headline)
+                    .foregroundStyle(wearColor)
+                    .frame(width: 38, height: 38)
+                    .background(Theme.soft(wearColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(shoe.displayName)
-                    .font(.torHeading(16, .bold))
-                    .foregroundStyle(isRetired ? Theme.faint : Theme.text)
-                Text(language.integrations.shoeTypes(shoe.preferredWorkoutTypes))
-                    .font(.system(size: 12, weight: .medium))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(shoe.displayName)
+                        .font(.headline)
+                        .foregroundStyle(isRetired ? Theme.faint : Theme.text)
+                    Text(language.integrations.shoeTypes(shoe.preferredWorkoutTypes))
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.dim)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Theme.faint)
+            }
+
+            ProgressView(value: mileageProgress)
+                .tint(wearColor)
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(language.integrations.mileageProgress(
+                    current: Formatters.kilometers(mileageKm * 1000),
+                    expected: Formatters.kilometers(shoe.expectedLifespanKm * 1000)
+                ))
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(Theme.dim)
-                    .lineLimit(1)
-                HStack(spacing: 8) {
-                    Text(language.integrations.mileageProgress(
-                        current: Formatters.kilometers(mileageKm * 1000),
-                        expected: Formatters.kilometers(shoe.expectedLifespanKm * 1000)
-                    ))
-                        .font(.torMono(11))
-                        .foregroundStyle(Theme.faint)
-                    if warningText != nil {
-                        Text(warningText ?? "")
-                            .font(.torLabel(10, .bold))
-                            .foregroundStyle(wearColor)
-                    }
+                Spacer(minLength: 4)
+                if let warningText {
+                    Text(warningText)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(wearColor)
+                        .multilineTextAlignment(.trailing)
                 }
             }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Theme.faint)
         }
         .padding(14)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
         .opacity(isRetired ? 0.62 : 1)
+    }
+
+    private var mileageProgress: Double {
+        guard shoe.expectedLifespanKm > 0 else { return 0 }
+        return min(mileageKm / shoe.expectedLifespanKm, 1)
     }
 
     private var warningText: String? {
@@ -248,12 +417,14 @@ struct ShoeDetailView: View {
             VStack(alignment: .leading, spacing: 14) {
                 TorCard {
                     VStack(alignment: .leading, spacing: 12) {
-                        TorEyebrow(shoe.brand.isEmpty ? language.integrations.runningShoe : shoe.brand).tracking(2)
-                        Text(shoe.model.isEmpty ? shoe.displayName : shoe.model.uppercased())
-                            .font(.torHeading(28, .bold))
+                        Text(shoe.brand.isEmpty ? language.integrations.runningShoe : shoe.brand)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.dim)
+                        Text(shoe.model.isEmpty ? shoe.displayName : shoe.model)
+                            .font(.largeTitle.weight(.bold))
                             .foregroundStyle(Theme.text)
                         Text(Formatters.kilometers(mileageKm * 1000))
-                            .font(.torNumber(36, .bold))
+                            .font(.largeTitle.weight(.bold).monospacedDigit())
                             .foregroundStyle(Theme.text)
                         Text(language.integrations.shoeStatus(shoe.status))
                             .font(.caption.weight(.semibold))
@@ -318,6 +489,7 @@ struct ShoeDetailView: View {
                 ShoeFormView(mode: .edit(shoe)) { _ in
                     try? ShoeAssignmentService.reassignFutureAutomaticWorkouts(in: modelContext)
                     try? modelContext.save()
+                    Task { await ShoeWearNotifier.notifyIfNeeded(in: modelContext) }
                 }
             }
         }
@@ -338,7 +510,9 @@ struct ShoeDetailView: View {
     private func detailSection<Content: View>(_ title: String, @ViewBuilder content: @escaping () -> Content) -> some View {
         TorCard {
             VStack(alignment: .leading, spacing: 12) {
-                TorEyebrow(title).tracking(2)
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(Theme.text)
                 content()
             }
         }
@@ -466,6 +640,9 @@ struct ShoeFormView: View {
                 Section(language.integrations.mileage) {
                     Stepper(language.integrations.expectedLifespanValue(Formatters.kilometers(expectedLifespan * 1000)), value: $expectedLifespan, in: 100...1200, step: 50)
                     Text(language.integrations.adjustAnytime)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(language.integrations.mileageUpdatesAfterSync)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

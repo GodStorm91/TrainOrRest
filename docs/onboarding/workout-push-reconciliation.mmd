@@ -1,0 +1,11 @@
+flowchart TD
+  A[PlannedWorkout rows] --> B[WorkoutDSL]
+  B --> C[WorkoutPushService]
+  C --> D[IntervalsICUClient]
+  D --> E[intervals.icu calendar]
+  E --> F[Garmin watch sync]
+  C --> G[PushReconciler]
+  G --> H{remote matches local?}
+  H -->|yes| I[No-op]
+  H -->|changed| J[Upsert/delete event]
+  H -->|failed| K[Keep HealthKit sync isolated]

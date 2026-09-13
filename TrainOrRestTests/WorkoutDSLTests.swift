@@ -80,9 +80,10 @@ final class WorkoutDSLTests: XCTestCase {
         XCTAssertEqual(WorkoutDSL.eventName(kind: .intervals, structure: structure), "Intervals - 3 x 1km @ I pace")
     }
 
-    func testUnpacedStepFallsBackToEasyPaceAndEqualBandRenders() {
-        // A step with no fitness-derived band must still push a pace target
-        // (the fallback easy band) so the watch never shows distance-only.
+    func testUnpacedQualityWorkRendersDistanceOnlyAndEqualBandRenders() {
+        // An unpaced work step inside a quality workout must not inherit the
+        // easy fallback (that would tell the watch to run intervals at easy pace).
+        // Paced steps still render, including an equal fast/slow band.
         let structure = [
             WorkoutStepGroup(steps: [
                 WorkoutStep(role: .work, distanceKm: 1.25),
@@ -98,7 +99,7 @@ final class WorkoutDSLTests: XCTestCase {
             WorkoutDSL.render(kind: .intervals, structure: structure),
             """
             Main set
-            - 1.25km 6:30-6:00/km Pace
+            - 1.25km
             - 45s 5:00-5:00/km Pace
             """
         )
@@ -119,6 +120,37 @@ final class WorkoutDSLTests: XCTestCase {
 
         let event = try XCTUnwrap(WorkoutDSL.event(for: workout, calendar: PlanEngineTestSupport.calendar))
         XCTAssertEqual(event.description, "- 8km 6:30-6:00/km Pace")
+    }
+
+    func testUnpacedTempoPushesWorkByEffortAndDropsPaceLabel() {
+        // Quality work built without fitness has no band. The watch must not be
+        // told to run tempo at the easy fallback, and the name must not claim T pace.
+        let structure = [
+            WorkoutStepGroup(steps: [
+                WorkoutStep(role: .warmUp, distanceKm: 2, paceBand: nil)
+            ]),
+            WorkoutStepGroup(steps: [
+                WorkoutStep(role: .work, distanceKm: 5, paceBand: nil)
+            ]),
+            WorkoutStepGroup(steps: [
+                WorkoutStep(role: .coolDown, distanceKm: 2, paceBand: nil)
+            ])
+        ]
+
+        XCTAssertEqual(
+            WorkoutDSL.render(kind: .tempo, structure: structure),
+            """
+            Warmup
+            - 2km 6:30-6:00/km Pace
+
+            Tempo
+            - 5km
+
+            Cooldown
+            - 2km 6:30-6:00/km Pace
+            """
+        )
+        XCTAssertEqual(WorkoutDSL.eventName(kind: .tempo, structure: structure), "Tempo - 5km")
     }
 
     func testMovingTimeUsesStructuredDuration() {

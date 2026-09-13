@@ -1,0 +1,12 @@
+flowchart LR
+  A[Garmin data in Apple Health] --> B[HealthKit observer or background refresh]
+  B --> C[SyncEngine.syncAll]
+  C --> D[Workout delta via anchors]
+  C --> E[Wellness 60-day recompute]
+  D --> F[SwiftData save]
+  E --> F
+  F --> G[PlanStore auto-match]
+  G --> H[ReadinessStore daily pipeline]
+  H --> I[VerdictBannerView]
+  H --> J[VerdictNotifier when background]
+  H --> K[WorkoutPushService reconcile]

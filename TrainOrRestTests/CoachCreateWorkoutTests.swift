@@ -219,6 +219,12 @@ final class CoachCreateWorkoutTests: XCTestCase {
             )
             XCTAssertEqual(preflight.warnings.map(\.kind), [kind], name)
             XCTAssertFalse(preflight.summary.isEmpty, name)
+            // The warning is shown to the user verbatim; dates must read as a
+            // local calendar day, never a raw Date description with a UTC offset.
+            for warning in preflight.warnings {
+                XCTAssertFalse(warning.message.contains("+0000"), "\(name): \(warning.message)")
+                XCTAssertNil(warning.message.range(of: #"\d{2}:\d{2}:\d{2}"#, options: .regularExpression), "\(name): \(warning.message)")
+            }
 
             XCTAssertThrowsError(
                 try CoachTools.apply(
@@ -295,15 +301,29 @@ final class CoachCreateWorkoutTests: XCTestCase {
         XCTAssertTrue(workout.manuallyOverridden)
     }
 
-    /// Quality zones cannot be invented without fitness; the app refuses rather
-    /// than guessing a threshold pace.
-    func testQualityCreateWithoutFitnessIsRejected() throws {
+    /// Quality work without fitness is created unpaced and the runner is told,
+    /// never refused. The note is informational, so nothing needs acknowledging.
+    func testQualityCreateWithoutFitnessBuildsUnpacedWithNote() throws {
         let container = try seededContainer(withHistory: false)
         let context = container.mainContext
-        XCTAssertThrowsError(try create(.tempo(workKm: 3), on: freeDay, in: context)) { error in
-            XCTAssertTrue(error.localizedDescription.contains("Not enough recent running data"))
-        }
-        XCTAssertNil(try workout(on: freeDay, in: context))
+
+        let candidate = try CoachPlanCandidateEngine.prepare(
+            proposal: .init(changes: [change(.tempo(workKm: 3), on: freeDay)]),
+            in: context, today: today, calendar: calendar, language: .en
+        )
+        XCTAssertEqual(candidate.notes.map(\.kind), [.paceUnavailable])
+        XCTAssertTrue(candidate.loadRisks.isEmpty, "a missing pace band is a fact, not a load risk")
+        XCTAssertEqual(
+            candidate.notes.first?.message,
+            "Not enough recent runs to set a tempo pace. Run this by effort; TrainOrRest fills paces in once it has 6 runs in 28 days."
+        )
+
+        try create(.tempo(workKm: 3), on: freeDay, in: context)
+        let workout = try XCTUnwrap(workout(on: freeDay, in: context))
+        XCTAssertEqual(workout.kind, .tempo)
+        XCTAssertNil(workout.paceBand)
+        XCTAssertNil(workout.structure.flatMap(\.steps).first { $0.role == .work }?.paceBand)
+        XCTAssertEqual(workout.details, "2 km warm-up · 3 km by effort · 2 km cool-down")
     }
 
     /// One bad create in a batch rolls the whole batch back, including targets.

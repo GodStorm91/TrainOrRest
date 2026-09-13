@@ -5,101 +5,260 @@ private struct CoachRetryUnavailableError: LocalizedError {
     let message: String
     var errorDescription: String? { message }
 }
+enum CoachTurnOrigin {
+    case composer
+    case promptSuggestion(CoachPromptSuggestion)
+    case interaction(
+        messageID: UUID?,
+        interactionID: String,
+        selectedOptionID: String?,
+        isCustomResponse: Bool
+    )
+    case followUp(messageID: UUID)
+}
+
+struct CoachTurnRequest {
+    let text: String
+    let model: String
+    var attachments: [CoachContextAttachment] = []
+    var evidence: EvidenceSelection? = nil
+    var groundingSnapshot: GroundingSnapshot? = nil
+    var threadID: UUID? = nil
+    var origin: CoachTurnOrigin = .composer
+    var actionTypeOverride: CoachRequestActionType? = nil
+    var expectedResponseInteraction: CoachResponseInteraction? = nil
+    var displayText: String? = nil
+    var contextSnapshotID: String? = nil
+    var contextItems: [CoachContextItem] = []
+
+    var interactionID: String? {
+        guard case .interaction(_, let interactionID, _, _) = origin else { return nil }
+        return interactionID
+    }
+
+    var selectedOptionID: String? {
+        guard case .interaction(_, _, let selectedOptionID, _) = origin else { return nil }
+        return selectedOptionID
+    }
+
+    var isCustomInteractionResponse: Bool {
+        guard case .interaction(_, _, _, let isCustomResponse) = origin else { return false }
+        return isCustomResponse
+    }
+
+    var interactionMessageID: UUID? {
+        guard case .interaction(let messageID, _, _, _) = origin else { return nil }
+        return messageID
+    }
+
+    var promptSuggestion: CoachPromptSuggestion? {
+        guard case .promptSuggestion(let suggestion) = origin else { return nil }
+        return suggestion
+    }
+
+    var followUpMessageID: UUID? {
+        guard case .followUp(let messageID) = origin else { return nil }
+        return messageID
+    }
+}
+
+enum CoachPlanConfirmationResult {
+    case applied(CoachPlanReceipt)
+    case stale
+    case failed
+    case ignored
+}
+
 
 @MainActor
 final class CoachChatStore: ObservableObject {
     @Published private(set) var isSending = false
     @Published private(set) var isRetrying = false
+    @Published private(set) var isConfirmingPlanCandidate = false
     @Published private(set) var generationState: CoachGenerationState = .idle
+    @Published private(set) var pendingPlanCandidate: CoachPlanCandidate?
     @Published var lastError: String?
 
     private let anthropicClient: ClaudeServicing
     private let openAIClient: ClaudeServicing
     private let calendar: Calendar
     private let now: () -> Date
-    private let replacementCoordinator: WorkoutReplacementCoordinator?
 
     init(
         client: ClaudeServicing? = nil,
         anthropicClient: ClaudeServicing = ClaudeClient(),
         openAIClient: ClaudeServicing = OpenAIClient(),
         calendar: Calendar = .current,
-        now: @escaping () -> Date = { .now },
-        replacementCoordinator: WorkoutReplacementCoordinator? = nil
+        now: @escaping () -> Date = { .now }
     ) {
         self.anthropicClient = client ?? anthropicClient
         self.openAIClient = client ?? openAIClient
         self.calendar = calendar
         self.now = now
-        self.replacementCoordinator = replacementCoordinator
+    }
+
+    var hasPendingPlanDecision: Bool {
+        pendingPlanCandidate != nil
+    }
+
+    func stagePlanCandidate(_ candidate: CoachPlanCandidate) {
+        guard pendingPlanCandidate == nil, !isConfirmingPlanCandidate else { return }
+        pendingPlanCandidate = candidate
+        lastError = nil
+    }
+
+    func cancelPlanCandidate() {
+        guard !isConfirmingPlanCandidate else { return }
+        pendingPlanCandidate = nil
+        lastError = nil
     }
 
     @discardableResult
-    func send(
-        text: String,
-        model: String,
-        attachments: [CoachContextAttachment] = [],
-        evidence: EvidenceSelection? = nil,
-        groundingSnapshot: GroundingSnapshot? = nil,
-        threadID: UUID? = nil,
-        interactionId: String? = nil,
-        selectedOptionId: String? = nil,
-        isCustomInteractionResponse: Bool = false,
-        actionTypeOverride: CoachRequestActionType? = nil,
-        expectedResponseInteraction: CoachResponseInteraction? = nil,
-        displayText: String? = nil,
-        contextSnapshotId: String? = nil,
-        contextItems: [CoachContextItem] = [],
-        in context: ModelContext
-    ) async -> Bool {
-        let account = CoachModelProvider.apiKeyAccount(for: model)
+    func confirmPlanCandidate(_ id: UUID, in context: ModelContext) -> CoachPlanConfirmationResult {
+        guard let candidate = pendingPlanCandidate,
+              candidate.id == id,
+              !isConfirmingPlanCandidate else { return .ignored }
+        isConfirmingPlanCandidate = true
+        lastError = nil
+        defer { isConfirmingPlanCandidate = false }
+
+        let language = CoachLanguage.current
+        let message: String
+        let appliedSummary: String
+        switch candidate.presentation {
+        case .replacement(let date, let existing, let proposed, _, _):
+            message = language.replacementSuccessMessage(date: date, proposed: proposed)
+            appliedSummary = language.replacementAppliedSummary(
+                date: date,
+                existing: existing,
+                proposed: proposed
+            )
+        case .proposal:
+            message = "Applied: \(candidate.summary)"
+            appliedSummary = candidate.summary
+        }
+
+        do {
+            switch try CoachPlanCandidateEngine.commit(
+                candidate,
+                in: context,
+                today: now(),
+                calendar: calendar,
+                language: language,
+                acknowledging: candidate.warnings,
+                beforeSave: { receipt in
+                    context.insert(ChatMessage(
+                        role: .assistant,
+                        text: message,
+                        date: receipt.appliedAt,
+                        appliedAdjustment: appliedSummary,
+                        threadID: candidate.threadID
+                    ))
+                }
+            ) {
+            case .stale(let fresh):
+                pendingPlanCandidate = fresh
+                return .stale
+            case .applied(let receipt):
+                pendingPlanCandidate = nil
+                return .applied(receipt)
+            }
+        } catch {
+            lastError = technicalErrorMessage(error)
+            return .failed
+        }
+    }
+
+    @discardableResult
+    func submit(_ request: CoachTurnRequest, in context: ModelContext) async -> Bool {
+        let account = CoachModelProvider.apiKeyAccount(for: request.model)
         guard let apiKey = try? KeychainStore.load(account: account), !apiKey.isEmpty else {
-            lastError = CoachLanguage.current.missingCoachKeyError(provider: CoachModelProvider.displayName(for: model))
+            lastError = CoachLanguage.current.missingCoachKeyError(
+                provider: CoachModelProvider.displayName(for: request.model)
+            )
             return false
         }
-        return await send(
-            text: text,
-            model: model,
-            attachments: attachments,
-            evidence: evidence,
-            groundingSnapshot: groundingSnapshot,
-            apiKey: apiKey,
-            threadID: threadID,
-            interactionId: interactionId,
-            selectedOptionId: selectedOptionId,
-            isCustomInteractionResponse: isCustomInteractionResponse,
-            actionTypeOverride: actionTypeOverride,
-            expectedResponseInteraction: expectedResponseInteraction,
-            displayText: displayText,
-            contextSnapshotId: contextSnapshotId,
-            contextItems: contextItems,
-            in: context
-        )
+        return await submit(request, apiKey: apiKey, in: context)
     }
 
     @discardableResult
-    func send(
-        text: String,
-        model: String,
-        attachments: [CoachContextAttachment] = [],
-        evidence: EvidenceSelection? = nil,
-        groundingSnapshot: GroundingSnapshot? = nil,
+    func submit(_ request: CoachTurnRequest, apiKey: String, in context: ModelContext) async -> Bool {
+        guard !isSending else { return false }
+        guard !hasPendingPlanDecision else {
+            lastError = CoachLanguage.current.replacementPendingMessage
+            return false
+        }
+        let previousInteraction = request.interactionMessageID.flatMap { messageID in
+            try? context.fetch(FetchDescriptor<ChatMessage>())
+                .first(where: { $0.turnID == messageID })?
+                .interaction
+        }
+        let previousFollowUpConsumed = request.followUpMessageID.flatMap { messageID in
+            try? context.fetch(FetchDescriptor<ChatMessage>())
+                .first(where: { $0.turnID == messageID })?
+                .followUpsConsumed
+        }
+
+        if let messageID = request.interactionMessageID {
+            _ = resolveInteraction(
+                messageID: messageID,
+                selectedOptionId: request.selectedOptionID,
+                resolvedWithOther: request.isCustomInteractionResponse,
+                in: context
+            )
+        }
+        if let suggestion = request.promptSuggestion {
+            setPromptSuggestionStatus(.consumed, for: suggestion, in: context)
+        }
+        if let messageID = request.followUpMessageID,
+           let message = try? context.fetch(FetchDescriptor<ChatMessage>())
+            .first(where: { $0.turnID == messageID }) {
+            message.followUpsConsumed = true
+            try? context.save()
+        }
+
+        let didSend = await performSubmission(request, apiKey: apiKey, in: context)
+        if !didSend {
+            if let messageID = request.interactionMessageID, let previousInteraction {
+                restoreInteraction(messageID: messageID, interaction: previousInteraction, in: context)
+            }
+            if let suggestion = request.promptSuggestion {
+                setPromptSuggestionStatus(.available, for: suggestion, in: context)
+            }
+            if let messageID = request.followUpMessageID,
+               let previousFollowUpConsumed,
+               let message = try? context.fetch(FetchDescriptor<ChatMessage>())
+                .first(where: { $0.turnID == messageID }) {
+                message.followUpsConsumed = previousFollowUpConsumed
+                try? context.save()
+            }
+        }
+        return didSend
+    }
+
+    private func performSubmission(
+        _ request: CoachTurnRequest,
         apiKey: String,
-        threadID: UUID? = nil,
-        interactionId: String? = nil,
-        selectedOptionId: String? = nil,
-        isCustomInteractionResponse: Bool = false,
-        actionTypeOverride: CoachRequestActionType? = nil,
-        expectedResponseInteraction: CoachResponseInteraction? = nil,
-        displayText: String? = nil,
-        contextSnapshotId: String? = nil,
-        contextItems: [CoachContextItem] = [],
         in context: ModelContext
     ) async -> Bool {
+        let text = request.text
+        let model = request.model
+        let attachments = request.attachments
+        let evidence = request.evidence
+        let groundingSnapshot = request.groundingSnapshot
+        let threadID = request.threadID
+        let interactionId = request.interactionID
+        let selectedOptionId = request.selectedOptionID
+        let isCustomInteractionResponse = request.isCustomInteractionResponse
+        let actionTypeOverride = request.actionTypeOverride
+        let expectedResponseInteraction = request.expectedResponseInteraction
+        let displayText = request.displayText
+        let contextSnapshotId = request.contextSnapshotID
+        let contextItems = request.contextItems
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         guard !isSending else { return false }
-        guard replacementCoordinator?.hasPendingDecision != true else {
+        guard !hasPendingPlanDecision else {
             lastError = CoachLanguage.current.replacementPendingMessage
             return false
         }
@@ -140,7 +299,7 @@ final class CoachChatStore: ObservableObject {
             contextBoundaryMessageID: userTurn.turnID,
             locale: CoachLanguage.current.rawValue,
             createdAt: submittedAt,
-            actionType: actionTypeOverride ?? classifyAction(trimmed),
+            actionType: actionTypeOverride ?? classifyAction(trimmed, attachments: attachments),
             groundingSnapshot: grounding,
             threadID: threadID,
             interactionId: interactionId,
@@ -243,7 +402,7 @@ final class CoachChatStore: ObservableObject {
         assistantTurn: ChatMessage,
         in context: ModelContext
     ) -> Bool {
-        guard classifyAction(text) != .planMutation, CoachPlanLookup.matches(text) else {
+        guard classifyAction(text, attachments: []) != .planMutation, CoachPlanLookup.matches(text) else {
             return false
         }
 
@@ -283,8 +442,7 @@ final class CoachChatStore: ObservableObject {
         assistantTurn: ChatMessage,
         in context: ModelContext
     ) throws -> Bool {
-        guard let replacementCoordinator,
-              let workoutID = attachments.compactMap({ attachment -> UUID? in
+        guard let workoutID = attachments.compactMap({ attachment -> UUID? in
                   if case .plannedWorkout(let uuid) = attachment { return uuid }
                   return nil
               }).first,
@@ -302,14 +460,14 @@ final class CoachChatStore: ObservableObject {
             action: .replace,
             workout: payload
         )])
-        let replacement = try CoachTools.pendingReplacement(
-            for: proposal,
+        let candidate = try CoachPlanCandidateEngine.prepare(
+            proposal: proposal,
             in: context,
             today: snapshot.createdAt,
             calendar: calendar,
-            language: CoachLanguage(rawValue: snapshot.locale) ?? .current
+            language: CoachLanguage(rawValue: snapshot.locale) ?? .current,
+            threadID: snapshot.threadID
         )
-        guard let replacement else { return false }
 
         assistantTurn.text = (CoachLanguage(rawValue: snapshot.locale) ?? .current).contextualDistancePreparedThisWorkout
         assistantTurn.assistantStatus = .completed
@@ -317,7 +475,7 @@ final class CoachChatStore: ObservableObject {
         assistantTurn.errorCategory = nil
         assistantTurn.errorMessage = nil
         assistantTurn.activeAttemptID = nil
-        replacementCoordinator.stage(replacement)
+        stagePlanCandidate(candidate)
         try context.save()
         return true
     }
@@ -329,8 +487,7 @@ final class CoachChatStore: ObservableObject {
         assistantTurn: ChatMessage,
         in context: ModelContext
     ) throws -> Bool {
-        guard let replacementCoordinator,
-              !attachments.contains(where: {
+        guard !attachments.contains(where: {
                 if case .plannedWorkout = $0 { return true }
                 return false
               }),
@@ -355,14 +512,14 @@ final class CoachChatStore: ObservableObject {
             action: .replace,
             workout: payload
         )])
-        let replacement = try CoachTools.pendingReplacement(
-            for: proposal,
+        let candidate = try CoachPlanCandidateEngine.prepare(
+            proposal: proposal,
             in: context,
             today: snapshot.createdAt,
             calendar: calendar,
-            language: CoachLanguage(rawValue: snapshot.locale) ?? .current
+            language: CoachLanguage(rawValue: snapshot.locale) ?? .current,
+            threadID: snapshot.threadID
         )
-        guard let replacement else { return false }
 
         assistantTurn.text = (CoachLanguage(rawValue: snapshot.locale) ?? .current).contextualDistancePrepared(dayLabel: Self.dayLabel(for: day, relativeTo: snapshot.createdAt, calendar: calendar))
         assistantTurn.assistantStatus = .completed
@@ -370,13 +527,13 @@ final class CoachChatStore: ObservableObject {
         assistantTurn.errorCategory = nil
         assistantTurn.errorMessage = nil
         assistantTurn.activeAttemptID = nil
-        replacementCoordinator.stage(replacement)
+        stagePlanCandidate(candidate)
         try context.save()
         return true
     }
 
     func retryFailedResponse(_ assistantTurnID: UUID, model: String, apiKey: String, in context: ModelContext) async {
-        guard !isSending, !isRetrying,
+        guard !isSending, !isRetrying, !hasPendingPlanDecision, !isConfirmingPlanCandidate,
               let assistantTurn = message(assistantTurnID, in: context),
               assistantTurn.role == .assistant,
               let snapshot = snapshot(assistantTurn.requestSnapshotID, in: context) else { return }
@@ -772,30 +929,22 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
 
             do {
                 let proposal = try toolUse.2.decoded(PlanAdjustmentProposal.self)
-                try validateContextualProposal(proposal, attachments: attachments, in: context)
-                if let replacement = try CoachTools.pendingReplacement(for: proposal, in: context, today: today, calendar: calendar, language: language) {
-                    guard let replacementCoordinator else {
-                        throw CoachTools.ValidationError("Workout replacement confirmation is unavailable.")
-                    }
-                    assistantTurn.text = language.preparedReplacementMessage
-                    replacementCoordinator.stage(replacement)
-                    try context.save()
-                    return
-                }
-
-                guard let replacementCoordinator else {
-                    throw CoachTools.ValidationError("Plan update confirmation is unavailable.")
-                }
-                let validated = try CoachTools.validateForConfirmation(proposal: proposal, in: context, today: today, calendar: calendar)
-                let summary = validated.summary.isEmpty ? CoachTools.summary(for: proposal) : validated.summary
-                assistantTurn.text = language.preparedCalendarUpdateMessage(summary: summary)
-                try context.save()
-                replacementCoordinator.stage(
-                    proposal,
-                    summary: summary,
-                    threadID: snapshot.threadID,
-                    warnings: validated.warnings
+                let candidate = try CoachPlanCandidateEngine.prepare(
+                    proposal: proposal,
+                    in: context,
+                    today: today,
+                    calendar: calendar,
+                    language: language,
+                    threadID: snapshot.threadID
                 )
+                switch candidate.presentation {
+                case .replacement:
+                    assistantTurn.text = language.preparedReplacementMessage
+                case .proposal:
+                    assistantTurn.text = language.preparedCalendarUpdateMessage(summary: candidate.summary)
+                }
+                try context.save()
+                stagePlanCandidate(candidate)
                 return
             } catch {
                 let message = technicalErrorMessage(error)
@@ -954,42 +1103,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         }
     }
 
-    private func validateContextualProposal(
-        _ proposal: PlanAdjustmentProposal,
-        attachments: [CoachContextAttachment],
-        in context: ModelContext
-    ) throws {
-        guard let selectedWorkoutID = attachments.compactMap({ attachment -> UUID? in
-            if case .plannedWorkout(let uuid) = attachment { return uuid }
-            return nil
-        }).first else { return }
-
-        guard let selected = try context.fetch(FetchDescriptor<PlannedWorkout>()).first(where: { $0.uuid == selectedWorkoutID }) else {
-            throw CoachTools.ValidationError("The selected workout is no longer available.")
-        }
-        let selectedDay = calendar.startOfDay(for: selected.date)
-        for change in proposal.changes {
-            guard let proposalDay = Self.planToolDateFormatter.date(from: change.date) else {
-                throw CoachTools.ValidationError("The contextual workout proposal used an invalid date.")
-            }
-            guard calendar.isDate(proposalDay, inSameDayAs: selectedDay) else {
-                throw CoachTools.ValidationError("This proposal targets a different workout. Switch context before editing another workout.")
-            }
-            if selected.kind == .race {
-                throw CoachTools.ValidationError("Race workouts cannot be replaced from this contextual edit flow.")
-            }
-        }
-    }
-
-    private static let planToolDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
-    private func classifyAction(_ text: String) -> CoachRequestActionType {
+    private func classifyAction(_ text: String, attachments: [CoachContextAttachment]) -> CoachRequestActionType {
         let lower = text
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "vi_VN"))
             .lowercased()
@@ -1005,8 +1119,24 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         if mutationNeedles.contains(where: { lower.contains($0) }) || Self.distanceEditRequest(from: text) != nil {
             return .planMutation
         }
+        if Self.isAttachedTypeChange(lower, attachments: attachments) {
+            return .planMutation
+        }
 
         return .unspecified
+    }
+
+    /// "Đổi buổi này sang tempo" with the workout open is a plan edit, not a
+    /// question. A workout kind plus an edit verb, addressed at an attached
+    /// planned workout, routes straight to the plan tool.
+    private static func isAttachedTypeChange(_ lower: String, attachments: [CoachContextAttachment]) -> Bool {
+        let hasPlannedWorkout = attachments.contains {
+            if case .plannedWorkout = $0 { return true }
+            return false
+        }
+        guard hasPlannedWorkout, workoutKind(from: lower) != nil else { return false }
+        let typeChangeCues = ["doi", "thay", "sang", "thanh", "chuyen", "change", "into", "switch"]
+        return typeChangeCues.contains { lower.contains($0) }
     }
 
     private struct DistanceEditRequest {

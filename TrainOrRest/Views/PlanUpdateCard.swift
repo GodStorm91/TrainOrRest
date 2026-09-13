@@ -4,11 +4,14 @@ import SwiftUI
 /// Proposed/Validated/Awaits sequence and its receipt cannot drift between cards.
 struct CoachTrustLedger: View {
     let language: CoachLanguage
-    var warnings: [PlanValidator.Issue] = []
+    /// Issues the user must acknowledge before Apply. Drive the chip and the sheet title.
+    var loadRisks: [PlanValidator.Issue] = []
+    /// Informational issues. Listed in the receipt, never change the chip.
+    var notes: [PlanValidator.Issue] = []
 
     @State private var showsReceipt = false
 
-    private var hasLoadWarning: Bool { !warnings.isEmpty }
+    private var hasLoadWarning: Bool { !loadRisks.isEmpty }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -44,9 +47,10 @@ struct CoachTrustLedger: View {
     private var receiptRows: [ReceiptSheet.Row] {
         let checks = language.planValidationChecks
         let kinds = PlanValidator.Issue.Kind.allCases
-        let warned = Set(warnings.map(\.kind))
+        let flagged = loadRisks + notes
+        let warned = Set(flagged.map(\.kind))
         var rows: [ReceiptSheet.Row] = []
-        for warning in warnings {
+        for warning in flagged {
             let title: String
             if let index = kinds.firstIndex(of: warning.kind), index < checks.count {
                 title = checks[index].title
@@ -78,27 +82,129 @@ struct CoachTrustLedger: View {
     }
 }
 
+private struct CoachPlanChangedBanner: View {
+    let isVisible: Bool
+    let language: CoachLanguage
+
+    var body: some View {
+        if isVisible {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.warn)
+                    .accessibilityHidden(true)
+                Text(language.planChangedBannerText)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(Theme.text)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                Theme.soft(Theme.warn, 0.16),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .accessibilityLabel(language.planChangedBannerText)
+        }
+    }
+}
+
+private struct CoachLoadWarningBanner: View {
+    let warnings: [PlanValidator.Issue]
+    let language: CoachLanguage
+
+    var body: some View {
+        if !warnings.isEmpty {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Theme.warn)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(language.planLoadWarningTitle)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Theme.warn)
+                    ForEach(Array(warnings.enumerated()), id: \.offset) { _, warning in
+                        Text(warning.message)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text(language.planLoadWarningConfirmHint)
+                        .font(.caption)
+                        .foregroundStyle(Theme.dim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.soft(Theme.warn), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .accessibilityElement(children: .combine)
+        }
+    }
+}
+
+/// Facts about the change the runner should know. Nothing here gates Apply.
+private struct CoachPlanNoteRow: View {
+    let notes: [PlanValidator.Issue]
+
+    var body: some View {
+        if !notes.isEmpty {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(Theme.dim)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(notes.enumerated()), id: \.offset) { _, note in
+                        Text(note.message)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.soft(Theme.dim), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .accessibilityElement(children: .combine)
+        }
+    }
+}
+
 /// The coach's proposed swap, shown inline above the composer instead of a
 /// system alert. Every value comes from the staged replacement — the card shows
 /// the real before/after workouts and the real weekly-volume delta, and claims
 /// nothing the plan engine cannot compute.
 struct PlanUpdateCard: View {
-    let pending: PendingWorkoutReplacement
+    let candidate: CoachPlanCandidate
     let language: CoachLanguage
     var isApplying: Bool = false
     let onApply: () -> Void
     let onKeep: () -> Void
     let onAskWhy: () -> Void
 
+    private var replacement: (
+        date: Date,
+        existing: WorkoutReplacementSummary,
+        proposed: WorkoutReplacementSummary,
+        volumeDeltaKm: Double
+    ) {
+        guard case .replacement(let date, let existing, let proposed, _, let volumeDeltaKm) = candidate.presentation else {
+            preconditionFailure("PlanUpdateCard requires a replacement candidate")
+        }
+        return (date, existing, proposed, volumeDeltaKm)
+    }
+
     private var weekday: String {
-        let day = Weekday(rawValue: Calendar.current.component(.weekday, from: pending.date)) ?? .monday
+        let day = Weekday(rawValue: Calendar.current.component(.weekday, from: replacement.date)) ?? .monday
         return language.shortName(day).uppercased()
     }
 
     private var applyLabel: String {
-        pending.expected.weekIndex >= 0
-            ? language.applyToWeekLabel(pending.expected.weekIndex + 1)
-            : language.applyChangesLabel
+        guard candidate.loadRisks.isEmpty else { return language.applyDespiteLoadRiskLabel }
+        guard let weekIndex = candidate.transaction.operations.first?.after?.weekIndex else {
+            return language.applyChangesLabel
+        }
+        return language.applyToWeekLabel(weekIndex + 1)
     }
 
     var body: some View {
@@ -108,13 +214,15 @@ struct PlanUpdateCard: View {
                     applyingRow
                 } else {
                     titleRow
-                    CoachTrustLedger(language: language)
-                    planChangedBanner
+                    CoachTrustLedger(language: language, loadRisks: candidate.loadRisks, notes: candidate.notes)
+                    CoachPlanChangedBanner(isVisible: candidate.changedSinceProposed, language: language)
+                    CoachLoadWarningBanner(warnings: candidate.loadRisks, language: language)
+                    CoachPlanNoteRow(notes: candidate.notes)
                     diffRow
 
                     Rectangle().fill(Theme.line).frame(height: 1)
 
-                    Text(language.weeklyVolumeDeltaText(pending.volumeDeltaKm))
+                    Text(language.weeklyVolumeDeltaText(replacement.volumeDeltaKm))
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(Theme.dim)
 
@@ -150,30 +258,6 @@ struct PlanUpdateCard: View {
         .foregroundStyle(Theme.accent)
     }
 
-    @ViewBuilder
-    private var planChangedBanner: some View {
-        if pending.planChangedSinceProposed {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.warn)
-                    .accessibilityHidden(true)
-
-                Text(language.planChangedBannerText)
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(Theme.text)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                Theme.soft(Theme.warn, 0.16),
-                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-            )
-            .accessibilityLabel(language.planChangedBannerText)
-        }
-    }
 
     private var diffRow: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -212,7 +296,7 @@ struct PlanUpdateCard: View {
     }
 
     private func beforeLine(singleLine: Bool) -> some View {
-        Text(language.workoutRowText(pending.existing))
+        Text(language.workoutRowText(replacement.existing))
             .font(.subheadline.weight(.medium))
             .foregroundStyle(Theme.faint)
             .strikethrough(true, color: Theme.faint)
@@ -222,7 +306,7 @@ struct PlanUpdateCard: View {
 
     private func afterLine(singleLine: Bool) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(language.workoutRowText(pending.proposed))
+            Text(language.workoutRowText(replacement.proposed))
                 .font(.torHeading(15, .semibold))
                 .foregroundStyle(Theme.text)
                 .lineLimit(singleLine ? 1 : nil)
@@ -246,7 +330,10 @@ struct PlanUpdateCard: View {
             }
 
             Button(action: onApply) {
-                Label(applyLabel, systemImage: "checkmark")
+                Label(
+                    applyLabel,
+                    systemImage: candidate.loadRisks.isEmpty ? "checkmark" : "exclamationmark.triangle.fill"
+                )
                     .font(.torHeading(13, .bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity, minHeight: 44)
@@ -254,6 +341,7 @@ struct PlanUpdateCard: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(applyLabel)
+            .accessibilityHint(candidate.loadRisks.isEmpty ? "" : language.planLoadWarningConfirmHint)
         }
     }
 
@@ -279,7 +367,7 @@ struct PlanUpdateCard: View {
 /// A multi-change plan proposal awaiting confirmation. Renders the real per-change
 /// rows from `proposal.changes`, not only the summary sentence.
 struct PlanProposalCard: View {
-    let pending: PendingPlanProposal
+    let candidate: CoachPlanCandidate
     let language: CoachLanguage
     var isApplying: Bool = false
     let onApply: () -> Void
@@ -292,19 +380,20 @@ struct PlanProposalCard: View {
                     applyingRow
                 } else {
                     titleRow
-                    CoachTrustLedger(language: language, warnings: pending.warnings)
+                    CoachTrustLedger(language: language, loadRisks: candidate.loadRisks, notes: candidate.notes)
+                    CoachPlanChangedBanner(isVisible: candidate.changedSinceProposed, language: language)
+                    CoachLoadWarningBanner(warnings: candidate.loadRisks, language: language)
+                    CoachPlanNoteRow(notes: candidate.notes)
 
-                    loadWarningBanner
 
-
-                    Text(pending.summary)
+                    Text(candidate.summary)
                         .font(.torHeading(15, .semibold))
                         .foregroundStyle(Theme.text)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    if !pending.proposal.changes.isEmpty {
+                    if !candidate.proposal.changes.isEmpty {
                         VStack(alignment: .leading, spacing: 7) {
-                            ForEach(Array(pending.proposal.changes.enumerated()), id: \.offset) { _, change in
+                            ForEach(Array(candidate.proposal.changes.enumerated()), id: \.offset) { _, change in
                                 changeRow(change)
                             }
                         }
@@ -347,37 +436,6 @@ struct PlanProposalCard: View {
         .foregroundStyle(Theme.accent)
     }
 
-    @ViewBuilder
-    private var loadWarningBanner: some View {
-        if !pending.warnings.isEmpty {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(Theme.warn)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(language.planLoadWarningTitle)
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(Theme.warn)
-
-                    ForEach(Array(pending.warnings.enumerated()), id: \.offset) { _, warning in
-                        Text(warning.message)
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.text)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Text(language.planLoadWarningConfirmHint)
-                        .font(.caption)
-                        .foregroundStyle(Theme.dim)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.soft(Theme.warn), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .accessibilityElement(children: .combine)
-        }
-    }
 
     private func changeRow(_ change: PlanAdjustmentProposal.Change) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -402,7 +460,7 @@ struct PlanProposalCard: View {
     }
 
     private var applyLabel: String {
-        pending.warnings.isEmpty ? language.applyChangesLabel : language.applyDespiteLoadRiskLabel
+        candidate.loadRisks.isEmpty ? language.applyChangesLabel : language.applyDespiteLoadRiskLabel
     }
 
     private var actions: some View {
@@ -420,7 +478,7 @@ struct PlanProposalCard: View {
             Button(action: onApply) {
                 Label(
                     applyLabel,
-                    systemImage: pending.warnings.isEmpty ? "checkmark" : "exclamationmark.triangle.fill"
+                    systemImage: candidate.loadRisks.isEmpty ? "checkmark" : "exclamationmark.triangle.fill"
                 )
                 .font(.torHeading(13, .bold))
                 .multilineTextAlignment(.center)
@@ -433,7 +491,7 @@ struct PlanProposalCard: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(applyLabel)
-            .accessibilityHint(pending.warnings.isEmpty ? "" : language.planLoadWarningConfirmHint)
+            .accessibilityHint(candidate.loadRisks.isEmpty ? "" : language.planLoadWarningConfirmHint)
         }
     }
 }

@@ -163,9 +163,6 @@ enum WorkoutFactory {
             }
             for step in block.steps {
                 try validate(step)
-                if step.zone.isQuality, paces == nil {
-                    throw WorkoutBuildError("Not enough recent running data to set \(step.zone.rawValue) pace.")
-                }
             }
         }
 

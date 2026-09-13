@@ -60,6 +60,7 @@ struct ActivityDetailView: View {
                     activity.shoeAssignmentSource = shoe == nil ? .none : .manual
                     try? ShoeMileageService.syncMileage(for: activity, in: modelContext)
                     try? modelContext.save()
+                    Task { await ShoeWearNotifier.notifyIfNeeded(in: modelContext) }
                 },
                 onAutomatic: nil
             )

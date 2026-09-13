@@ -22,6 +22,7 @@ enum PlanValidator {
             case workoutOutsidePlanWeek
             case invalidDistance
             case structureDistanceMismatch
+            case paceUnavailable
         }
 
         var kind: Kind
@@ -207,7 +208,7 @@ enum PlanValidator {
             return Issue(
                 kind: .qualityTooClose,
                 weekIndex: nil,
-                message: "Hard sessions \(gap) day(s) apart around \(earlier)"
+                message: "Hard sessions \(gap) day(s) apart around \(dayString(earlier, calendar: calendar))"
             )
         }
     }
@@ -237,12 +238,19 @@ enum PlanValidator {
 }
 
 extension PlanValidator.Issue.Kind {
-    var isUserOverridableLoadRisk: Bool {
+    /// How a plan edit surfaces an issue to the user.
+    /// `blocking` refuses the edit; `acknowledge` needs an explicit "apply despite
+    /// risk" tap; `inform` is shown and never gates Apply.
+    enum Severity { case blocking, acknowledge, inform }
+
+    var severity: Severity {
         switch self {
         case .weeklyVolumeTooHigh, .rampExceeded, .taperNotMonotonic, .longRunTooLong, .qualityTooClose:
-            true
+            .acknowledge
+        case .paceUnavailable:
+            .inform
         case .workoutOnUnavailableDay, .raceMissing, .duplicateWorkoutDay, .workoutOutsidePlanWeek, .invalidDistance, .structureDistanceMismatch:
-            false
+            .blocking
         }
     }
 }

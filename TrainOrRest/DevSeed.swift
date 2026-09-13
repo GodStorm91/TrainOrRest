@@ -3,17 +3,11 @@ import Foundation
 import SwiftData
 import UIKit
 
-/// DEBUG-only launch seam used for visual verification of the coach chat.
+/// DEBUG-only launch seam used for deterministic visual verification.
 ///
-/// The app is onboarding-gated and its Coach screen is not scriptable in the
-/// simulator, so there is otherwise no way to screenshot rendered assistant
-/// markdown. When the process is launched with `TOR_DEV_SEED=1` (see the
-/// `--seed` path in `scripts/smoke.sh`) this seam:
-///   1. marks onboarding complete so `RootView` lands on `.ready`,
-///   2. preloads an API key so `ChatView` shows the message feed instead of
-///      `missingKeyView`, and
-///   3. inserts a deterministic coach thread whose assistant turns exercise the
-///      ordered/unordered list + multi-line rendering paths.
+/// The app is onboarding-gated and deep screens are not scriptable in the
+/// simulator. `TOR_DEV_SEED=1` bypasses onboarding, preloads safe local data,
+/// and can route directly to a screen selected with `TOR_DEV_SCREEN`.
 ///
 /// The whole type is compiled out of release builds by `#if DEBUG`.
 enum DevSeed {
@@ -51,6 +45,25 @@ enum DevSeed {
     /// verified against the provider.
     static var isLiveRequested: Bool {
         isRequested && ProcessInfo.processInfo.environment["TOR_DEV_LIVE"] == "1"
+    }
+
+    /// `TOR_DEV_LIVE_EDIT=1` with `TOR_DEV_LIVE=1` and `TOR_DEV_PLAN=1` opens the
+    /// live turn in "Edit with Coach" context on the next planned easy run so
+    /// the plan-edit card can be verified against the provider.
+    static var isLiveEditRequested: Bool {
+        isLiveRequested && ProcessInfo.processInfo.environment["TOR_DEV_LIVE_EDIT"] == "1"
+    }
+
+    /// The workout the live edit turn attaches: the first planned, unlocked
+    /// easy run on or after today.
+    @MainActor
+    static func liveEditWorkoutID(_ context: ModelContext) -> UUID? {
+        guard isLiveEditRequested else { return nil }
+        let start = Calendar.current.startOfDay(for: Date())
+        let rows = (try? context.fetch(FetchDescriptor<PlannedWorkout>(sortBy: [SortDescriptor(\.date)]))) ?? []
+        return rows.first {
+            $0.date >= start && $0.status == .planned && $0.kind == .easy && !$0.isScheduleLocked
+        }?.uuid
     }
 
     /// `TOR_DEV_TAB=calendar|chat|profile` picks the tab the seeded shell
@@ -138,6 +151,55 @@ enum DevSeed {
         return id
     }
 
+    /// `TOR_DEV_SCREEN=shoes` or `TOR_DEV_PLAN=1` seeds a small closet so the
+    /// list and calendar show approaching wear copy, a healthy pair, and an
+    /// automatic rotation over the planned runs.
+    @MainActor
+    private static func seedShoesIfRequested(_ context: ModelContext) {
+        let wantsShoes = requestedScreen == .shoes
+            || ProcessInfo.processInfo.environment["TOR_DEV_PLAN"] == "1"
+        guard wantsShoes else { return }
+        let hasShoes = (try? context.fetch(FetchDescriptor<RunningShoe>()).isEmpty == false) ?? false
+        if !hasShoes {
+            let now = Date()
+            context.insert(RunningShoe(
+                brand: "ASICS",
+                model: "Gel-Nimbus 27",
+                nickname: "Daily comfort",
+                purchaseDate: now.addingTimeInterval(-120 * 86_400),
+                initialMileageKm: 392,
+                preferredWorkoutTypes: [.recovery, .easy, .longRun],
+                primaryWorkoutType: .easy,
+                expectedLifespanKm: 700,
+                createdAt: now.addingTimeInterval(-120 * 86_400)
+            ))
+            context.insert(RunningShoe(
+                brand: "New Balance",
+                model: "FuelCell Rebel v5",
+                nickname: "Speed day",
+                purchaseDate: now.addingTimeInterval(-65 * 86_400),
+                initialMileageKm: 188,
+                preferredWorkoutTypes: [.tempo, .threshold, .intervals],
+                primaryWorkoutType: .tempo,
+                expectedLifespanKm: 550,
+                createdAt: now.addingTimeInterval(-65 * 86_400)
+            ))
+            context.insert(RunningShoe(
+                brand: "Nike",
+                model: "Pegasus 41",
+                nickname: "Inspect now",
+                purchaseDate: now.addingTimeInterval(-250 * 86_400),
+                initialMileageKm: 563,
+                preferredWorkoutTypes: [.easy, .steady],
+                primaryWorkoutType: .steady,
+                expectedLifespanKm: 600,
+                createdAt: now.addingTimeInterval(-250 * 86_400)
+            ))
+        }
+        try? ShoeAssignmentService.reassignFutureAutomaticWorkouts(in: context)
+        try? context.save()
+    }
+
     private static func preloadAPIKey() {
         let anthropic = ProcessInfo.processInfo.environment["TOR_ANTHROPIC_KEY"]
         let anthropicKey = (anthropic?.isEmpty == false) ? anthropic! : "dev-seed-preview-key"
@@ -166,58 +228,6 @@ enum DevSeed {
         )
         let fitness = FitnessProfile(vdot: 48, weeklyVolumeKm: 40, volumeTrend: 0, longestRecentRunKm: 16)
         try? PlanStore.replaceGoal(spec: spec, fitness: fitness, today: today, calendar: calendar, in: context)
-    }
-
-    /// `TOR_DEV_SCREEN=shoes` seeds a small closet so the list can show
-    /// approaching wear copy, a healthy pair, and a retired pair.
-    @MainActor
-    private static func seedShoesIfRequested(_ context: ModelContext) {
-        let wantsShoes = requestedScreen == .shoes
-            || ProcessInfo.processInfo.environment["TOR_DEV_PLAN"] == "1"
-        guard wantsShoes else { return }
-        let existing = (try? context.fetch(FetchDescriptor<RunningShoe>())) ?? []
-        if existing.isEmpty {
-            context.insert(RunningShoe(
-                brand: "ASICS",
-                model: "Superblast",
-                initialMileageKm: 120,
-                preferredWorkoutTypes: [.easy, .longRun],
-                primaryWorkoutType: .easy,
-                expectedLifespanKm: 600
-            ))
-            context.insert(RunningShoe(
-                brand: "Nike",
-                model: "Vaporfly",
-                initialMileageKm: 490,
-                preferredWorkoutTypes: [.tempo, .intervals],
-                primaryWorkoutType: .tempo,
-                expectedLifespanKm: 600
-            ))
-            context.insert(RunningShoe(
-                brand: "Brooks",
-                model: "Ghost",
-                initialMileageKm: 720,
-                status: .retired,
-                preferredWorkoutTypes: [.easy],
-                expectedLifespanKm: 700
-            ))
-        }
-        assignSeededShoeToToday(context)
-        try? context.save()
-    }
-
-    @MainActor
-    private static func assignSeededShoeToToday(_ context: ModelContext) {
-        let shoes = (try? context.fetch(FetchDescriptor<RunningShoe>())) ?? []
-        guard let shoe = shoes.first(where: { $0.status == .active }) else { return }
-        let calendar = Calendar.current
-        let start = calendar.startOfDay(for: Date())
-        guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return }
-        let workouts = (try? context.fetch(FetchDescriptor<PlannedWorkout>())) ?? []
-        for workout in workouts where workout.date >= start && workout.date < end {
-            workout.shoeID = shoe.id
-            workout.shoeAssignmentSource = .auto
-        }
     }
 
     /// `TOR_DEV_HISTORY=1` seeds six months of wellness, runs, and readiness

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import UserNotifications
 
 struct ShoeAssignmentResult: Equatable {
     var shoeID: UUID?
@@ -31,7 +32,21 @@ enum ShoeWearStatusService {
         let current = ShoeMileageService.currentMileageKm(for: shoe, ledger: ledger)
         return current / shoe.expectedLifespanKm >= thresholdPercent / 100
     }
+
+    static func reminderStage(currentMileageKm: Double, expectedLifespanKm: Double) -> ShoeWearReminderStage {
+        switch wearStatus(currentMileageKm: currentMileageKm, expectedLifespanKm: expectedLifespanKm) {
+        case .normal, .approaching: .none
+        case .inspect: .inspect
+        case .pastRange: .replace
+        }
+    }
 }
+enum ShoeWearReminderStage: Int, Equatable {
+    case none
+    case inspect
+    case replace
+}
+
 
 enum ShoeAssignmentService {
     static func selectShoeForWorkout(
@@ -109,6 +124,36 @@ enum ShoeAssignmentService {
         let preferences = try ShoePreferencesStore.preferences(in: context)
         for workout in workouts where shouldAutoAssign(workout) {
             applySelection(to: workout, shoes: shoes, preferences: preferences, entries: entries)
+        }
+    }
+
+    @MainActor
+    static func assignAutomaticShoesToUnassignedActivities(in context: ModelContext) throws {
+        let activities = try context.fetch(FetchDescriptor<CompletedActivity>())
+        let unassigned = activities.filter {
+            $0.shoeID == nil
+                && $0.shoeAssignmentSource != .manual
+                && $0.shoeAssignmentSource != .syncedProvider
+        }
+        guard !unassigned.isEmpty else { return }
+
+        let shoes = try context.fetch(FetchDescriptor<RunningShoe>())
+        var entries = try context.fetch(FetchDescriptor<ShoeMileageEntry>())
+        let preferences = try ShoePreferencesStore.preferences(in: context)
+
+        for activity in unassigned {
+            let result = selectShoeForWorkout(
+                workoutType: .other,
+                activeShoes: shoes,
+                preferences: preferences,
+                existingShoeID: nil,
+                existingAssignmentSource: .none,
+                mileageEntries: entries
+            )
+            activity.shoeID = result.shoeID
+            activity.shoeAssignmentSource = result.source
+            try ShoeMileageService.syncMileage(for: activity, in: context)
+            entries = try context.fetch(FetchDescriptor<ShoeMileageEntry>())
         }
     }
 
@@ -279,5 +324,71 @@ enum ShoePreferencesStore {
         let preferences = RunningShoePreferences()
         context.insert(preferences)
         return preferences
+    }
+}
+
+@MainActor
+enum ShoeWearNotifier {
+    static func notifyIfNeeded(in context: ModelContext) async {
+        guard
+            let shoes = try? context.fetch(FetchDescriptor<RunningShoe>()),
+            let entries = try? context.fetch(FetchDescriptor<ShoeMileageEntry>())
+        else { return }
+
+        let candidates = shoes
+            .filter { $0.status == .active }
+            .compactMap { shoe -> (RunningShoe, Double, ShoeWearReminderStage)? in
+                let mileage = ShoeMileageService.currentMileageKm(for: shoe, ledger: entries)
+                let stage = ShoeWearStatusService.reminderStage(
+                    currentMileageKm: mileage,
+                    expectedLifespanKm: shoe.expectedLifespanKm
+                )
+                let key = reminderKey(for: shoe)
+                let notifiedStage = ShoeWearReminderStage(rawValue: UserDefaults.standard.integer(forKey: key)) ?? .none
+                if stage.rawValue < notifiedStage.rawValue {
+                    UserDefaults.standard.set(stage.rawValue, forKey: key)
+                }
+                guard stage.rawValue > notifiedStage.rawValue else { return nil }
+                return (shoe, mileage, stage)
+            }
+            .sorted {
+                if $0.2.rawValue != $1.2.rawValue { return $0.2.rawValue > $1.2.rawValue }
+                return ($0.1 / $0.0.expectedLifespanKm) > ($1.1 / $1.0.expectedLifespanKm)
+            }
+
+        guard let (shoe, mileage, stage) = candidates.first else { return }
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
+
+        let copy = CoachLanguage.current.integrations
+        let content = UNMutableNotificationContent()
+        switch stage {
+        case .none:
+            return
+        case .inspect:
+            content.title = copy.shoeInspectionReminderTitle(shoe.displayName)
+            content.body = copy.shoeInspectionReminderBody(Formatters.kilometers(mileage * 1000))
+        case .replace:
+            content.title = copy.shoeReplacementReminderTitle(shoe.displayName)
+            content.body = copy.shoeReplacementReminderBody(Formatters.kilometers(mileage * 1000))
+        }
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "shoe-wear-\(shoe.id.uuidString)-\(stage.rawValue)",
+            content: content,
+            trigger: nil
+        )
+        do {
+            try await center.add(request)
+            UserDefaults.standard.set(stage.rawValue, forKey: reminderKey(for: shoe))
+        } catch {
+            // Best-effort: leave the stage unchanged so a later sync can retry.
+        }
+    }
+
+    private static func reminderKey(for shoe: RunningShoe) -> String {
+        "shoe-wear-reminder-stage-\(shoe.id.uuidString)"
     }
 }

@@ -78,6 +78,13 @@ final class SyncEngine: ObservableObject {
                 logger.error("Workout auto-match failed: \(error, privacy: .public)")
             }
             do {
+                try ShoeAssignmentService.assignAutomaticShoesToUnassignedActivities(in: modelContext)
+                try modelContext.save()
+            } catch {
+                logger.error("Automatic shoe assignment failed: \(error, privacy: .public)")
+            }
+            await ShoeWearNotifier.notifyIfNeeded(in: modelContext)
+            do {
                 let readiness = try ReadinessStore.runDailyPipeline(
                     in: modelContext, today: .now, calendar: calendar
                 )

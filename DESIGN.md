@@ -237,6 +237,21 @@ it lives under Profile → Run history, and these rules hold:
 - No "best readiness" — a leaderboard/record stat invites gaming. Show the **verdict distribution** instead: "Trained 16 · Easy 5 · Rested 7."
 - The 28‑day readiness line is **banded** (normal range shaded), unlabeled by peaks, captioned *"readiness reflects recovery, not effort."* No maxima, no records.
 
+### 7.2 Shoes
+
+Shoes live under Profile and operate as a quiet rotation tool, not an equipment
+leaderboard. Planned runs are assigned from each shoe's preferred workout types
+(easy, long, tempo, intervals, race, and related categories). After sync,
+unmatched runs use the configured rotation fallback; explicit manual or provider
+assignments are never overwritten. Assigned activity distance updates the
+mileage ledger idempotently, in addition to the shoe's starting mileage.
+
+The shoes screen leads with automatic-rotation status, total active mileage, and
+the next planned shoe assignment. A persistent amber warning asks for inspection
+at 90% of expected lifespan; a replacement warning appears at 100%. The same
+threshold transition may issue one local notification per shoe and stage, with
+no repeated nagging until the stage changes.
+
 ---
 
 ## 8. Uncertainty & empty states

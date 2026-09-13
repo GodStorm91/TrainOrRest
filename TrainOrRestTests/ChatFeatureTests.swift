@@ -340,7 +340,10 @@ final class ChatFeatureTests: XCTestCase {
             .init(date: CoachContextBuilder.day(qualityDay, calendar: calendar), action: .downgrade, detail: nil)
         ])
         _ = try CoachTools.apply(proposal: proposal, in: context, today: today, calendar: calendar)
-        _ = try CoachTools.apply(proposal: proposal, in: context, today: today, calendar: calendar)
+        XCTAssertThrowsError(
+            try CoachTools.apply(proposal: proposal, in: context, today: today, calendar: calendar),
+            "re-applying an already-applied downgrade is a no-op rejection, never a cloned row"
+        )
 
         let workouts = try plannedWorkouts(on: qualityDay, in: context)
         XCTAssertEqual(workouts.count, 1)
@@ -503,26 +506,26 @@ final class ChatFeatureTests: XCTestCase {
             ], stopReason: "tool_use"),
             ClaudeResponse(content: [.text("I downgraded Wednesday to easy.")], stopReason: "end_turn")
         ])
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
-        let store = CoachChatStore(
-            client: client,
-            calendar: calendar,
-            now: { self.today },
-            replacementCoordinator: coordinator
-        )
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Make Wednesday easier.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Make Wednesday easier.", model: "claude-test", apiKey: "test-key", in: context)
 
-        XCTAssertNotNil(coordinator.pendingProposal)
+        XCTAssertNotNil(store.pendingPlanCandidate)
         XCTAssertEqual(client.requests.count, 1)
         XCTAssertFalse(try XCTUnwrap(try plannedWorkouts(on: qualityDay, in: context).first).manuallyOverridden)
 
-        let pending = try XCTUnwrap(coordinator.pendingProposal)
-        coordinator.confirmProposal(pending.id)
+        let pending = try XCTUnwrap(store.pendingPlanCandidate)
+        _ = store.confirmPlanCandidate(pending.id, in: context)
 
-        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
-        XCTAssertEqual(messages.map(\.role), [.user, .assistant, .assistant])
-        XCTAssertEqual(messages.last?.appliedAdjustment, "Downgraded 2026-01-07 to easy")
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>())
+        XCTAssertEqual(messages.count, 3)
+        XCTAssertEqual(messages.filter { $0.role == .user }.count, 1)
+        XCTAssertEqual(messages.filter { $0.role == .assistant }.count, 2)
+        XCTAssertEqual(
+            messages.compactMap(\.appliedAdjustment),
+            ["Downgraded 2026-01-07 to easy"]
+        )
         XCTAssertTrue(try XCTUnwrap(try plannedWorkouts(on: qualityDay, in: context).first).manuallyOverridden)
     }
 
@@ -543,17 +546,12 @@ final class ChatFeatureTests: XCTestCase {
                 ]))
             ], stopReason: "tool_use")
         ])
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
-        let store = CoachChatStore(
-            client: client,
-            calendar: calendar,
-            now: { self.today },
-            replacementCoordinator: coordinator
-        )
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Update my plan this week.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Update my plan this week.", model: "claude-test", apiKey: "test-key", in: context)
 
-        XCTAssertNotNil(coordinator.pendingProposal)
+        XCTAssertNotNil(store.pendingPlanCandidate)
         XCTAssertEqual(client.requests.count, 2)
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertFalse(messages.map(\.text).joined(separator: "\n").contains("VCALENDAR"))
@@ -572,13 +570,11 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "Review this workout.",
-            model: "claude-test",
-            attachments: [.health, .plannedWorkout(workout.uuid), .image(image)],
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "Review this workout.",
+        model: "claude-test",
+        attachments: [.health, .plannedWorkout(workout.uuid), .image(image)],
+        apiKey: "test-key",
+        in: context)
 
         let storedMessages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertEqual(storedMessages.first?.text, "Review this workout.")
@@ -597,39 +593,38 @@ final class ChatFeatureTests: XCTestCase {
         })
     }
 
-    func testContextualCoachRejectsProposalForDifferentWorkoutDate() async throws {
+    func testContextualCoachStagesProposalForDifferentWorkoutDate() async throws {
         let container = try makeContainer()
         let context = container.mainContext
         try seedTrainingData(in: context)
-        let selected = try XCTUnwrap(try plannedWorkouts(on: qualityDay, in: context).first)
         let friday = PlanEngineTestSupport.date(2026, 1, 9)
+        let selected = try XCTUnwrap(try plannedWorkouts(on: friday, in: context).first)
         let client = MockClaudeClient(responses: [
             ClaudeResponse(content: [
                 .toolUse(id: "toolu_1", name: CoachTools.toolName, input: .object([
                     "changes": .array([
                         .object([
-                            "date": .string(CoachContextBuilder.day(friday, calendar: calendar)),
+                            "date": .string(CoachContextBuilder.day(qualityDay, calendar: calendar)),
                             "action": .string("downgrade")
                         ])
                     ])
                 ]))
-            ], stopReason: "tool_use"),
-            ClaudeResponse(content: [.text("I will keep the selected workout in context.")], stopReason: "end_turn")
+            ], stopReason: "tool_use")
         ])
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
-        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
 
-        await store.send(
-            text: "Make this workout easier.",
-            model: "claude-test",
-            attachments: [.plannedWorkout(selected.uuid)],
-            apiKey: "test-key",
-            in: context
-        )
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        XCTAssertNil(coordinator.pendingProposal)
-        XCTAssertEqual(client.requests.count, 2)
-        XCTAssertFalse(try XCTUnwrap(try plannedWorkouts(on: friday, in: context).first).manuallyOverridden)
+        await store.submitTestTurn(text: "Make Wednesday easier instead.",
+        model: "claude-test",
+        attachments: [.plannedWorkout(selected.uuid)],
+        apiKey: "test-key",
+        in: context)
+
+        XCTAssertNotNil(store.pendingPlanCandidate, "a proposal for another day is staged for confirmation, never refused")
+        XCTAssertEqual(client.requests.count, 1)
+        let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
+        XCTAssertNil(assistant.errorCategory)
+        XCTAssertEqual(try XCTUnwrap(try plannedWorkouts(on: qualityDay, in: context).first).kind, .tempo, "nothing applies before the user confirms")
     }
 
     func testContextualThreadStoresWorkoutSnapshotMetadata() throws {
@@ -675,28 +670,22 @@ final class ChatFeatureTests: XCTestCase {
         })
         let client = MockClaudeClient(responses: [])
         let contextualToday = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: selected.date)))
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { contextualToday })
-        let store = CoachChatStore(
-            client: client,
-            calendar: calendar,
-            now: { contextualToday },
-            replacementCoordinator: coordinator
-        )
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { contextualToday })
 
         let unsafeTargetKm = selected.distanceKm * 2
 
-        await store.send(
-            text: "đổi cự li thành \(unsafeTargetKm) km",
-            model: "claude-test",
-            attachments: [.plannedWorkout(selected.uuid)],
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "đổi cự li thành \(unsafeTargetKm) km",
+        model: "claude-test",
+        attachments: [.plannedWorkout(selected.uuid)],
+        apiKey: "test-key",
+        in: context)
 
         XCTAssertTrue(client.requests.isEmpty)
-        let pending = try XCTUnwrap(coordinator.pending)
-        XCTAssertEqual(pending.expected.uuid, selected.uuid)
-        XCTAssertEqual(pending.proposed.distanceKm, unsafeTargetKm, accuracy: 0.001)
+        let pending = try XCTUnwrap(store.pendingPlanCandidate)
+        let replacement = try replacementDetails(pending)
+        XCTAssertEqual(replacement.workoutID, selected.uuid)
+        XCTAssertEqual(replacement.proposed.distanceKm, unsafeTargetKm, accuracy: 0.001)
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertFalse(messages.map(\.text).joined(separator: "\n").contains("cụ thể hơn"))
     }
@@ -710,31 +699,25 @@ final class ChatFeatureTests: XCTestCase {
         })
         let client = MockClaudeClient(responses: [])
         let contextualToday = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: selected.date)))
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { contextualToday })
-        let store = CoachChatStore(
-            client: client,
-            calendar: calendar,
-            now: { contextualToday },
-            replacementCoordinator: coordinator
-        )
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { contextualToday })
 
         let targetKm = selected.distanceKm + 0.5
 
-        await store.send(
-            text: "đổi cự ly thành \(targetKm) km",
-            model: "claude-test",
-            attachments: [.plannedWorkout(selected.uuid)],
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "đổi cự ly thành \(targetKm) km",
+        model: "claude-test",
+        attachments: [.plannedWorkout(selected.uuid)],
+        apiKey: "test-key",
+        in: context)
 
         XCTAssertTrue(client.requests.isEmpty)
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertFalse(messages.map(\.text).joined(separator: "\n").contains("cụ thể hơn"))
-        if let pending = coordinator.pending {
-            XCTAssertEqual(pending.expected.uuid, selected.uuid)
-            XCTAssertEqual(pending.proposed.distanceKm, targetKm, accuracy: 0.001)
-            XCTAssertEqual(pending.proposed.kind, selected.kind)
+        if let pending = store.pendingPlanCandidate {
+            let replacement = try replacementDetails(pending)
+            XCTAssertEqual(replacement.workoutID, selected.uuid)
+            XCTAssertEqual(replacement.proposed.distanceKm, targetKm, accuracy: 0.001)
+            XCTAssertEqual(replacement.proposed.kind, selected.kind)
         }
     }
 
@@ -747,31 +730,25 @@ final class ChatFeatureTests: XCTestCase {
         })
         let client = MockClaudeClient(responses: [])
         let contextualToday = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: selected.date))
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { contextualToday })
-        let store = CoachChatStore(
-            client: client,
-            calendar: calendar,
-            now: { contextualToday },
-            replacementCoordinator: coordinator
-        )
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { contextualToday })
 
         let targetKm = selected.distanceKm + 0.5
 
-        await store.send(
-            text: "tăng cự li buổi ngày mai lên \(targetKm) km",
-            model: "claude-test",
-            attachments: [.plannedWorkout(selected.uuid)],
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "tăng cự li buổi ngày mai lên \(targetKm) km",
+        model: "claude-test",
+        attachments: [.plannedWorkout(selected.uuid)],
+        apiKey: "test-key",
+        in: context)
 
         XCTAssertTrue(client.requests.isEmpty)
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertFalse(messages.map(\.text).joined(separator: "\n").contains("cụ thể hơn"))
-        if let pending = coordinator.pending {
-            XCTAssertEqual(pending.expected.uuid, selected.uuid)
-            XCTAssertEqual(pending.proposed.distanceKm, targetKm, accuracy: 0.001)
-            XCTAssertEqual(pending.proposed.kind, selected.kind)
+        if let pending = store.pendingPlanCandidate {
+            let replacement = try replacementDetails(pending)
+            XCTAssertEqual(replacement.workoutID, selected.uuid)
+            XCTAssertEqual(replacement.proposed.distanceKm, targetKm, accuracy: 0.001)
+            XCTAssertEqual(replacement.proposed.kind, selected.kind)
         } else {
             let transcript = messages.map(\.text).joined(separator: "\n")
             XCTAssertTrue(transcript.contains("Em hiểu anh muốn đổi buổi này lên"))
@@ -787,24 +764,17 @@ final class ChatFeatureTests: XCTestCase {
             $0.kind == .long && $0.status == .planned && $0.date > today
         })
         let client = MockClaudeClient(responses: [])
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
-        let store = CoachChatStore(
-            client: client,
-            calendar: calendar,
-            now: { self.today },
-            replacementCoordinator: coordinator
-        )
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "tăng cự li buổi ngày mai lên 100 km",
-            model: "claude-test",
-            attachments: [.plannedWorkout(selected.uuid)],
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "tăng cự li buổi ngày mai lên 100 km",
+        model: "claude-test",
+        attachments: [.plannedWorkout(selected.uuid)],
+        apiKey: "test-key",
+        in: context)
 
         XCTAssertTrue(client.requests.isEmpty)
-        XCTAssertNil(coordinator.pending)
+        XCTAssertNil(store.pendingPlanCandidate)
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         let transcript = messages.map(\.text).joined(separator: "\n")
         XCTAssertTrue(transcript.contains("I understand you want to change this workout to 100 km"))
@@ -836,28 +806,22 @@ final class ChatFeatureTests: XCTestCase {
         try context.save()
 
         let client = MockClaudeClient(responses: [])
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
-        let store = CoachChatStore(
-            client: client,
-            calendar: calendar,
-            now: { self.today },
-            replacementCoordinator: coordinator
-        )
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "chuyển bài long run hnay cự li 5km thành 8km",
-            model: "claude-test",
-            attachments: [.health],
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "chuyển bài long run hnay cự li 5km thành 8km",
+        model: "claude-test",
+        attachments: [.health],
+        apiKey: "test-key",
+        in: context)
 
         XCTAssertTrue(client.requests.isEmpty)
-        let pending = try XCTUnwrap(coordinator.pending)
-        XCTAssertEqual(pending.expected.uuid, selected.uuid)
-        XCTAssertEqual(pending.existing.distanceKm, 5, accuracy: 0.001)
-        XCTAssertEqual(pending.proposed.distanceKm, 8, accuracy: 0.001)
-        XCTAssertEqual(pending.proposed.kind, .long)
+        let pending = try XCTUnwrap(store.pendingPlanCandidate)
+        let replacement = try replacementDetails(pending)
+        XCTAssertEqual(replacement.workoutID, selected.uuid)
+        XCTAssertEqual(replacement.existing.distanceKm, 5, accuracy: 0.001)
+        XCTAssertEqual(replacement.proposed.distanceKm, 8, accuracy: 0.001)
+        XCTAssertEqual(replacement.proposed.kind, .long)
         let transcript = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
             .map(\.text)
             .joined(separator: "\n")
@@ -903,29 +867,23 @@ final class ChatFeatureTests: XCTestCase {
         try context.save()
 
         let client = MockClaudeClient(responses: [])
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
-        let store = CoachChatStore(
-            client: client,
-            calendar: calendar,
-            now: { self.today },
-            replacementCoordinator: coordinator
-        )
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "Tạo chỉnh sửa ngắn hạn chỉ ngày 2026-01-06 easy 10km vẫn easy nha",
-            model: "claude-test",
-            attachments: [.health],
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "Tạo chỉnh sửa ngắn hạn chỉ ngày 2026-01-06 easy 10km vẫn easy nha",
+        model: "claude-test",
+        attachments: [.health],
+        apiKey: "test-key",
+        in: context)
 
         XCTAssertTrue(client.requests.isEmpty)
-        let pending = try XCTUnwrap(coordinator.pending)
-        XCTAssertEqual(pending.expected.uuid, selected.uuid)
-        XCTAssertEqual(pending.existing.distanceKm, 5.2, accuracy: 0.001)
-        XCTAssertEqual(pending.existing.kind, .easy)
-        XCTAssertEqual(pending.proposed.distanceKm, 10, accuracy: 0.001)
-        XCTAssertEqual(pending.proposed.kind, .easy)
+        let pending = try XCTUnwrap(store.pendingPlanCandidate)
+        let replacement = try replacementDetails(pending)
+        XCTAssertEqual(replacement.workoutID, selected.uuid)
+        XCTAssertEqual(replacement.existing.distanceKm, 5.2, accuracy: 0.001)
+        XCTAssertEqual(replacement.existing.kind, .easy)
+        XCTAssertEqual(replacement.proposed.distanceKm, 10, accuracy: 0.001)
+        XCTAssertEqual(replacement.proposed.kind, .easy)
         let transcript = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
             .map(\.text)
             .joined(separator: "\n")
@@ -964,30 +922,25 @@ final class ChatFeatureTests: XCTestCase {
             ], stopReason: "tool_use"),
             ClaudeResponse(content: [.text("Added a 5 km easy run on Saturday.")], stopReason: "end_turn")
         ])
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
-        let store = CoachChatStore(
-            client: client,
-            calendar: calendar,
-            now: { self.today },
-            replacementCoordinator: coordinator
-        )
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Add an easy run on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Add an easy run on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
 
         XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
-        let pending = try XCTUnwrap(coordinator.pendingProposal)
+        let pending = try XCTUnwrap(store.pendingPlanCandidate)
         XCTAssertTrue(pending.summary.contains("Created easy on 2026-01-10"))
         XCTAssertEqual(client.requests.count, 1)
 
-        coordinator.confirmProposal(pending.id)
+        _ = store.confirmPlanCandidate(pending.id, in: context)
 
         let created = try XCTUnwrap(try plannedWorkouts(on: saturday, in: context).first)
         XCTAssertEqual(created.kind, .easy)
         XCTAssertEqual(created.distanceKm, 5, accuracy: 0.001)
         XCTAssertTrue(created.manuallyOverridden)
 
-        let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
-        XCTAssertEqual(messages.last?.appliedAdjustment, "Created easy on 2026-01-10")
+        let messages = try context.fetch(FetchDescriptor<ChatMessage>())
+        XCTAssertEqual(messages.compactMap(\.appliedAdjustment), ["Created easy on 2026-01-10"])
     }
 
     func testCoachMoveCanTargetNormalRestDay() throws {
@@ -1053,7 +1006,13 @@ final class ChatFeatureTests: XCTestCase {
             workout: payload
         )])
         XCTAssertThrowsError(
-            try CoachTools.pendingReplacement(for: proposal, in: context, today: today, calendar: calendar, language: .en)
+            try CoachPlanCandidateEngine.prepare(
+                proposal: proposal,
+                in: context,
+                today: today,
+                calendar: calendar,
+                language: .en
+            )
         ) { error in
             XCTAssertTrue("\(error)".contains("No change to apply"), "identical replace must be a no-op rejection, got: \(error)")
         }
@@ -1071,10 +1030,10 @@ final class ChatFeatureTests: XCTestCase {
             ]))
         ], stopReason: "tool_use")
         let client = MockClaudeClient(responses: Array(repeating: describe, count: CoachChatConfig.maxToolRounds))
-        let coordinator = WorkoutReplacementCoordinator(container: container)
-        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Áp dụng đề xuất tuần tới và lưu thay đổi", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Áp dụng đề xuất tuần tới và lưu thay đổi", model: "claude-test", apiKey: "test-key", in: context)
 
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertNil(assistant.structuredResponse, "an apply-and-save message must route to a plan mutation, not persist a describe card")
@@ -1092,10 +1051,10 @@ final class ChatFeatureTests: XCTestCase {
             ]))
         ], stopReason: "tool_use")
         let client = MockClaudeClient(responses: Array(repeating: describe, count: CoachChatConfig.maxToolRounds))
-        let coordinator = WorkoutReplacementCoordinator(container: container)
-        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Apply it", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Apply it", model: "claude-test", apiKey: "test-key", in: context)
 
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertNil(assistant.structuredResponse, "an apply command must route to a plan mutation, not persist a describe card")
@@ -1171,6 +1130,7 @@ final class ChatFeatureTests: XCTestCase {
             return (workout, target)
         }.prefix(4)
         XCTAssertEqual(movablePairs.count, 4, "fixture needs four same-week easy moves for max-size plan edit coverage")
+        let sourceDates = movablePairs.map { $0.0.date }
 
         let workout = PlanAdjustmentProposal.CreateWorkout(
             kind: "easy",
@@ -1209,7 +1169,6 @@ final class ChatFeatureTests: XCTestCase {
             XCTAssertNil(try plannedWorkouts(on: target, in: context).first, "preflight must not persist moves")
         }
 
-        let sourceDates = movablePairs.map(\.0.date)
         let applied = try CoachTools.apply(
             proposal: .init(changes: changes),
             in: context,
@@ -1220,8 +1179,12 @@ final class ChatFeatureTests: XCTestCase {
         let created = try XCTUnwrap(try plannedWorkouts(on: createTarget, in: context).first)
         XCTAssertEqual(created.kind, .easy)
         XCTAssertEqual(created.distanceKm, 1, accuracy: 0.001)
-        for date in sourceDates {
-            XCTAssertNil(try plannedWorkouts(on: date, in: context).first)
+        for sourceDate in sourceDates {
+            let remaining = try plannedWorkouts(on: sourceDate, in: context)
+            XCTAssertTrue(
+                remaining.isEmpty,
+                "source \(CoachContextBuilder.day(sourceDate, calendar: calendar)) still has \(remaining.map(\.uuid))"
+            )
         }
         for (_, target) in movablePairs {
             XCTAssertNotNil(try plannedWorkouts(on: target, in: context).first)
@@ -1278,18 +1241,13 @@ final class ChatFeatureTests: XCTestCase {
                 ]))
             ], stopReason: "tool_use")
         ])
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
-        let store = CoachChatStore(
-            client: client,
-            calendar: calendar,
-            now: { self.today },
-            replacementCoordinator: coordinator
-        )
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Create easy on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Create easy on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
 
         XCTAssertEqual(client.requests.count, 1)
-        let pending = try XCTUnwrap(coordinator.pendingProposal)
+        let pending = try XCTUnwrap(store.pendingPlanCandidate)
         XCTAssertEqual(pending.summary, "Created easy on 2026-01-10")
         XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
@@ -1329,23 +1287,16 @@ final class ChatFeatureTests: XCTestCase {
                 ]))
             ], stopReason: "tool_use")
         ])
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
-        let store = CoachChatStore(
-            client: client,
-            calendar: calendar,
-            now: { self.today },
-            replacementCoordinator: coordinator
-        )
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "thêm một buổi threshold ngắn giữa tuần",
-            model: "claude-test",
-            attachments: [.completedActivity(review.hkUUID)],
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "thêm một buổi threshold ngắn giữa tuần",
+        model: "claude-test",
+        attachments: [.completedActivity(review.hkUUID)],
+        apiKey: "test-key",
+        in: context)
 
-        let pending = try XCTUnwrap(coordinator.pendingProposal)
+        let pending = try XCTUnwrap(store.pendingPlanCandidate)
         XCTAssertEqual(pending.summary, "Created easy on 2026-01-10")
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         let transcript = messages.map(\.text).joined(separator: "\n")
@@ -1392,18 +1343,13 @@ final class ChatFeatureTests: XCTestCase {
                 ]))
             ], stopReason: "tool_use")
         ])
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
-        let store = CoachChatStore(
-            client: client,
-            calendar: calendar,
-            now: { self.today },
-            replacementCoordinator: coordinator
-        )
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Create easy on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Create easy on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
 
         XCTAssertEqual(client.requests.count, 3)
-        XCTAssertNotNil(coordinator.pendingProposal)
+        XCTAssertNotNil(store.pendingPlanCandidate)
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertFalse(messages.map(\.text).joined(separator: "\n").contains("Bạn có thể xác nhận"))
     }
@@ -1426,17 +1372,12 @@ final class ChatFeatureTests: XCTestCase {
             ], stopReason: "tool_use"),
             ClaudeResponse(content: [.text("Em chưa thể chỉnh vì thứ bảy đang trống.")], stopReason: "end_turn")
         ])
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
-        let store = CoachChatStore(
-            client: client,
-            calendar: calendar,
-            now: { self.today },
-            replacementCoordinator: coordinator
-        )
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Create workout on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Create workout on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
 
-        XCTAssertNil(coordinator.pendingProposal)
+        XCTAssertNil(store.pendingPlanCandidate)
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertEqual(messages.map(\.role), [.user, .assistant])
         let assistant = try XCTUnwrap(messages.last)
@@ -1458,14 +1399,14 @@ final class ChatFeatureTests: XCTestCase {
             ]))
         ], stopReason: "tool_use")
         let client = MockClaudeClient(responses: Array(repeating: describe, count: CoachChatConfig.maxToolRounds))
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
-        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Create workout on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Create workout on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
 
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertNil(assistant.structuredResponse, "a plan mutation must stage a proposal, not persist a describe-only card")
-        XCTAssertFalse(coordinator.hasPendingDecision, "a describe-only card stages nothing")
+        XCTAssertFalse(store.hasPendingPlanDecision, "a describe-only card stages nothing")
     }
 
     func testPlanPromptForbidsViewDraftStep() throws {
@@ -1495,15 +1436,15 @@ final class ChatFeatureTests: XCTestCase {
             ]))
         ], stopReason: "tool_use")
         let client = MockClaudeClient(responses: Array(repeating: explain, count: CoachChatConfig.maxToolRounds))
-        let coordinator = WorkoutReplacementCoordinator(container: container)
-        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Create workout on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Create workout on Saturday.", model: "claude-test", apiKey: "test-key", in: context)
 
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertFalse(assistant.text.contains("Unknown coach tool"), "an unhandled tool must nudge to propose, not dead-end")
         XCTAssertNil(assistant.structuredResponse)
-        XCTAssertFalse(coordinator.hasPendingDecision)
+        XCTAssertFalse(store.hasPendingPlanDecision)
     }
 
     func testChatStoreRejectsUnapplyablePlanCardBeforeUserCanConfirm() async throws {
@@ -1551,18 +1492,13 @@ final class ChatFeatureTests: XCTestCase {
                 ]))
             ], stopReason: "tool_use")
         ])
-        let coordinator = WorkoutReplacementCoordinator(container: container, calendar: calendar, now: { self.today })
-        let store = CoachChatStore(
-            client: client,
-            calendar: calendar,
-            now: { self.today },
-            replacementCoordinator: coordinator
-        )
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Make Saturday a run day.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Make Saturday a run day.", model: "claude-test", apiKey: "test-key", in: context)
 
         XCTAssertEqual(client.requests.count, 2)
-        let pending = try XCTUnwrap(coordinator.pendingProposal)
+        let pending = try XCTUnwrap(store.pendingPlanCandidate)
         XCTAssertEqual(pending.summary, "Created easy on 2026-01-10")
         XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
@@ -1598,7 +1534,7 @@ final class ChatFeatureTests: XCTestCase {
         let client = MockClaudeClient(error: ClaudeClientError.connectionLost)
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Create workout tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Create workout tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
 
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertEqual(messages.map(\.role), [.user, .assistant])
@@ -1622,7 +1558,7 @@ final class ChatFeatureTests: XCTestCase {
         let client = MockClaudeClient(error: ClaudeClientError.timedOut)
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Create workout tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Create workout tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
 
         let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertEqual(failed.assistantStatus, .failed)
@@ -1640,7 +1576,7 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Create workout tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Create workout tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
 
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         let failed = try XCTUnwrap(messages.last)
@@ -2305,12 +2241,10 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "Xem chi tiết các buổi sắp tới",
-            model: "claude-test",
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "Xem chi tiết các buổi sắp tới",
+        model: "claude-test",
+        apiKey: "test-key",
+        in: context)
 
         XCTAssertEqual(client.requests.count, 0)
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last { $0.role == .assistant })
@@ -2350,12 +2284,10 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "Should I skip my next workout?",
-            model: "claude-test",
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "Should I skip my next workout?",
+        model: "claude-test",
+        apiKey: "test-key",
+        in: context)
 
         XCTAssertEqual(client.requests.count, 1)
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last { $0.role == .assistant })
@@ -2487,16 +2419,14 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "Hom nay the nao?",
-            model: "claude-test",
-            apiKey: "test-key",
-            contextItems: [
-                CoachContextItem(type: .healthData, label: "Suc khoe"),
-                CoachContextItem(type: .completedRun, label: "Buoi chay")
-            ],
-            in: context
-        )
+        await store.submitTestTurn(text: "Hom nay the nao?",
+        model: "claude-test",
+        apiKey: "test-key",
+        contextItems: [
+            CoachContextItem(type: .healthData, label: "Suc khoe"),
+            CoachContextItem(type: .completedRun, label: "Buoi chay")
+        ],
+        in: context)
 
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         let assistant = try XCTUnwrap(messages.last { $0.role == .assistant })
@@ -2523,7 +2453,7 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "How am I?", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "How am I?", model: "claude-test", apiKey: "test-key", in: context)
 
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         let assistant = try XCTUnwrap(messages.last { $0.role == .assistant })
@@ -2624,16 +2554,14 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "How am I?",
-            model: "claude-test",
-            apiKey: "test-key",
-            contextItems: [
-                CoachContextItem(type: .healthData, label: "Health"),
-                CoachContextItem(type: .completedRun, label: "Completed run")
-            ],
-            in: context
-        )
+        await store.submitTestTurn(text: "How am I?",
+        model: "claude-test",
+        apiKey: "test-key",
+        contextItems: [
+            CoachContextItem(type: .healthData, label: "Health"),
+            CoachContextItem(type: .completedRun, label: "Completed run")
+        ],
+        in: context)
 
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         let assistant = try XCTUnwrap(messages.last { $0.role == .assistant })
@@ -2670,7 +2598,7 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "How am I?", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "How am I?", model: "claude-test", apiKey: "test-key", in: context)
 
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         let assistant = try XCTUnwrap(messages.last { $0.role == .assistant })
@@ -2715,7 +2643,7 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Review this run.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Review this run.", model: "claude-test", apiKey: "test-key", in: context)
 
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertNotEqual(assistant.assistantStatus, .failed)
@@ -2733,15 +2661,66 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "Tạo bài chạy dài vào thứ Bảy.",
-            model: "claude-test",
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "Tạo bài chạy dài vào thứ Bảy.",
+        model: "claude-test",
+        apiKey: "test-key",
+        in: context)
 
         let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
         XCTAssertEqual(snapshot.actionType, .planMutation)
+    }
+
+    func testTypeChangeWithPlannedWorkoutAttachmentClassifiesAsPlanMutation() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let friday = PlanEngineTestSupport.date(2026, 1, 9)
+        let selected = try XCTUnwrap(try plannedWorkouts(on: friday, in: context).first)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [
+                .toolUse(id: "toolu_1", name: CoachTools.toolName, input: .object([
+                    "changes": .array([
+                        .object([
+                            "date": .string(CoachContextBuilder.day(qualityDay, calendar: calendar)),
+                            "action": .string("downgrade")
+                        ])
+                    ])
+                ]))
+            ], stopReason: "tool_use")
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.submitTestTurn(text: "Đổi buổi này sang tempo",
+        model: "claude-test",
+        attachments: [.plannedWorkout(selected.uuid)],
+        apiKey: "test-key",
+        in: context)
+
+        let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
+        XCTAssertEqual(snapshot.actionType, .planMutation)
+        let request = try XCTUnwrap(client.requests.first)
+        XCTAssertEqual(request.tools.map(\.name), [CoachTools.toolName], "a type change offers only the plan tool, so the model cannot answer with options")
+    }
+
+    func testTypeQuestionWithPlannedWorkoutAttachmentStaysUnspecified() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let friday = PlanEngineTestSupport.date(2026, 1, 9)
+        let selected = try XCTUnwrap(try plannedWorkouts(on: friday, in: context).first)
+        let client = MockClaudeClient(responses: [
+            ClaudeResponse(content: [.text("ok")], stopReason: "end_turn")
+        ])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
+
+        await store.submitTestTurn(text: "What is tempo supposed to feel like?",
+        model: "claude-test",
+        attachments: [.plannedWorkout(selected.uuid)],
+        apiKey: "test-key",
+        in: context)
+
+        let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
+        XCTAssertEqual(snapshot.actionType, .unspecified)
     }
 
     func testAdviceQuestionClassifiesAsUnspecified() async throws {
@@ -2753,12 +2732,10 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "Sau buổi chạy này tôi nên điều chỉnh gì tiếp theo?",
-            model: "claude-test",
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "Sau buổi chạy này tôi nên điều chỉnh gì tiếp theo?",
+        model: "claude-test",
+        apiKey: "test-key",
+        in: context)
 
         let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
         XCTAssertEqual(snapshot.actionType, .unspecified)
@@ -2773,12 +2750,10 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "確認用の計画調整案を作成してください。",
-            model: "claude-test",
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "確認用の計画調整案を作成してください。",
+        model: "claude-test",
+        apiKey: "test-key",
+        in: context)
 
         let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
         XCTAssertEqual(snapshot.actionType, .unspecified)
@@ -2806,12 +2781,10 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "Sau buổi chạy này tôi nên điều chỉnh gì tiếp theo?",
-            model: "claude-test",
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "Sau buổi chạy này tôi nên điều chỉnh gì tiếp theo?",
+        model: "claude-test",
+        apiKey: "test-key",
+        in: context)
 
         let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
         XCTAssertEqual(snapshot.actionType, .unspecified)
@@ -2833,12 +2806,10 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "Đổi cự ly hoặc thời lượng",
-            model: "claude-test",
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "Đổi cự ly hoặc thời lượng",
+        model: "claude-test",
+        apiKey: "test-key",
+        in: context)
 
         let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
         XCTAssertEqual(
@@ -2869,12 +2840,10 @@ final class ChatFeatureTests: XCTestCase {
         let client = MockClaudeClient(responses: Array(repeating: card, count: CoachChatConfig.maxToolRounds))
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "Đổi cự ly hoặc thời lượng",
-            model: "claude-test",
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "Đổi cự ly hoặc thời lượng",
+        model: "claude-test",
+        apiKey: "test-key",
+        in: context)
 
         let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
         XCTAssertEqual(snapshot.actionType, .unspecified)
@@ -2890,7 +2859,7 @@ final class ChatFeatureTests: XCTestCase {
         let container = try makeContainer()
         let context = container.mainContext
         try seedTrainingData(in: context)
-        let coordinator = WorkoutReplacementCoordinator(container: container)
+        
         let replaceNoWorkout = ClaudeResponse(content: [
             .toolUse(id: "toolu_bad", name: CoachTools.toolName, input: .object([
                 "changes": .array([.object([
@@ -2900,9 +2869,9 @@ final class ChatFeatureTests: XCTestCase {
             ]))
         ], stopReason: "tool_use")
         let client = MockClaudeClient(responses: Array(repeating: replaceNoWorkout, count: CoachChatConfig.maxToolRounds))
-        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Điều chỉnh kế hoạch giúp tôi.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Điều chỉnh kế hoạch giúp tôi.", model: "claude-test", apiKey: "test-key", in: context)
 
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertTrue(assistant.text.contains("couldn't read which workout"), "expected localized missing-workout message, got: \(assistant.text)")
@@ -2913,7 +2882,7 @@ final class ChatFeatureTests: XCTestCase {
         let container = try makeContainer()
         let context = container.mainContext
         try seedTrainingData(in: context)
-        let coordinator = WorkoutReplacementCoordinator(container: container)
+        
         let pastDay = PlanEngineTestSupport.date(2026, 1, 1)
         let downgradePast = ClaudeResponse(content: [
             .toolUse(id: "toolu_past", name: CoachTools.toolName, input: .object([
@@ -2924,9 +2893,9 @@ final class ChatFeatureTests: XCTestCase {
             ]))
         ], stopReason: "tool_use")
         let client = MockClaudeClient(responses: Array(repeating: downgradePast, count: CoachChatConfig.maxToolRounds))
-        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Điều chỉnh kế hoạch giúp tôi.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Điều chỉnh kế hoạch giúp tôi.", model: "claude-test", apiKey: "test-key", in: context)
 
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertFalse(assistant.text.contains("couldn't read which workout"), "past-date error must not be mislabeled as missing workout, got: \(assistant.text)")
@@ -2937,7 +2906,7 @@ final class ChatFeatureTests: XCTestCase {
         let container = try makeContainer()
         let context = container.mainContext
         try seedTrainingData(in: context)
-        let coordinator = WorkoutReplacementCoordinator(container: container)
+        
         let invalidPropose = ClaudeResponse(content: [
             .toolUse(id: "toolu_bad", name: CoachTools.toolName, input: .object([
                 "changes": .array([.object([
@@ -2950,9 +2919,9 @@ final class ChatFeatureTests: XCTestCase {
             .text("Bạn có thể xác nhận lại định dạng JSON của plan_adjustment tool giúp mình không?")
         ], stopReason: "end_turn")
         let client = MockClaudeClient(responses: [invalidPropose] + Array(repeating: detour, count: CoachChatConfig.maxToolRounds - 1))
-        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Điều chỉnh kế hoạch giúp tôi.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Điều chỉnh kế hoạch giúp tôi.", model: "claude-test", apiKey: "test-key", in: context)
 
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertTrue(assistant.text.contains("couldn't read which workout"), "underlying validation reason should survive the retry nudge, got: \(assistant.text)")
@@ -2965,7 +2934,7 @@ final class ChatFeatureTests: XCTestCase {
         let container = try makeContainer()
         let context = container.mainContext
         try seedTrainingData(in: context)
-        let coordinator = WorkoutReplacementCoordinator(container: container)
+        
         let replaceNoWorkout = ClaudeResponse(content: [
             .toolUse(id: "toolu_bad", name: CoachTools.toolName, input: .object([
                 "changes": .array([.object([
@@ -2975,9 +2944,9 @@ final class ChatFeatureTests: XCTestCase {
             ]))
         ], stopReason: "tool_use")
         let client = MockClaudeClient(responses: Array(repeating: replaceNoWorkout, count: CoachChatConfig.maxToolRounds))
-        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Adjust my plan please.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Adjust my plan please.", model: "claude-test", apiKey: "test-key", in: context)
 
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertFalse(assistant.text.contains("chưa"), "English app must not receive Vietnamese rejection text, got: \(assistant.text)")
@@ -2990,7 +2959,7 @@ final class ChatFeatureTests: XCTestCase {
         let container = try makeContainer()
         let context = container.mainContext
         try seedTrainingData(in: context)
-        let coordinator = WorkoutReplacementCoordinator(container: container)
+        
         let moveNoTarget = ClaudeResponse(content: [
             .toolUse(id: "toolu_move", name: CoachTools.toolName, input: .object([
                 "changes": .array([.object([
@@ -3000,9 +2969,9 @@ final class ChatFeatureTests: XCTestCase {
             ]))
         ], stopReason: "tool_use")
         let client = MockClaudeClient(responses: Array(repeating: moveNoTarget, count: CoachChatConfig.maxToolRounds))
-        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today }, replacementCoordinator: coordinator)
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Move it to today.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Move it to today.", model: "claude-test", apiKey: "test-key", in: context)
 
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertTrue(assistant.text.contains("Which day should I move the workout to"), "missing move target must ask for the target day, got: \(assistant.text)")
@@ -3052,7 +3021,7 @@ final class ChatFeatureTests: XCTestCase {
         let client = MockClaudeClient(error: ClaudeClientError.connectionLost)
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Create workout tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Create workout tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
 
         let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         store.dismissFailedResponse(failed.turnID, in: context)
@@ -3072,7 +3041,7 @@ final class ChatFeatureTests: XCTestCase {
         let client = MockClaudeClient(error: ClaudeClientError.connectionLost)
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Create workout tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Create workout tomorrow.", model: "claude-test", apiKey: "test-key", in: context)
 
         let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertEqual(failed.assistantStatus, .failed)
@@ -3094,7 +3063,7 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "What should I do today?", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "What should I do today?", model: "claude-test", apiKey: "test-key", in: context)
         let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertEqual(failed.assistantStatus, .failed)
 
@@ -3121,7 +3090,7 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "What should I do today?", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "What should I do today?", model: "claude-test", apiKey: "test-key", in: context)
         let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertEqual(failed.assistantStatus, .failed)
 
@@ -3143,7 +3112,7 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "What should I do today?", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "What should I do today?", model: "claude-test", apiKey: "test-key", in: context)
         let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertEqual(failed.assistantStatus, .failed)
 
@@ -3167,7 +3136,7 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Tải tập tuần này thế nào?", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Tải tập tuần này thế nào?", model: "claude-test", apiKey: "test-key", in: context)
 
         let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertEqual(failed.assistantStatus, .failed)
@@ -3195,14 +3164,12 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "Review original run.",
-            model: "claude-test",
-            attachments: [.health, .completedActivity(activity.hkUUID)],
-            evidence: EvidenceSelection(readinessSnapshot: true, weekPlan: true, workout: .completed(activity.hkUUID)),
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "Review original run.",
+        model: "claude-test",
+        attachments: [.health, .completedActivity(activity.hkUUID)],
+        evidence: EvidenceSelection(readinessSnapshot: true, weekPlan: true, workout: .completed(activity.hkUUID)),
+        apiKey: "test-key",
+        in: context)
         let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
 
         await store.retryFailedResponse(failed.turnID, model: "claude-test", apiKey: "test-key", in: context)
@@ -3225,13 +3192,11 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(
-            text: "Review this run.",
-            model: "claude-test",
-            attachments: [.completedActivity(activity.hkUUID)],
-            apiKey: "test-key",
-            in: context
-        )
+        await store.submitTestTurn(text: "Review this run.",
+        model: "claude-test",
+        attachments: [.completedActivity(activity.hkUUID)],
+        apiKey: "test-key",
+        in: context)
         let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         context.delete(activity)
         try context.save()
@@ -3255,9 +3220,9 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "First question?", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "First question?", model: "claude-test", apiKey: "test-key", in: context)
         let olderFailed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
-        await store.send(text: "Second question?", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Second question?", model: "claude-test", apiKey: "test-key", in: context)
 
         await store.retryFailedResponse(olderFailed.turnID, model: "claude-test", apiKey: "test-key", in: context)
 
@@ -3281,7 +3246,7 @@ final class ChatFeatureTests: XCTestCase {
         ])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
-        await store.send(text: "Rebuild my week.", model: "claude-test", apiKey: "test-key", in: context)
+        await store.submitTestTurn(text: "Rebuild my week.", model: "claude-test", apiKey: "test-key", in: context)
 
         XCTAssertEqual(try context.fetch(FetchDescriptor<PlannedWorkout>()).count, before)
         XCTAssertEqual(client.requests.count, 1, "a truncated turn must not start another round")
@@ -3329,28 +3294,22 @@ final class ChatFeatureTests: XCTestCase {
     func testGoldenCase1SingleReplacementDoesNotRequireConfirmation() async throws {
         let fixture = try loadGoldenFixture(named: "01-no-double-confirm")
         let prepared = try prepareGoldenCase(fixture)
-        await prepared.store.send(
-            text: fixture.request.text,
-            model: "claude-test",
-            apiKey: "test-key",
-            threadID: prepared.threadID,
-            in: prepared.context
-        )
+        await prepared.store.submitTestTurn(text: fixture.request.text,
+        model: "claude-test",
+        apiKey: "test-key",
+        threadID: prepared.threadID,
+        in: prepared.context)
 
         try assertGoldenRouting(fixture, client: prepared.client, in: prepared.context)
+        let pending = try XCTUnwrap(prepared.store.pendingPlanCandidate)
         XCTAssertEqual(
-            WorkoutReplacementCoordinator.confirmationKind(for: PlanAdjustmentProposal(changes: [
-                .init(date: "2026-01-06", action: .replace, workout: nil)
-            ])),
-            .notRequired
+            try replacementDetails(pending).proposed.distanceKm,
+            fixture.expect.proposedDistanceKm ?? 8,
+            accuracy: 0.01
         )
-        XCTAssertEqual(prepared.coordinator.lastConfirmationKind, .notRequired)
-        XCTAssertNil(prepared.coordinator.pendingProposal)
-        let pending = try XCTUnwrap(prepared.coordinator.pending)
-        XCTAssertEqual(pending.proposed.distanceKm, fixture.expect.proposedDistanceKm ?? 8, accuracy: 0.01)
 
         let tuesday = PlanEngineTestSupport.date(2026, 1, 6)
-        prepared.coordinator.confirm(pending.id)
+        _ = prepared.store.confirmPlanCandidate(pending.id, in: prepared.context)
         let updated = try XCTUnwrap(try plannedWorkouts(on: tuesday, in: prepared.context).first)
         XCTAssertEqual(updated.distanceKm, 8, accuracy: 0.01)
         XCTAssertEqual(updated.kind, .easy)
@@ -3359,35 +3318,22 @@ final class ChatFeatureTests: XCTestCase {
     func testGoldenCase2MultiRestRequiresConfirmationBeforeApply() async throws {
         let fixture = try loadGoldenFixture(named: "02-destructive-confirmation")
         let prepared = try prepareGoldenCase(fixture)
-        await prepared.store.send(
-            text: fixture.request.text,
-            model: "claude-test",
-            apiKey: "test-key",
-            threadID: prepared.threadID,
-            in: prepared.context
-        )
+        await prepared.store.submitTestTurn(text: fixture.request.text,
+        model: "claude-test",
+        apiKey: "test-key",
+        threadID: prepared.threadID,
+        in: prepared.context)
 
         try assertGoldenRouting(fixture, client: prepared.client, in: prepared.context)
-        XCTAssertEqual(
-            WorkoutReplacementCoordinator.confirmationKind(for: PlanAdjustmentProposal(changes: [
-                .init(date: "2026-01-06", action: .rest),
-                .init(date: "2026-01-08", action: .rest),
-                .init(date: "2026-01-10", action: .rest),
-                .init(date: "2026-01-11", action: .rest)
-            ])),
-            .required
-        )
-        XCTAssertEqual(prepared.coordinator.lastConfirmationKind, .required)
-        XCTAssertNil(prepared.coordinator.pending)
-        let pendingProposal = try XCTUnwrap(prepared.coordinator.pendingProposal)
+        let pendingProposal = try XCTUnwrap(prepared.store.pendingPlanCandidate)
 
         let restDates = fixture.setup.workouts.map { fixtureDate($0.date) }
         for date in restDates {
             XCTAssertFalse(try plannedWorkouts(on: date, in: prepared.context).isEmpty)
         }
 
-        prepared.coordinator.confirmProposal(pendingProposal.id)
-        XCTAssertNil(prepared.coordinator.lastError)
+        _ = prepared.store.confirmPlanCandidate(pendingProposal.id, in: prepared.context)
+        XCTAssertNil(prepared.store.lastError)
         for date in restDates {
             XCTAssertTrue(
                 try plannedWorkouts(on: date, in: prepared.context).isEmpty,
@@ -3399,13 +3345,11 @@ final class ChatFeatureTests: XCTestCase {
     func testGoldenCase3AttachedContextIsNotRestatedAsMissing() async throws {
         let fixture = try loadGoldenFixture(named: "03-context-attached")
         let prepared = try prepareGoldenCase(fixture)
-        await prepared.store.send(
-            text: fixture.request.text,
-            model: "claude-test",
-            apiKey: "test-key",
-            threadID: prepared.threadID,
-            in: prepared.context
-        )
+        await prepared.store.submitTestTurn(text: fixture.request.text,
+        model: "claude-test",
+        apiKey: "test-key",
+        threadID: prepared.threadID,
+        in: prepared.context)
 
         try assertGoldenRouting(fixture, client: prepared.client, in: prepared.context)
         let request = try XCTUnwrap(prepared.client.requests.first)
@@ -3443,14 +3387,12 @@ final class ChatFeatureTests: XCTestCase {
     func testGoldenCase4ScannableStructuredReplyAndInvalidFallback() async throws {
         let fixture = try loadGoldenFixture(named: "04-scannable-reply")
         let prepared = try prepareGoldenCase(fixture)
-        await prepared.store.send(
-            text: fixture.request.text,
-            model: "claude-test",
-            apiKey: "test-key",
-            threadID: prepared.threadID,
-            actionTypeOverride: .readOnly,
-            in: prepared.context
-        )
+        await prepared.store.submitTestTurn(text: fixture.request.text,
+        model: "claude-test",
+        apiKey: "test-key",
+        threadID: prepared.threadID,
+        actionTypeOverride: .readOnly,
+        in: prepared.context)
 
         try assertGoldenRouting(fixture, client: prepared.client, in: prepared.context)
         let assistant = try XCTUnwrap(
@@ -3478,13 +3420,11 @@ final class ChatFeatureTests: XCTestCase {
         try seedTrainingData(in: invalidContext)
         let invalidClient = MockClaudeClient(responses: Array(repeating: invalid, count: CoachChatConfig.maxToolRounds))
         let invalidStore = CoachChatStore(client: invalidClient, calendar: calendar, now: { self.today })
-        await invalidStore.send(
-            text: fixture.request.text,
-            model: "claude-test",
-            apiKey: "test-key",
-            actionTypeOverride: .readOnly,
-            in: invalidContext
-        )
+        await invalidStore.submitTestTurn(text: fixture.request.text,
+        model: "claude-test",
+        apiKey: "test-key",
+        actionTypeOverride: .readOnly,
+        in: invalidContext)
         let failed = try XCTUnwrap(
             try invalidContext.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last { $0.role == .assistant }
         )
@@ -3496,13 +3436,11 @@ final class ChatFeatureTests: XCTestCase {
     func testGoldenCase5ChoiceCardsKeepStructuredOptionsAndFreeText() async throws {
         let fixture = try loadGoldenFixture(named: "05-options-and-free-text")
         let otherPrepared = try prepareGoldenCase(fixture, extraResponses: Array(repeating: followUpCardResponse(), count: CoachChatConfig.maxToolRounds))
-        await otherPrepared.store.send(
-            text: fixture.request.text,
-            model: "claude-test",
-            apiKey: "test-key",
-            threadID: otherPrepared.threadID,
-            in: otherPrepared.context
-        )
+        await otherPrepared.store.submitTestTurn(text: fixture.request.text,
+        model: "claude-test",
+        apiKey: "test-key",
+        threadID: otherPrepared.threadID,
+        in: otherPrepared.context)
         try assertGoldenRouting(fixture, client: otherPrepared.client, in: otherPrepared.context)
 
         let otherAssistant = try XCTUnwrap(
@@ -3523,15 +3461,13 @@ final class ChatFeatureTests: XCTestCase {
             in: otherPrepared.context
         )
         let freeText = try XCTUnwrap(fixture.expect.freeText)
-        _ = await otherPrepared.store.send(
-            text: freeText,
-            model: "claude-test",
-            apiKey: "test-key",
-            threadID: otherPrepared.threadID,
-            interactionId: interaction.id,
-            isCustomInteractionResponse: true,
-            in: otherPrepared.context
-        )
+        _ = await otherPrepared.store.submitTestTurn(text: freeText,
+        model: "claude-test",
+        apiKey: "test-key",
+        threadID: otherPrepared.threadID,
+        interactionId: interaction.id,
+        isCustomInteractionResponse: true,
+        in: otherPrepared.context)
         let otherSnapshot = try XCTUnwrap(
             try otherPrepared.context.fetch(FetchDescriptor<CoachRequestSnapshot>(sortBy: [SortDescriptor(\.createdAt)])).last
         )
@@ -3544,13 +3480,11 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertTrue(otherUserText.contains("response=other"))
 
         let selectedPrepared = try prepareGoldenCase(fixture, extraResponses: Array(repeating: followUpCardResponse(), count: CoachChatConfig.maxToolRounds))
-        await selectedPrepared.store.send(
-            text: fixture.request.text,
-            model: "claude-test",
-            apiKey: "test-key",
-            threadID: selectedPrepared.threadID,
-            in: selectedPrepared.context
-        )
+        await selectedPrepared.store.submitTestTurn(text: fixture.request.text,
+        model: "claude-test",
+        apiKey: "test-key",
+        threadID: selectedPrepared.threadID,
+        in: selectedPrepared.context)
         let selectedAssistant = try XCTUnwrap(
             try selectedPrepared.context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last { $0.role == .assistant }
         )
@@ -3562,15 +3496,13 @@ final class ChatFeatureTests: XCTestCase {
             selectedOptionId: selectedOptionID,
             in: selectedPrepared.context
         )
-        _ = await selectedPrepared.store.send(
-            text: selectedOption.value,
-            model: "claude-test",
-            apiKey: "test-key",
-            threadID: selectedPrepared.threadID,
-            interactionId: selectedInteraction.id,
-            selectedOptionId: selectedOptionID,
-            in: selectedPrepared.context
-        )
+        _ = await selectedPrepared.store.submitTestTurn(text: selectedOption.value,
+        model: "claude-test",
+        apiKey: "test-key",
+        threadID: selectedPrepared.threadID,
+        interactionId: selectedInteraction.id,
+        selectedOptionId: selectedOptionID,
+        in: selectedPrepared.context)
         let selectedSnapshot = try XCTUnwrap(
             try selectedPrepared.context.fetch(FetchDescriptor<CoachRequestSnapshot>(sortBy: [SortDescriptor(\.createdAt)])).last
         )
@@ -3736,10 +3668,10 @@ final class ChatFeatureTests: XCTestCase {
     }
 
     private struct GoldenCasePrepared {
+        let container: ModelContainer
         let context: ModelContext
         let store: CoachChatStore
         let client: MockClaudeClient
-        let coordinator: WorkoutReplacementCoordinator
         let threadID: UUID
     }
 
@@ -3748,6 +3680,16 @@ final class ChatFeatureTests: XCTestCase {
         return bundle.url(forResource: basename, withExtension: "json", subdirectory: "Fixtures/ChatCore")
             ?? bundle.url(forResource: basename, withExtension: "json", subdirectory: "ChatCore")
             ?? bundle.url(forResource: basename, withExtension: "json")
+    }
+
+    private func replacementDetails(
+        _ candidate: CoachPlanCandidate
+    ) throws -> (workoutID: UUID, existing: WorkoutReplacementSummary, proposed: WorkoutReplacementSummary) {
+        guard case .replacement(_, let existing, let proposed, _, _) = candidate.presentation,
+              let workoutID = candidate.transaction.operations.first?.before?.uuid else {
+            throw CoachTools.ValidationError("Expected replacement candidate")
+        }
+        return (workoutID, existing, proposed)
     }
 
     private func loadGoldenFixture(named basename: String) throws -> ChatGoldenFixture {
@@ -3827,22 +3769,13 @@ final class ChatFeatureTests: XCTestCase {
         var responses = try fixture.mockResponses.map(ChatCoreWireDecoder.response)
         responses.append(contentsOf: extraResponses)
         let client = MockClaudeClient(responses: responses)
-        let coordinator = WorkoutReplacementCoordinator(
-            container: container,
-            calendar: calendar,
-            now: { self.today }
-        )
-        let store = CoachChatStore(
-            client: client,
-            calendar: calendar,
-            now: { self.today },
-            replacementCoordinator: coordinator
-        )
+        
+        let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
         return GoldenCasePrepared(
+            container: container,
             context: context,
             store: store,
             client: client,
-            coordinator: coordinator,
             threadID: threadID
         )
     }

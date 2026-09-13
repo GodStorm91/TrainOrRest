@@ -1206,6 +1206,110 @@ struct IntegrationsCopy {
         }
     }
 
+    func shoeInspectionReminderTitle(_ shoeName: String) -> String {
+        switch language {
+        case .en: "Check your \(shoeName)"
+        case .ja: "\(shoeName)を確認"
+        case .vi: "Kiểm tra \(shoeName)"
+        }
+    }
+
+    func shoeInspectionReminderBody(_ distance: String) -> String {
+        switch language {
+        case .en: "\(distance) logged automatically. Check cushioning, outsole wear, and any new discomfort."
+        case .ja: "\(distance)を自動記録しました。クッション、アウトソールの摩耗、新しい違和感を確認してください。"
+        case .vi: "Đã tự động ghi \(distance). Hãy kiểm tra độ đệm, độ mòn đế ngoài và cảm giác khó chịu mới."
+        }
+    }
+
+    func shoeReplacementReminderTitle(_ shoeName: String) -> String {
+        switch language {
+        case .en: "Consider replacing \(shoeName)"
+        case .ja: "\(shoeName)の交換を検討"
+        case .vi: "Cân nhắc thay \(shoeName)"
+        }
+    }
+
+    func shoeReplacementReminderBody(_ distance: String) -> String {
+        switch language {
+        case .en: "\(distance) logged automatically — past its expected range. Retire it to stop automatic assignment."
+        case .ja: "\(distance)を自動記録し、想定範囲を超えました。自動割り当てを止めるには引退させてください。"
+        case .vi: "Đã tự động ghi \(distance) — vượt phạm vi dự kiến. Ngừng dùng để loại khỏi gán tự động."
+        }
+    }
+
+    var automaticRotation: String {
+        switch language {
+        case .en: "Automatic rotation"
+        case .ja: "自動ローテーション"
+        case .vi: "Luân phiên tự động"
+        }
+    }
+
+    var automaticRotationOn: String {
+        switch language {
+        case .en: "On"
+        case .ja: "オン"
+        case .vi: "Bật"
+        }
+    }
+
+    var automaticRotationOff: String {
+        switch language {
+        case .en: "Off"
+        case .ja: "オフ"
+        case .vi: "Tắt"
+        }
+    }
+
+    var automaticMileageExplanation: String {
+        switch language {
+        case .en: "Shoes are matched to each workout. Synced run distance is added automatically."
+        case .ja: "各ワークアウトに合うシューズを選び、同期したランの距離を自動で加算します。"
+        case .vi: "Giày được chọn theo từng buổi tập. Quãng đường chạy đã đồng bộ được tự động cộng vào."
+        }
+    }
+
+    func activeShoeCount(_ count: Int) -> String {
+        switch language {
+        case .en: count == 1 ? "1 active shoe" : "\(count) active shoes"
+        case .ja: "使用中 \(count) 足"
+        case .vi: "\(count) đôi đang dùng"
+        }
+    }
+
+    var totalLogged: String {
+        switch language {
+        case .en: "Total logged"
+        case .ja: "合計記録"
+        case .vi: "Tổng đã ghi"
+        }
+    }
+
+    var nextShoeAssignment: String {
+        switch language {
+        case .en: "Next assignment"
+        case .ja: "次の割り当て"
+        case .vi: "Lần gán tiếp theo"
+        }
+    }
+
+    func shoeAssignedForWorkout(_ shoeName: String, workoutName: String) -> String {
+        switch language {
+        case .en: "\(shoeName) for \(workoutName.lowercased())"
+        case .ja: "\(workoutName)：\(shoeName)"
+        case .vi: "\(shoeName) cho \(workoutName.lowercased())"
+        }
+    }
+
+    var mileageUpdatesAfterSync: String {
+        switch language {
+        case .en: "Future mileage updates automatically after each synced run."
+        case .ja: "今後の走行距離はランの同期後に自動更新されます。"
+        case .vi: "Quãng đường sau này tự động cập nhật sau mỗi buổi chạy được đồng bộ."
+        }
+    }
+
     var basicInformation: String {
         switch language {
         case .en: "Basic information"
@@ -1336,9 +1440,9 @@ struct IntegrationsCopy {
 
     var autoPickShoeExplanation: String {
         switch language {
-        case .en: "When a workout does not already have a shoe, TrainOrRest can choose one based on workout type and your shoe preferences."
-        case .ja: "ワークアウトにシューズがまだない場合、TrainOrRestはワークアウト種別とシューズ設定に基づいて選択できます。"
-        case .vi: "Khi một buổi tập chưa có giày, TrainOrRest có thể chọn dựa trên loại buổi tập và tùy chọn giày của bạn."
+        case .en: "TrainOrRest assigns planned workouts by type, fills unmatched synced runs, and updates shoe mileage automatically."
+        case .ja: "TrainOrRestは予定されたワークアウトを種別で割り当て、未割り当ての同期ランを補完し、走行距離を自動更新します。"
+        case .vi: "TrainOrRest gán buổi tập đã lên kế hoạch theo loại, bổ sung các buổi chạy đồng bộ chưa có giày và tự động cập nhật quãng đường."
         }
     }
 

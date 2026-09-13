@@ -14,7 +14,6 @@ struct TrainOrRestApp: App {
     @StateObject private var googleCalendarService: GoogleCalendarSyncService
     @StateObject private var chatStore: CoachChatStore
     @StateObject private var chatSession: CoachChatSessionState
-    @StateObject private var replacementCoordinator: WorkoutReplacementCoordinator
     @StateObject private var runSchedule: RunScheduleController
     @Environment(\.scenePhase) private var scenePhase
 
@@ -38,8 +37,7 @@ struct TrainOrRestApp: App {
         self.container = container
         let pushService = WorkoutPushService(modelContext: container.mainContext)
         let googleCalendarService = GoogleCalendarSyncService(modelContext: container.mainContext)
-        let replacementCoordinator = WorkoutReplacementCoordinator(container: container)
-        let chatStore = CoachChatStore(replacementCoordinator: replacementCoordinator)
+        let chatStore = CoachChatStore()
         let chatSession = CoachChatSessionState()
 #if DEBUG
         if let seededThreadID = DevSeed.seedIfRequested(container.mainContext) {
@@ -62,7 +60,6 @@ struct TrainOrRestApp: App {
         _chatStore = StateObject(wrappedValue: chatStore)
         _chatSession = StateObject(wrappedValue: chatSession)
         _runSchedule = StateObject(wrappedValue: RunScheduleController())
-        _replacementCoordinator = StateObject(wrappedValue: replacementCoordinator)
 
         // Background tasks must be registered before launch finishes.
         BGTaskScheduler.shared.register(
@@ -80,7 +77,6 @@ struct TrainOrRestApp: App {
                 .environmentObject(googleCalendarService)
                 .environmentObject(chatStore)
                 .environmentObject(chatSession)
-                .environmentObject(replacementCoordinator)
                 .environmentObject(runSchedule)
         }
         .modelContainer(container)
@@ -261,17 +257,18 @@ private struct DevCoachLiveView: View {
     @State private var fired = false
 
     var body: some View {
-        ChatView()
+        let workoutID = DevSeed.liveEditWorkoutID(modelContext)
+        ChatView(contextualWorkoutID: workoutID)
             .task {
                 guard DevSeed.isLiveRequested, !fired else { return }
                 fired = true
                 guard let threadID = chatSession.activeThreadID else { return }
-                _ = await chatStore.send(
-                    text: DevSeed.livePrompt,
-                    model: model,
-                    threadID: threadID,
-                    in: modelContext
-                )
+                var request = CoachTurnRequest(text: DevSeed.livePrompt, model: model, threadID: threadID)
+                if let workoutID {
+                    request.attachments = [.plannedWorkout(workoutID)]
+                    request.evidence = EvidenceSelection(readinessSnapshot: true, weekPlan: true, workout: .planned(workoutID), hasPhoto: false)
+                }
+                _ = await chatStore.submit(request, in: modelContext)
             }
     }
 }
