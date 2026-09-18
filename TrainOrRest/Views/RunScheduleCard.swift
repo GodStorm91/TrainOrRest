@@ -67,9 +67,12 @@ struct TodayWeatherEvidenceRow: View {
                 .accessibilityHint(language.plan.weatherRetry)
             } else if let weather {
                 let summary = weather.summary(language: language)
-                Label(summary, systemImage: weather.glyph.systemImage)
-                    .foregroundStyle(RunScheduleCard.color(for: weather.glyph))
-                    .accessibilityLabel(summary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(summary, systemImage: weather.glyph.systemImage)
+                        .foregroundStyle(RunScheduleCard.color(for: weather.glyph))
+                        .accessibilityLabel(summary)
+                    AppleWeatherAttributionRow(language: language)
+                }
             } else {
                 Button(action: onRetry) {
                     Label(language.plan.weatherOnNoForecast, systemImage: "questionmark.circle")
@@ -81,5 +84,19 @@ struct TodayWeatherEvidenceRow: View {
         .font(.footnote.weight(.medium))
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+struct AppleWeatherAttributionRow: View {
+    var language: CoachLanguage
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(language.plan.appleWeatherMark)
+            Link(language.plan.weatherLegalSource, destination: WeatherDataAttribution.legalPageURL)
+        }
+        .font(.caption.weight(.medium))
+        .foregroundStyle(Theme.dim)
+        .accessibilityElement(children: .contain)
     }
 }

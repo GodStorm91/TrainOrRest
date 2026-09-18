@@ -86,6 +86,23 @@ final class RunScheduleTests: XCTestCase {
         XCTAssertTrue(PlanCopy(language: .vi).slotWeatherSummary(weather).hasPrefix("Trời ổn để chạy"))
     }
 
+    func testAppleWeatherAttributionShowsTrademarkAndLegalSource() {
+        XCTAssertEqual(
+            WeatherDataAttribution.legalPageURL.absoluteString,
+            "https://developer.apple.com/weatherkit/data-source-attribution/"
+        )
+        for language in CoachLanguage.allCases {
+            let copy = PlanCopy(language: language)
+            XCTAssertEqual(copy.appleWeatherMark, " Weather")
+            XCTAssertFalse(copy.weatherLegalSource.isEmpty)
+            XCTAssertTrue(copy.weatherAttributionAccessibility.contains(" Weather"))
+            XCTAssertTrue(copy.weatherAttributionAccessibility.contains(copy.weatherLegalSource))
+        }
+        XCTAssertEqual(PlanCopy(language: .en).weatherLegalSource, "Other data sources")
+        XCTAssertEqual(PlanCopy(language: .ja).weatherLegalSource, "その他のデータソース")
+        XCTAssertEqual(PlanCopy(language: .vi).weatherLegalSource, "Nguồn dữ liệu khác")
+    }
+
     func testRainToleranceCopyStatesTheCutoff() {
         let copy = PlanCopy(language: .en)
         XCTAssertEqual(copy.rainStanceLabel(.low), "Avoid rain")

@@ -326,6 +326,7 @@ struct WorkoutDetailView: View {
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(RunScheduleCard.color(for: weather.glyph))
                     .fixedSize(horizontal: false, vertical: true)
+                AppleWeatherAttributionRow(language: language)
             }
             Label(language.plan.syncedWhenAvailable, systemImage: "checkmark")
                 .font(.caption)

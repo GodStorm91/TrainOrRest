@@ -218,6 +218,7 @@ struct RunScheduleSetupSheet: View {
             .font(.footnote.weight(.medium))
             .foregroundStyle(Theme.text)
             .fixedSize(horizontal: false, vertical: true)
+            AppleWeatherAttributionRow(language: language)
         } else {
             Text(language.plan.weatherOnNoForecast)
                 .font(.footnote.weight(.medium))

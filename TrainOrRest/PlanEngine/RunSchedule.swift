@@ -88,6 +88,10 @@ enum WeatherForecastingError: Error, Equatable {
     case unavailable
 }
 
+enum WeatherDataAttribution {
+    static let legalPageURL = URL(string: "https://developer.apple.com/weatherkit/data-source-attribution/")!
+}
+
 protocol WeatherForecasting: Sendable {
     func forecast(at latitude: Double, longitude: Double, from start: Date, days: Int) async throws -> [HourlyWeatherSample]
 }
