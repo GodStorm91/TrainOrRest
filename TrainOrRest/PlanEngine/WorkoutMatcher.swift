@@ -74,7 +74,12 @@ enum WorkoutMatcher {
         let candidates = activities.filter { !planned.dismissedActivityIDs.contains($0.id) }
         guard !candidates.isEmpty else { return nil }
         guard let expected = planned.expectedDurationSeconds, expected > 0 else {
-            return candidates.max { ($0.durationSeconds, $1.id.uuidString) < ($1.durationSeconds, $0.id.uuidString) }?.id
+            return candidates.max {
+                if $0.durationSeconds != $1.durationSeconds {
+                    return $0.durationSeconds < $1.durationSeconds
+                }
+                return $0.id.uuidString > $1.id.uuidString
+            }?.id
         }
         return candidates.min {
             let leftDeviation = abs($0.durationSeconds - expected) / expected

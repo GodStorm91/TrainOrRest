@@ -119,11 +119,18 @@ enum PlanStore {
     }
 
     static func link(_ activity: CompletedActivity, to workout: PlannedWorkout, in context: ModelContext) throws {
-        guard workout.matchedActivityUUID != activity.hkUUID else { return }
-
         let workouts = try context.fetch(FetchDescriptor<PlannedWorkout>())
         guard !workouts.contains(where: { $0.uuid != workout.uuid && $0.matchedActivityUUID == activity.hkUUID }) else {
             throw LinkError.activityAlreadyLinked
+        }
+        if workout.matchedActivityUUID == activity.hkUUID {
+            workout.clearLinkDismissal(activity.hkUUID)
+            workout.status = .done
+            workout.manuallyOverridden = true
+            try copyPlannedShoe(from: workout, to: activity, in: context)
+            try context.save()
+            NotificationCenter.default.post(name: .planDidChange, object: nil)
+            return
         }
         if workout.matchedActivityUUID != nil {
             try unlink(workout, in: context)

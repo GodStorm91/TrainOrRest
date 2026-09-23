@@ -65,4 +65,14 @@ final class WorkoutMatcherLinkTests: XCTestCase {
 
         XCTAssertEqual(suggestion, longer.id)
     }
+
+    func testSuggestionWithoutExpectedDurationBreaksDurationTiesByID() {
+        let workout = planned(expectedMinutes: nil)
+        let higherID = activity(UUID(uuidString: "00000000-0000-0000-0000-000000000002")!, minutes: 70)
+        let lowerID = activity(UUID(uuidString: "00000000-0000-0000-0000-000000000001")!, minutes: 70)
+
+        let suggestion = WorkoutMatcher.suggestion(for: workout, among: [higherID, lowerID])
+
+        XCTAssertEqual(suggestion, lowerID.id)
+    }
 }

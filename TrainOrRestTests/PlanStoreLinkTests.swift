@@ -61,6 +61,26 @@ final class PlanStoreLinkTests: XCTestCase {
         XCTAssertNil(workout.dismissedActivityUUIDs)
     }
 
+    func testManualLinkNormalizesAlreadyMatchedDismissedState() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let workout = makeWorkout()
+        let run = makeRun()
+        workout.status = .planned
+        workout.matchedActivityUUID = run.hkUUID
+        workout.dismissLink(run.hkUUID)
+        context.insert(workout)
+        context.insert(run)
+        try context.save()
+
+        try PlanStore.link(run, to: workout, in: context)
+
+        XCTAssertEqual(workout.status, .done)
+        XCTAssertEqual(workout.matchedActivityUUID, run.hkUUID)
+        XCTAssertTrue(workout.manuallyOverridden)
+        XCTAssertFalse(workout.isLinkDismissed(run.hkUUID))
+    }
+
     func testDismissSuggestionPersistsWithoutChangingPlanStatus() throws {
         let container = try makeContainer()
         let context = container.mainContext
