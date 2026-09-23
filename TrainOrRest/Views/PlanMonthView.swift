@@ -14,6 +14,7 @@ struct PlanMonthView: View {
     var onConfigureWeather: () -> Void = {}
     var showsTodaysCall = true
     var displaysOnlyTodaysCall = false
+    var phaseRibbon: PlanPhaseRibbonModel? = nil
     @Query(sort: \RunningShoe.createdAt, order: .reverse) private var shoes: [RunningShoe]
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -22,6 +23,10 @@ struct PlanMonthView: View {
     private let calendar = Calendar.current
     @ScaledMetric(relativeTo: .caption2) private var railWidth: CGFloat = 52
     private let summaryGutterWidth: CGFloat = 13
+    private var regularMonthContentMaxWidth: CGFloat {
+        7 * 96 + summaryGutterWidth + railWidth
+    }
+
 
     var body: some View {
         if displaysOnlyTodaysCall {
@@ -39,12 +44,29 @@ struct PlanMonthView: View {
                         todaysCall
                     }
                     monthNav
+                    if let phaseRibbon {
+                        PlanPhaseRibbonView(
+                            model: phaseRibbon,
+                            language: language,
+                            onSelectWeek: selectPlanWeek
+                        )
+                        .frame(
+                            maxWidth: horizontalSizeClass == .regular
+                                ? regularMonthContentMaxWidth
+                                : .infinity,
+                            alignment: .leading
+                        )
+                        .frame(
+                            maxWidth: .infinity,
+                            alignment: horizontalSizeClass == .regular ? .center : .leading
+                        )
+                    }
                     if horizontalSizeClass == .regular {
                         VStack(alignment: .leading, spacing: 8) {
                             weekdayRow
                             grid(index)
                         }
-                        .frame(maxWidth: 7 * 96 + summaryGutterWidth + railWidth, alignment: .leading)
+                        .frame(maxWidth: regularMonthContentMaxWidth, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .center)
                     } else {
                         weekdayRow
@@ -94,6 +116,14 @@ struct PlanMonthView: View {
     private func shiftMonth(_ delta: Int) {
         guard let next = calendar.date(byAdding: .month, value: delta, to: monthAnchor) else { return }
         withAnimation(.easeOut(duration: 0.2)) { monthAnchor = next }
+    }
+
+    private func selectPlanWeek(_ weekIndex: Int) {
+        guard let weekStart = phaseRibbon?.weekStart(for: weekIndex) else { return }
+        withAnimation(.easeOut(duration: 0.2)) {
+            selectedDate = weekStart
+            monthAnchor = weekStart
+        }
     }
 
     // MARK: - Grid
