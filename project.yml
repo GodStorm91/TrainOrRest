@@ -43,6 +43,10 @@ targets:
           resting heart rate, VO2 max, walking and running distance, and sleep
           from Apple Health to calculate readiness and build or adapt your
           training plan.
+        NSHealthUpdateUsageDescription: >-
+          TrainOrRest never writes data to Apple Health. It only reads your
+          workouts and wellness data to calculate readiness and adapt your
+          training plan.
         NSLocationWhenInUseUsageDescription: >-
           TrainOrRest uses your location to check weather for the hours you run.
         NSLocationUsageDescription: >-
