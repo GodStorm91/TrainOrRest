@@ -13,6 +13,7 @@ enum WorkoutMatcher {
         /// Estimated duration from distance × mid pace; nil when the workout
         /// has no pace band to estimate from.
         var expectedDurationSeconds: Double?
+        var dismissedActivityIDs: Set<UUID> = []
     }
 
     struct ActivityRef: Equatable {
@@ -44,7 +45,7 @@ enum WorkoutMatcher {
             for workout in orderedPlanned {
                 guard let expected = workout.expectedDurationSeconds, expected > 0 else { continue }
                 let best = candidates
-                    .filter { !usedActivities.contains($0.id) }
+                    .filter { !usedActivities.contains($0.id) && !workout.dismissedActivityIDs.contains($0.id) }
                     .map { (activity: $0, deviation: abs($0.durationSeconds - expected) / expected) }
                     .filter { $0.deviation <= durationTolerance }
                     .min { ($0.deviation, $0.activity.id.uuidString) < ($1.deviation, $1.activity.id.uuidString) }
@@ -57,12 +58,28 @@ enum WorkoutMatcher {
             // Fallback: a lone run on a day with one unmatched workout counts.
             let unmatchedPlanned = orderedPlanned.filter { assignments[$0.id] == nil }
             let freeActivities = candidates.filter { !usedActivities.contains($0.id) }
-            if unmatchedPlanned.count == 1, freeActivities.count == 1,
-               let workout = unmatchedPlanned.first, let activity = freeActivities.first {
+            if unmatchedPlanned.count == 1,
+               let workout = unmatchedPlanned.first,
+               freeActivities.count == 1,
+               let activity = freeActivities.first,
+               !workout.dismissedActivityIDs.contains(activity.id) {
                 assignments[workout.id] = activity.id
                 usedActivities.insert(activity.id)
             }
         }
         return assignments
+    }
+
+    static func suggestion(for planned: PlannedRef, among activities: [ActivityRef]) -> UUID? {
+        let candidates = activities.filter { !planned.dismissedActivityIDs.contains($0.id) }
+        guard !candidates.isEmpty else { return nil }
+        guard let expected = planned.expectedDurationSeconds, expected > 0 else {
+            return candidates.max { ($0.durationSeconds, $1.id.uuidString) < ($1.durationSeconds, $0.id.uuidString) }?.id
+        }
+        return candidates.min {
+            let leftDeviation = abs($0.durationSeconds - expected) / expected
+            let rightDeviation = abs($1.durationSeconds - expected) / expected
+            return (leftDeviation, $0.id.uuidString) < (rightDeviation, $1.id.uuidString)
+        }?.id
     }
 }
