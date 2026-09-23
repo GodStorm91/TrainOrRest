@@ -22,10 +22,43 @@ struct PlanMonthView: View {
     private let calendar = Calendar.current
     @ScaledMetric(relativeTo: .caption2) private var railWidth: CGFloat = 52
     private let summaryGutterWidth: CGFloat = 13
+    private enum SelectedDateFocus: Equatable {
+        case today
+        case otherDay
+    }
+    private enum ScrollTarget: Hashable {
+        case selectedDayDetail
+    }
+    private struct DayTrainingGroup {
+        let plannedWorkouts: [PlannedWorkout]
+        let completedActivity: CompletedActivity?
+        let confirmedMatchedPlan: PlannedWorkout?
+
+        init(plannedWorkouts: [PlannedWorkout], completedActivity: CompletedActivity?) {
+            self.plannedWorkouts = plannedWorkouts
+            self.completedActivity = completedActivity
+            confirmedMatchedPlan = completedActivity.flatMap { activity in
+                plannedWorkouts.first { $0.matchedActivityUUID == activity.hkUUID }
+            }
+        }
+
+        var remainingPlannedWorkouts: [PlannedWorkout] {
+            guard let confirmedMatchedPlan else { return plannedWorkouts }
+            return plannedWorkouts.filter { $0.uuid != confirmedMatchedPlan.uuid }
+        }
+    }
+
+
+    private var selectedDateFocus: SelectedDateFocus {
+        calendar.isDateInToday(selectedDate) ? .today : .otherDay
+    }
+
 
     var body: some View {
         if displaysOnlyTodaysCall {
-            todaysCall
+            if selectedDateFocus == .today {
+                todaysCall
+            }
         } else {
             let index = MonthIndex(
                 anchor: monthAnchor,
@@ -33,30 +66,36 @@ struct PlanMonthView: View {
                 activities: completedActivities,
                 calendar: calendar
             )
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if showsTodaysCall {
-                        todaysCall
-                    }
-                    monthNav
-                    if horizontalSizeClass == .regular {
-                        VStack(alignment: .leading, spacing: 8) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if showsTodaysCall && selectedDateFocus == .today {
+                            todaysCall
+                        }
+                        monthNav
+                        if horizontalSizeClass == .regular {
+                            VStack(alignment: .leading, spacing: 8) {
+                                weekdayRow
+                                grid(index)
+                            }
+                            .frame(maxWidth: 7 * 96 + summaryGutterWidth + railWidth, alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                        } else {
                             weekdayRow
                             grid(index)
                         }
-                        .frame(maxWidth: 7 * 96 + summaryGutterWidth + railWidth, alignment: .leading)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                    } else {
-                        weekdayRow
-                        grid(index)
+                        selectedDayDetail
+                            .id(ScrollTarget.selectedDayDetail)
                     }
-                    selectedDayDetail
+                    .padding(.horizontal, 16)
+                    .padding(.top, 6)
+                    .padding(.bottom, 24)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 6)
-                .padding(.bottom, 24)
+                .scrollIndicators(.hidden)
+                .onChange(of: selectedDate) { _, newValue in
+                    scrollToSelectedDay(proxy, selectedDate: newValue)
+                }
             }
-            .scrollIndicators(.hidden)
         }
     }
 
@@ -70,6 +109,18 @@ struct PlanMonthView: View {
                 .foregroundStyle(Theme.text)
                 .contentTransition(.numericText())
             navButton("chevron.right") { shiftMonth(1) }
+            if selectedDateFocus == .otherDay {
+                Button {
+                    selectToday()
+                } label: {
+                    Text(language.todayLabel)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Theme.accent)
+                        .frame(minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(language.todayLabel)
+            }
             Spacer()
         }
     }
@@ -94,6 +145,23 @@ struct PlanMonthView: View {
     private func shiftMonth(_ delta: Int) {
         guard let next = calendar.date(byAdding: .month, value: delta, to: monthAnchor) else { return }
         withAnimation(.easeOut(duration: 0.2)) { monthAnchor = next }
+    }
+
+    private func selectToday() {
+        let today = calendar.startOfDay(for: .now)
+        withAnimation(.easeOut(duration: 0.2)) {
+            monthAnchor = today
+            selectedDate = today
+        }
+    }
+
+    private func scrollToSelectedDay(_ proxy: ScrollViewProxy, selectedDate: Date) {
+        guard !calendar.isDateInToday(selectedDate) else { return }
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo(ScrollTarget.selectedDayDetail, anchor: .top)
+            }
+        }
     }
 
     // MARK: - Grid
@@ -162,15 +230,24 @@ struct PlanMonthView: View {
         } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isToday || isSelected ? Theme.chip : Color.clear)
+                    .fill(cellFill(isToday: isToday, isSelected: isSelected))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .strokeBorder(cellBorder(isToday: isToday, isSelected: isSelected), lineWidth: 1)
                     )
+                    .overlay(alignment: .topTrailing) {
+                        if isToday && isSelected {
+                            Circle()
+                                .fill(Theme.text)
+                                .frame(width: 5, height: 5)
+                                .padding(6)
+                                .accessibilityHidden(true)
+                        }
+                    }
                 VStack(spacing: 5) {
                     Text("\(calendar.component(.day, from: date))")
                         .font(.subheadline.weight(.bold))
-                        .foregroundStyle(numberColor(isToday: isToday, isPast: isPast, hasWorkout: kind != nil))
+                        .foregroundStyle(numberColor(isToday: isToday, isSelected: isSelected, isPast: isPast, hasWorkout: kind != nil))
                     dayMark(kind: kind, isPast: isPast)
                 }
             }
@@ -179,6 +256,7 @@ struct PlanMonthView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel(date, kind: kind, isToday: isToday))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private func dayMark(kind: WorkoutKind?, isPast: Bool) -> some View {
@@ -194,13 +272,20 @@ struct PlanMonthView: View {
         .frame(height: 12)
     }
 
-    private func cellBorder(isToday: Bool, isSelected: Bool) -> Color {
-        if isToday { return Theme.text }
-        if isSelected { return Theme.border }
+    private func cellFill(isToday: Bool, isSelected: Bool) -> Color {
+        if isSelected { return Theme.accentSoft }
+        if isToday { return Theme.chip }
         return .clear
     }
 
-    private func numberColor(isToday: Bool, isPast: Bool, hasWorkout: Bool) -> Color {
+    private func cellBorder(isToday: Bool, isSelected: Bool) -> Color {
+        if isSelected { return Theme.accent }
+        if isToday { return Theme.text }
+        return .clear
+    }
+
+    private func numberColor(isToday: Bool, isSelected: Bool, isPast: Bool, hasWorkout: Bool) -> Color {
+        if isSelected { return Theme.accent }
         if isToday { return Theme.text }
         if isPast { return Theme.faint }
         return hasWorkout ? Theme.text : Theme.dim
@@ -218,57 +303,70 @@ struct PlanMonthView: View {
     @ViewBuilder
     private var todaysCall: some View {
         let today = calendar.startOfDay(for: .now)
-        let dayWorkouts = workouts(on: today)
-        let activity = completedActivity(on: today)
+        let group = dayTrainingGroup(on: today)
         if verticalSizeClass == .compact {
             VStack(alignment: .leading, spacing: 8) {
-                compactTodaysCall(activity: activity, workout: dayWorkouts.first)
-                weatherEvidence(on: today, workout: dayWorkouts.first)
+                compactTodaysCall(activity: group.completedActivity, workout: group.plannedWorkouts.first)
+                if group.completedActivity != nil {
+                    ForEach(group.remainingPlannedWorkouts) { workout in
+                        stillPlannedCard(workout, scopeLabel: language.plan.stillPlannedToday)
+                    }
+                }
+                weatherEvidence(on: today, workout: group.plannedWorkouts.first)
             }
         } else {
             VStack(alignment: .leading, spacing: 10) {
-                TorEyebrow(language.plan.todayCall).tracking(2)
-                if let activity {
+                TorEyebrow(language.plan.todayCall)
+                    .tracking(2)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityLabel(language.plan.todayCall)
+                if let activity = group.completedActivity {
+                    scopeHeader(language.plan.completedToday)
                     CalendarRunSummaryCard(
                         activity: activity,
-                        plannedWorkout: matchedWorkout(for: activity) ?? dayWorkouts.first,
+                        plannedWorkout: group.confirmedMatchedPlan,
                         compact: false,
                         reviewDestination: ChatView(contextualCompletedActivityID: activity.hkUUID),
                         onReview: { onReviewRunInChat(activity) }
                     )
-                    ForEach(dayWorkouts) { workout in
-                        detailCard(workout)
+                    ForEach(group.remainingPlannedWorkouts) { workout in
+                        stillPlannedCard(workout, scopeLabel: language.plan.stillPlannedToday)
                     }
                 } else {
-                    todaysCallHero(workout: dayWorkouts.first)
+                    todaysCallHero(workout: group.plannedWorkouts.first)
                 }
-                weatherEvidence(on: today, workout: dayWorkouts.first)
+                weatherEvidence(on: today, workout: group.plannedWorkouts.first)
             }
         }
     }
     @ViewBuilder
     private var selectedDayDetail: some View {
-        if !calendar.isDateInToday(selectedDate) {
-            let dayWorkouts = workouts(on: selectedDate)
-            let activity = completedActivity(on: selectedDate)
+        if selectedDateFocus == .otherDay {
+            let group = dayTrainingGroup(on: selectedDate)
             VStack(alignment: .leading, spacing: 10) {
+                TorEyebrow(selectedDayEyebrow)
+                    .tracking(2)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityLabel(selectedDayEyebrow)
                 if runSchedule.showsWeatherOverlay || runSchedule.needsWeatherSetup {
-                    weatherEvidence(on: selectedDate, workout: dayWorkouts.first)
+                    weatherEvidence(on: selectedDate, workout: group.plannedWorkouts.first)
                 }
-                TorEyebrow(selectedDayEyebrow).tracking(2)
-                if let activity {
+                if let activity = group.completedActivity {
+                    scopeHeader(language.plan.completedOnSelectedDay)
                     CalendarRunSummaryCard(
                         activity: activity,
-                        plannedWorkout: matchedWorkout(for: activity) ?? dayWorkouts.first,
+                        plannedWorkout: group.confirmedMatchedPlan,
                         compact: false,
                         reviewDestination: ChatView(contextualCompletedActivityID: activity.hkUUID),
                         onReview: { onReviewRunInChat(activity) }
                     )
-                }
-                if dayWorkouts.isEmpty && activity == nil {
+                    ForEach(group.remainingPlannedWorkouts) { workout in
+                        stillPlannedCard(workout, scopeLabel: language.plan.stillPlannedOnSelectedDay)
+                    }
+                } else if group.plannedWorkouts.isEmpty {
                     restCard
                 } else {
-                    ForEach(dayWorkouts) { workout in
+                    ForEach(group.plannedWorkouts) { workout in
                         detailCard(workout)
                     }
                 }
@@ -582,6 +680,14 @@ struct PlanMonthView: View {
         language.longDate(selectedDate)
     }
 
+    private func scopeHeader(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Theme.dim)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityLabel(text)
+    }
+
     private func detailCard(_ workout: PlannedWorkout) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
@@ -620,6 +726,55 @@ struct PlanMonthView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(Theme.border, lineWidth: 1)
+        )
+    }
+
+    private func stillPlannedCard(_ workout: PlannedWorkout, scopeLabel: String) -> some View {
+        let workoutName = workout.kind.map(language.name) ?? language.genericRunLabel
+        let metrics = subtitle(workout)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            Text(scopeLabel)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.dim)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityLabel(scopeLabel)
+
+            HStack(spacing: 10) {
+                Image(systemName: workout.kind?.symbolName ?? "figure.run")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(workout.kind?.styleColor ?? Theme.accent)
+                    .frame(width: 36, height: 36)
+                    .background(
+                        Theme.soft(workout.kind?.styleColor ?? Theme.accent),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(workoutName)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(Theme.text)
+                    Text(metrics)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Theme.dim)
+                }
+                Spacer(minLength: 8)
+            }
+
+            actionRow(workout)
+        }
+        .padding(12)
+        .background(Theme.chip, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(
+            language.plan.stillPlannedAccessibility(
+                scope: scopeLabel,
+                workout: workoutName,
+                metrics: metrics
+            )
         )
     }
 
@@ -778,17 +933,19 @@ struct PlanMonthView: View {
 
     // MARK: - Helpers
 
+    private func dayTrainingGroup(on date: Date) -> DayTrainingGroup {
+        DayTrainingGroup(
+            plannedWorkouts: workouts(on: date),
+            completedActivity: completedActivity(on: date)
+        )
+    }
+
     private func workouts(on date: Date) -> [PlannedWorkout] {
         workouts.filter { calendar.isDate($0.date, inSameDayAs: date) }
     }
 
     private func completedActivity(on date: Date) -> CompletedActivity? {
         completedActivities.first { calendar.isDate($0.date, inSameDayAs: date) }
-    }
-
-    private func matchedWorkout(for activity: CompletedActivity) -> PlannedWorkout? {
-        workouts.first(where: { $0.matchedActivityUUID == activity.hkUUID })
-            ?? workouts(on: activity.date).first { !$0.isLinkDismissed(activity.hkUUID) }
     }
 
     private func assignedShoe(for workout: PlannedWorkout) -> RunningShoe? {

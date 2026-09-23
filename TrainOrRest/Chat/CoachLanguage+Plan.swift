@@ -41,6 +41,7 @@ struct PlanCopy {
     var googleSyncingAccessibility: String { text(en: "Google Calendar syncing", ja: "Google カレンダーを同期中", vi: "Đang đồng bộ Google Calendar") }
     var googleReconnectAccessibility: String { text(en: "Google Calendar needs reconnect", ja: "Google カレンダーの再接続が必要", vi: "Google Calendar cần kết nối lại") }
     var manageGoogleSyncAccessibility: String { text(en: "Manage Google Calendar sync", ja: "Google カレンダーの同期を管理", vi: "Quản lý đồng bộ Google Calendar") }
+    var dismissGoogleCalendarStatusAccessibility: String { text(en: "Dismiss Google Calendar status", ja: "Google カレンダーのステータスを閉じる", vi: "Đóng trạng thái Google Calendar") }
     var noWorkoutsToSync: String { text(en: "Nothing to sync right now.", ja: "現在同期するワークアウトはありません。", vi: "Hiện không có buổi tập nào để đồng bộ.") }
     var retry: String { text(en: "Retry", ja: "再試行", vi: "Thử lại") }
     var retryIntervalsAccessibility: String { text(en: "Retry intervals.icu sync", ja: "intervals.icuの同期を再試行", vi: "Thử lại đồng bộ intervals.icu") }
@@ -52,16 +53,35 @@ struct PlanCopy {
     func coachUpdatedWorkout(_ summary: String) -> String { text(en: "Coach updated 1 workout · \(summary)", ja: "Coachが1件のワークアウトを更新・\(summary)", vi: "Coach đã cập nhật 1 buổi tập · \(summary)") }
     var undo: String { text(en: "Undo", ja: "元に戻す", vi: "Hoàn tác") }
     var undoCoachWorkoutChangeAccessibility: String { text(en: "Undo Coach workout change", ja: "Coachによるワークアウト変更を元に戻す", vi: "Hoàn tác thay đổi buổi tập của Coach") }
+    var dismissRecentCoachChangesAccessibility: String { text(en: "Dismiss recent Coach changes", ja: "最近のCoachによる変更を閉じる", vi: "Đóng các thay đổi gần đây của Coach") }
     func workoutChangeSummary(beforeKind: String, beforeDistance: String, afterKind: String, afterDistance: String) -> String { "\(beforeKind) \(beforeDistance) km → \(afterKind) \(afterDistance) km" }
 
     // MARK: - Month and week views
 
     var todayCall: String { text(en: "Today's call", ja: "今日のメニュー", vi: "Buổi tập hôm nay") }
     var completedRun: String { text(en: "Completed run", ja: "完了したラン", vi: "Buổi chạy đã hoàn thành") }
+    var completedToday: String { text(en: "Completed today", ja: "今日の完了", vi: "Đã hoàn thành hôm nay") }
+    var completedOnSelectedDay: String { text(en: "Completed on selected day", ja: "選択日の完了", vi: "Đã hoàn thành vào ngày đã chọn") }
     var recoveryAndAdaptation: String { text(en: "Recovery and adaptation", ja: "回復と適応", vi: "Hồi phục và thích nghi") }
     var sessionLabel: String { text(en: "Session", ja: "セッション", vi: "Buổi tập") }
     var autoLabel: String { text(en: "Auto", ja: "自動", vi: "Tự động") }
     var reviewWithCoach: String { text(en: "Review with Coach", ja: "Coachと振り返る", vi: "Xem lại với Coach") }
+
+    var stillPlannedToday: String {
+        text(en: "Still planned today", ja: "今日の予定のまま", vi: "Vẫn dự kiến hôm nay")
+    }
+
+    var stillPlannedOnSelectedDay: String {
+        text(en: "Still planned on selected day", ja: "選択した日の予定のまま", vi: "Vẫn dự kiến vào ngày đã chọn")
+    }
+
+    func stillPlannedAccessibility(scope: String, workout: String, metrics: String) -> String {
+        switch language {
+        case .en: "\(scope): \(workout), \(metrics)"
+        case .ja: "\(scope)、\(workout)、\(metrics)"
+        case .vi: "\(scope): \(workout), \(metrics)"
+        }
+    }
 
     func linkedRunTitle(_ name: String) -> String { text(en: "Done: \(name)", ja: "完了: \(name)", vi: "Đã hoàn thành: \(name)") }
     func planComparison(_ planText: String) -> String { text(en: "Plan \(planText)", ja: "予定 \(planText)", vi: "Kế hoạch \(planText)") }

@@ -85,6 +85,16 @@ struct HistoryCopy {
     var distance: String { switch language { case .en: "Distance"; case .ja: "距離"; case .vi: "Quãng đường" } }
     var duration: String { switch language { case .en: "Duration"; case .ja: "時間"; case .vi: "Thời lượng" } }
     var matchedPlan: String { switch language { case .en: "Matched plan"; case .ja: "一致したプラン"; case .vi: "Kế hoạch khớp" } }
+
+    var planTarget: String { switch language { case .en: "Plan target"; case .ja: "プラン目標"; case .vi: "Mục tiêu kế hoạch" } }
+
+    func planTargetAccessibility(workout: String, metrics: String) -> String {
+        switch language {
+        case .en: "Plan target: \(workout), \(metrics)"
+        case .ja: "プラン目標、\(workout)、\(metrics)"
+        case .vi: "Mục tiêu kế hoạch: \(workout), \(metrics)"
+        }
+    }
     var plannedDistance: String { switch language { case .en: "Planned distance"; case .ja: "予定距離"; case .vi: "Quãng đường dự kiến" } }
     var analysisSource: String { switch language { case .en: "Analysis source"; case .ja: "分析元"; case .vi: "Nguồn phân tích" } }
     var maximumHeartRate: String { switch language { case .en: "Maximum HR"; case .ja: "最大心拍数"; case .vi: "Nhịp tim tối đa" } }

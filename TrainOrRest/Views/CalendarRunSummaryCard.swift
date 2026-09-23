@@ -61,6 +61,10 @@ struct CalendarRunSummaryCard: View {
             }
 
             metricSummary
+
+            if let plannedWorkout {
+                planTargetRow(plannedWorkout)
+            }
         }
         .padding(compact ? 12 : 14)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -120,6 +124,58 @@ struct CalendarRunSummaryCard: View {
                 reviewAction
             }
         }
+    }
+
+    private func planTargetRow(_ workout: PlannedWorkout) -> some View {
+        let workoutName = workout.kind.map(language.name) ?? language.genericRunLabel
+        let metrics = plannedMetrics(workout)
+
+        return HStack(spacing: 8) {
+            Image(systemName: workout.kind?.symbolName ?? "figure.run")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(workout.kind?.styleColor ?? Theme.accent)
+                .frame(width: 24, height: 24)
+                .background(
+                    Theme.soft(workout.kind?.styleColor ?? Theme.accent),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+            VStack(alignment: .leading, spacing: 1) {
+                Text(language.history.planTarget)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Theme.dim)
+                Text(workoutName)
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(Theme.text)
+                Text(metrics)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(Theme.dim)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(8)
+        .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityLabel(
+            language.history.planTargetAccessibility(
+                workout: workoutName,
+                metrics: metrics
+            )
+        )
+    }
+
+    private func plannedMetrics(_ workout: PlannedWorkout) -> String {
+        var metrics = [String(format: "%.2f km", workout.distanceKm)]
+        if let paceBand = workout.paceBand {
+            metrics.append(
+                Formatters.paceBand(paceBand)
+                    .replacingOccurrences(of: " /km", with: "/km")
+            )
+        }
+        if let duration = workout.expectedDurationSeconds {
+            metrics.append("~\(Int((duration / 60).rounded())) min")
+        }
+        return metrics.joined(separator: " · ")
     }
 
     private var sourceLine: String {

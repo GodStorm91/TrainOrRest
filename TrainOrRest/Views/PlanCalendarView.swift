@@ -13,6 +13,11 @@ struct PlanCalendarView: View {
         var id: Self { self }
     }
 
+    private enum DismissibleBanner: Hashable {
+        case recentCoachChanges(String)
+        case googleCalendarStatus(String)
+    }
+
     @Query(sort: \PlannedWorkout.date) private var workouts: [PlannedWorkout]
     @Query(sort: \CompletedActivity.date, order: .reverse) private var completedActivities: [CompletedActivity]
     @Query(sort: \PlanEdit.appliedAt, order: .reverse) private var planEdits: [PlanEdit]
@@ -38,6 +43,7 @@ struct PlanCalendarView: View {
     @State private var revertError: String?
     @State private var forceSyncStatus: ForceSyncStatus?
     @State private var isShowingGoogleCalendarStatus = false
+    @State private var dismissedBanners: Set<DismissibleBanner> = []
     @State private var didCheckGoogleCalendarOnOpen = false
     @State private var isShowingRunScheduleSetup = false
 
@@ -49,17 +55,22 @@ struct PlanCalendarView: View {
                 topBar
             }
             ForceIntervalsSyncStatusView(status: forceSyncStatus, language: language, onRetry: forceSyncIntervals)
-            RecentCoachChangesView(
-                edits: recentCoachEdits,
-                error: revertError,
-                language: language,
-                onRevert: revert
-            )
+            if isBannerVisible(coachChangesBanner) {
+                RecentCoachChangesView(
+                    edits: recentCoachEdits,
+                    error: revertError,
+                    language: language,
+                    onRevert: revert,
+                    onDismiss: { dismiss(coachChangesBanner) }
+                )
+            }
             content
             // Landscape phones have ~320pt of height: the Google status lives in
             // the nav bar there instead of a pinned row, and on regular width it
             // sits in the side pane under Today's Call.
-            if horizontalSizeClass != .regular && verticalSizeClass != .compact {
+            if horizontalSizeClass != .regular,
+               verticalSizeClass != .compact,
+               isBannerVisible(googleStatusBanner) {
                 googleCalendarStatusRow
             }
         }
@@ -91,7 +102,8 @@ struct PlanCalendarView: View {
                 } label: {
                     Label(goalButtonTitle, systemImage: "target")
                 }
-                if verticalSizeClass == .compact {
+                if verticalSizeClass == .compact,
+                   isBannerVisible(googleStatusBanner) {
                     Button {
                         isShowingGoogleCalendarStatus = true
                     } label: {
@@ -99,6 +111,17 @@ struct PlanCalendarView: View {
                             .foregroundStyle(googleCalendarStatusTint)
                     }
                     .accessibilityLabel(googleCalendarAccessibilityLabel)
+                    Button {
+                        dismiss(googleStatusBanner)
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Theme.dim)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(language.plan.dismissGoogleCalendarStatusAccessibility)
                 }
             }
         }
@@ -161,7 +184,9 @@ struct PlanCalendarView: View {
                             onConfigureWeather: { isShowingRunScheduleSetup = true },
                             displaysOnlyTodaysCall: true
                         )
-                        googleCalendarStatusRow
+                        if isBannerVisible(googleStatusBanner) {
+                            googleCalendarStatusRow
+                        }
                     }
                     .padding(.bottom, 24)
                 }
@@ -213,27 +238,42 @@ struct PlanCalendarView: View {
     }
 
     private var googleCalendarStatusRow: some View {
-        Button {
-            isShowingGoogleCalendarStatus = true
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: googleCalendarStatusIcon)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(googleCalendarStatusTint)
-                Text(googleCalendarStatusText)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.dim)
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.up")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(Theme.faint)
+        HStack(spacing: 0) {
+            Button {
+                isShowingGoogleCalendarStatus = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: googleCalendarStatusIcon)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(googleCalendarStatusTint)
+                    Text(googleCalendarStatusText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.dim)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.up")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(Theme.faint)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .padding(.leading, 16)
+                .padding(.trailing, 6)
             }
-            .frame(minHeight: 44)
-            .padding(.horizontal, 16)
-            .background(Theme.card)
+            .buttonStyle(.plain)
+            .accessibilityLabel(googleCalendarAccessibilityLabel)
+
+            Button {
+                dismiss(googleStatusBanner)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Theme.dim)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(language.plan.dismissGoogleCalendarStatusAccessibility)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(googleCalendarAccessibilityLabel)
+        .background(Theme.card)
     }
 
     private var modeToggle: some View {
@@ -353,6 +393,30 @@ struct PlanCalendarView: View {
             $0.source == "coach" && $0.revertedAt == nil && $0.appliedAt >= cutoff
         }
     }
+    private var coachChangesBanner: DismissibleBanner {
+        let editSignature = recentCoachEdits.map { edit in
+            [
+                edit.id.uuidString,
+                edit.appliedAt.timeIntervalSince1970.description,
+                edit.summaryText ?? ""
+            ].joined(separator: ":")
+        }
+        .joined(separator: "|")
+        return .recentCoachChanges([editSignature, revertError ?? ""].joined(separator: "|"))
+    }
+
+    private var googleStatusBanner: DismissibleBanner {
+        guard let connection = googleConnection else {
+            return .googleCalendarStatus("none")
+        }
+        return .googleCalendarStatus([
+            connection.uuid.uuidString,
+            connection.connectionStatus.rawValue,
+            "\(pendingGoogleCalendarReviews)",
+            connection.lastSyncErrorCategoryRaw ?? "",
+            connection.lastSyncSummary ?? ""
+        ].joined(separator: "|"))
+    }
 
     private func goToToday() {
         let today = calendar.startOfDay(for: .now)
@@ -361,6 +425,16 @@ struct PlanCalendarView: View {
             selectedDate = today
         }
         weekScrollToken += 1
+    }
+
+    private func isBannerVisible(_ banner: DismissibleBanner) -> Bool {
+        !dismissedBanners.contains(banner)
+    }
+
+    private func dismiss(_ banner: DismissibleBanner) {
+        withAnimation(.easeOut(duration: 0.15)) {
+            _ = dismissedBanners.insert(banner)
+        }
     }
 
 
@@ -463,6 +537,7 @@ private struct RecentCoachChangesView: View {
     var error: String?
     let language: CoachLanguage
     var onRevert: (PlanEdit) -> Void
+    var onDismiss: () -> Void
 
     var body: some View {
         if !edits.isEmpty {
@@ -510,6 +585,15 @@ private struct RecentCoachChangesView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(language.plan.undoCoachWorkoutChangeAccessibility)
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Theme.dim)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(language.plan.dismissRecentCoachChangesAccessibility)
         }
         .padding(.leading, 12)
         .padding(.trailing, 8)
