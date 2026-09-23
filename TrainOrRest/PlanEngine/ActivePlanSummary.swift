@@ -346,7 +346,7 @@ enum ActivePlanSummaryBuilder {
         let alreadyMatched = Set(workouts.compactMap(\.matchedActivityUUID))
         let plannedRefs = workouts
             .filter { $0.status == .planned && $0.matchedActivityUUID == nil }
-            .map { WorkoutMatcher.PlannedRef(id: $0.uuid, date: $0.date, expectedDurationSeconds: $0.expectedDurationSeconds) }
+            .map(\.matcherRef)
         let activityRefs = activities
             .filter { !alreadyMatched.contains($0.hkUUID) }
             .map { WorkoutMatcher.ActivityRef(id: $0.hkUUID, date: $0.date, durationSeconds: $0.durationSeconds) }

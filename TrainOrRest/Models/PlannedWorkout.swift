@@ -19,9 +19,11 @@ final class PlannedWorkout {
     var details: String
     var structure: [WorkoutStepGroup] = []
     var statusRaw: String
-    /// Set by user actions; auto-matching never overwrites a manual decision.
+    /// Marks user-owned content that plan regeneration keeps.
     var manuallyOverridden: Bool
     var matchedActivityUUID: UUID?
+    /// Activity links the athlete explicitly rejected for this workout.
+    var dismissedActivityUUIDs: [UUID]?
     var shoeID: UUID?
     var shoeAssignmentSourceRaw: String?
     var scheduleUpdatedFromRaw: String?
@@ -43,6 +45,7 @@ final class PlannedWorkout {
         self.statusRaw = WorkoutStatus.planned.rawValue
         self.manuallyOverridden = false
         self.matchedActivityUUID = nil
+        self.dismissedActivityUUIDs = nil
         self.shoeID = nil
         self.shoeAssignmentSourceRaw = ShoeAssignmentSource.none.rawValue
         self.scheduleUpdatedFromRaw = nil
@@ -77,6 +80,31 @@ final class PlannedWorkout {
         guard let band = paceBand else { return nil }
         let midPace = (band.fastSecondsPerKm + band.slowSecondsPerKm) / 2
         return distanceKm * midPace
+    }
+
+    var matcherRef: WorkoutMatcher.PlannedRef {
+        WorkoutMatcher.PlannedRef(
+            id: uuid,
+            date: date,
+            expectedDurationSeconds: expectedDurationSeconds,
+            dismissedActivityIDs: Set(dismissedActivityUUIDs ?? [])
+        )
+    }
+
+    func isLinkDismissed(_ activityID: UUID) -> Bool {
+        dismissedActivityUUIDs?.contains(activityID) ?? false
+    }
+
+    func dismissLink(_ activityID: UUID) {
+        guard !isLinkDismissed(activityID) else { return }
+        var dismissed = dismissedActivityUUIDs ?? []
+        dismissed.append(activityID)
+        dismissedActivityUUIDs = dismissed
+    }
+
+    func clearLinkDismissal(_ activityID: UUID) {
+        let remaining = (dismissedActivityUUIDs ?? []).filter { $0 != activityID }
+        dismissedActivityUUIDs = remaining.isEmpty ? nil : remaining
     }
 
     /// When several planned rows share a calendar day, keep the one that

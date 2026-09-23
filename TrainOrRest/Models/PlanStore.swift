@@ -84,7 +84,7 @@ enum PlanStore {
     /// Only touches automatic state — manual done/skip decisions stay.
     static func autoMatch(in context: ModelContext, calendar: Calendar) throws {
         let workouts = try context.fetch(FetchDescriptor<PlannedWorkout>())
-        let candidates = workouts.filter { $0.status == .planned && !$0.manuallyOverridden }
+        let candidates = workouts.filter { $0.status == .planned }
         guard !candidates.isEmpty else { return }
 
         // Matching is same-day, so only activities inside the candidates'
@@ -95,12 +95,7 @@ enum PlanStore {
             predicate: #Predicate { $0.date >= firstDay && $0.date < lastDay }
         ))
         let alreadyMatched = Set(workouts.compactMap(\.matchedActivityUUID))
-
-        let plannedRefs = candidates.map {
-            WorkoutMatcher.PlannedRef(
-                id: $0.uuid, date: $0.date, expectedDurationSeconds: $0.expectedDurationSeconds
-            )
-        }
+        let plannedRefs = candidates.map(\.matcherRef)
         let activityRefs = activities
             .filter { !alreadyMatched.contains($0.hkUUID) }
             .map {
@@ -112,18 +107,84 @@ enum PlanStore {
         let matches = WorkoutMatcher.matches(planned: plannedRefs, activities: activityRefs, calendar: calendar)
         guard !matches.isEmpty else { return }
         for workout in candidates {
-            if let activityID = matches[workout.uuid] {
+            if let activityID = matches[workout.uuid],
+               let activity = activities.first(where: { $0.hkUUID == activityID }) {
                 workout.status = .done
                 workout.matchedActivityUUID = activityID
-                if let activity = activities.first(where: { $0.hkUUID == activityID }),
-                   activity.shoeAssignmentSource != .manual,
-                   activity.shoeAssignmentSource != .syncedProvider {
-                    activity.shoeID = workout.shoeID
-                    activity.shoeAssignmentSource = workout.shoeID == nil ? .none : workout.shoeAssignmentSource
-                    try ShoeMileageService.syncMileage(for: activity, in: context)
-                }
+                workout.manuallyOverridden = true
+                try copyPlannedShoe(from: workout, to: activity, in: context)
             }
         }
         try context.save()
+    }
+
+    static func link(_ activity: CompletedActivity, to workout: PlannedWorkout, in context: ModelContext) throws {
+        guard workout.matchedActivityUUID != activity.hkUUID else { return }
+
+        let workouts = try context.fetch(FetchDescriptor<PlannedWorkout>())
+        guard !workouts.contains(where: { $0.uuid != workout.uuid && $0.matchedActivityUUID == activity.hkUUID }) else {
+            throw LinkError.activityAlreadyLinked
+        }
+        if workout.matchedActivityUUID != nil {
+            try unlink(workout, in: context)
+        }
+
+        workout.clearLinkDismissal(activity.hkUUID)
+        workout.status = .done
+        workout.matchedActivityUUID = activity.hkUUID
+        workout.manuallyOverridden = true
+        try copyPlannedShoe(from: workout, to: activity, in: context)
+        try context.save()
+        NotificationCenter.default.post(name: .planDidChange, object: nil)
+    }
+
+    static func unlink(_ workout: PlannedWorkout, in context: ModelContext) throws {
+        guard let activityID = workout.matchedActivityUUID else { return }
+
+        let activity = try context.fetch(FetchDescriptor<CompletedActivity>()).first { $0.hkUUID == activityID }
+        workout.dismissLink(activityID)
+        workout.matchedActivityUUID = nil
+        workout.status = .planned
+        if let activity,
+           activity.shoeAssignmentSource != .manual,
+           activity.shoeAssignmentSource != .syncedProvider,
+           activity.shoeID == workout.shoeID {
+            activity.shoeID = nil
+            activity.shoeAssignmentSource = .none
+            try ShoeMileageService.syncMileage(for: activity, in: context)
+        }
+        try context.save()
+        NotificationCenter.default.post(name: .planDidChange, object: nil)
+    }
+
+    static func dismissSuggestion(
+        _ activity: CompletedActivity,
+        for workout: PlannedWorkout,
+        in context: ModelContext
+    ) throws {
+        workout.dismissLink(activity.hkUUID)
+        try context.save()
+    }
+
+    private static func copyPlannedShoe(
+        from workout: PlannedWorkout,
+        to activity: CompletedActivity,
+        in context: ModelContext
+    ) throws {
+        guard activity.shoeAssignmentSource != .manual,
+              activity.shoeAssignmentSource != .syncedProvider
+        else { return }
+
+        activity.shoeID = workout.shoeID
+        activity.shoeAssignmentSource = workout.shoeID == nil ? .none : workout.shoeAssignmentSource
+        try ShoeMileageService.syncMileage(for: activity, in: context)
+    }
+
+    private enum LinkError: LocalizedError {
+        case activityAlreadyLinked
+
+        var errorDescription: String? {
+            "This run is already linked to another workout."
+        }
     }
 }
