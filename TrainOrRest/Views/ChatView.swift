@@ -490,17 +490,9 @@ struct ChatView: View {
 
             Divider().overlay(Theme.border)
 
-            HStack(spacing: 10) {
-                Image(systemName: todayWorkout?.kind?.symbolName ?? "figure.run")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.data)
-                    .frame(width: 24, height: 24)
-                    .background(Theme.data.opacity(0.12), in: Circle())
-                Text(todayPlannedWorkoutText)
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(Theme.text)
-                Spacer()
-            }
+            todayRunLinkRow
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: todayRunLink)
+                .transition(.opacity)
 
             Button { draft = language.viewTodayPlanLabel } label: {
                 HStack(spacing: 8) {
@@ -517,6 +509,170 @@ struct ChatView: View {
         }
         .padding(18)
         .torGlass(cornerRadius: 26, tint: .graphite)
+    }
+
+    @ViewBuilder
+    private var todayRunLinkRow: some View {
+        switch todayRunLink {
+        case .pending(let workout):
+            basicTodayRunRow(
+                symbol: workout.kind?.symbolName ?? "figure.run",
+                tint: Theme.data,
+                title: plannedWorkoutText(for: workout)
+            )
+        case .suggested(let workout, let activity):
+            suggestedRunRow(workout: workout, activity: activity)
+        case .linked(let workout, let activity):
+            linkedRunRow(workout: workout, activity: activity)
+        case .doneWithoutRun(let workout):
+            basicTodayRunRow(
+                symbol: "checkmark",
+                tint: Theme.good,
+                title: "\(language.plan.linkedRunTitle(workoutName(workout))) · \(plannedMetrics(for: workout))"
+            )
+        case .skipped(let workout):
+            basicTodayRunRow(
+                symbol: "forward.end",
+                tint: Theme.dim,
+                title: language.plan.skippedRunTitle(workoutName(workout))
+                    + " · " + plannedMetrics(for: workout)
+            )
+        case .unplannedRun(let activity):
+            basicTodayRunRow(
+                symbol: "figure.run",
+                tint: Theme.data,
+                title: language.plan.unplannedRunTitle(runDetail(activity))
+            )
+        case .rest:
+            basicTodayRunRow(
+                symbol: "figure.run",
+                tint: Theme.data,
+                title: language.noPlannedWorkoutTodayText
+            )
+        }
+    }
+
+    private func basicTodayRunRow(
+        symbol: String,
+        tint: Color,
+        title: String,
+        subtitle: String? = nil
+    ) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            todayRunLinkIcon(symbol: symbol, tint: tint)
+            todayRunLinkText(title: title, subtitle: subtitle)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func linkedRunRow(workout: PlannedWorkout, activity: CompletedActivity) -> some View {
+        let title = language.plan.linkedRunTitle(workoutName(workout))
+        let subtitle = [
+            activityDistanceText(activity),
+            activityPaceText(activity),
+            language.plan.planComparison(plannedMetrics(for: workout))
+        ].compactMap { $0 }.joined(separator: " · ")
+
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 10) {
+                todayRunLinkIcon(symbol: "checkmark", tint: Theme.good)
+                todayRunLinkText(title: title, subtitle: subtitle)
+                Spacer(minLength: 0)
+                unlinkRunButton(workout)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 10) {
+                    todayRunLinkIcon(symbol: "checkmark", tint: Theme.good)
+                    todayRunLinkText(title: title, subtitle: subtitle)
+                }
+                unlinkRunButton(workout)
+            }
+        }
+    }
+
+    private func suggestedRunRow(workout: PlannedWorkout, activity: CompletedActivity) -> some View {
+        let title = language.plan.suggestRunLinkTitle(
+            activityDistanceText(activity) ?? "–",
+            name: workoutName(workout)
+        )
+        let subtitle = [
+            activity.date.formatted(.dateTime.hour().minute().locale(language.uiLocale)),
+            Formatters.duration(activity.durationSeconds),
+            language.plan.planComparison(plannedMetrics(for: workout))
+        ].joined(separator: " · ")
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                todayRunLinkIcon(symbol: "link", tint: Theme.warn)
+                todayRunLinkText(title: title, subtitle: subtitle)
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    linkRunButton(activity, to: workout)
+                    dismissRunSuggestionButton(activity, for: workout)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    linkRunButton(activity, to: workout)
+                    dismissRunSuggestionButton(activity, for: workout)
+                }
+            }
+        }
+    }
+
+    private func todayRunLinkIcon(symbol: String, tint: Color) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(tint)
+            .frame(width: 24, height: 24)
+            .background(tint.opacity(0.12), in: Circle())
+    }
+
+    private func todayRunLinkText(title: String, subtitle: String?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(Theme.text)
+                .fixedSize(horizontal: false, vertical: true)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func linkRunButton(_ activity: CompletedActivity, to workout: PlannedWorkout) -> some View {
+        Button(language.plan.linkRunAction) {
+            perform { try PlanStore.link(activity, to: workout, in: modelContext) }
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(Theme.accent)
+        .controlSize(.large)
+        .frame(minHeight: 44)
+        .accessibilityLabel(language.plan.linkRunAccessibility(workoutName(workout)))
+    }
+
+    private func dismissRunSuggestionButton(_ activity: CompletedActivity, for workout: PlannedWorkout) -> some View {
+        Button(language.plan.notThisRunAction) {
+            perform { try PlanStore.dismissSuggestion(activity, for: workout, in: modelContext) }
+        }
+        .buttonStyle(.bordered)
+        .tint(Theme.dim)
+        .controlSize(.large)
+        .frame(minHeight: 44)
+    }
+
+    private func unlinkRunButton(_ workout: PlannedWorkout) -> some View {
+        Button {
+            perform { try PlanStore.unlink(workout, in: modelContext) }
+        } label: {
+            Label(language.plan.unlinkRunAction, systemImage: "arrow.uturn.backward")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(minHeight: 44)
+        }
+        .buttonStyle(.plain)
     }
 
     private var suggestedPromptRows: some View {
@@ -1121,11 +1277,11 @@ struct ChatView: View {
         readinessDays.first { calendar.isDateInToday($0.date) }
     }
 
-    private var todayWorkout: PlannedWorkout? {
-        plannedWorkouts
-            .filter { calendar.isDateInToday($0.date) && $0.status == .planned }
-            .sorted { $0.date < $1.date }
-            .first
+    private var todayRunLink: TodayRunLink {
+        TodayRunLink.resolve(
+            workouts: plannedWorkouts.filter { calendar.isDateInToday($0.date) },
+            activities: completedActivities.filter { calendar.isDateInToday($0.date) }
+        )
     }
 
     private var tomorrowWorkout: PlannedWorkout? {
@@ -1167,15 +1323,35 @@ struct ChatView: View {
         return Array(readiness.reasons.prefix(2)).joined(separator: " · ")
     }
 
-    private var todayPlannedWorkoutText: String {
-        guard let workout = todayWorkout else { return language.noPlannedWorkoutTodayText }
-        var parts: [String] = []
-        parts.append(workout.kind.map { language.name($0) } ?? language.genericRunLabel)
-        parts.append(kmText(workout.distanceKm))
+    private func workoutName(_ workout: PlannedWorkout) -> String {
+        workout.kind.map(language.name) ?? language.genericRunLabel
+    }
+
+    private func plannedMetrics(for workout: PlannedWorkout) -> String {
+        var parts = [kmText(workout.distanceKm)]
         if let band = workout.paceBand {
             parts.append(Formatters.paceBand(band).replacingOccurrences(of: " /km", with: "/km"))
         }
-        return language.plannedWorkoutPrefix + parts.joined(separator: " · ")
+        return parts.joined(separator: " · ")
+    }
+
+    private func plannedWorkoutText(for workout: PlannedWorkout) -> String {
+        language.plannedWorkoutPrefix + [workoutName(workout), plannedMetrics(for: workout)].joined(separator: " · ")
+    }
+
+    private func activityDistanceText(_ activity: CompletedActivity) -> String? {
+        activity.distanceMeters.map { kmText($0 / 1_000) }
+    }
+
+    private func activityPaceText(_ activity: CompletedActivity) -> String? {
+        let pace = Formatters.pace(activity.avgPaceSecondsPerKm).replacingOccurrences(of: " /km", with: "/km")
+        return pace == "–" ? nil : pace
+    }
+
+    private func runDetail(_ activity: CompletedActivity) -> String {
+        [activityDistanceText(activity), activityPaceText(activity)]
+            .compactMap { $0 }
+            .joined(separator: " · ")
     }
 
     private func kmText(_ km: Double) -> String {
@@ -1183,6 +1359,14 @@ struct ChatView: View {
             ? String(Int(km.rounded()))
             : String(format: "%.1f", locale: language.uiLocale, km)
         return "\(value) km"
+    }
+
+    private func perform(_ action: () throws -> Void) {
+        do {
+            try action()
+        } catch {
+            chatStore.presentError(language.plan.linkUpdateFailed)
+        }
     }
 
     private func send() {

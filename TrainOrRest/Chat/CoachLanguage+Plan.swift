@@ -62,6 +62,20 @@ struct PlanCopy {
     var sessionLabel: String { text(en: "Session", ja: "セッション", vi: "Buổi tập") }
     var autoLabel: String { text(en: "Auto", ja: "自動", vi: "Tự động") }
     var reviewWithCoach: String { text(en: "Review with Coach", ja: "Coachと振り返る", vi: "Xem lại với Coach") }
+
+    func linkedRunTitle(_ name: String) -> String { text(en: "Done: \(name)", ja: "完了: \(name)", vi: "Đã hoàn thành: \(name)") }
+    func planComparison(_ planText: String) -> String { text(en: "Plan \(planText)", ja: "予定 \(planText)", vi: "Kế hoạch \(planText)") }
+    func suggestRunLinkTitle(_ kilometers: String, name: String) -> String { text(en: "Link your \(kilometers) run to \(name)?", ja: "\(kilometers)のランを\(name)に紐づけますか？", vi: "Liên kết buổi chạy \(kilometers) với \(name)?") }
+    var linkRunAction: String { text(en: "Link", ja: "紐づける", vi: "Liên kết") }
+    var notThisRunAction: String { text(en: "Not this", ja: "違う", vi: "Không phải") }
+    var unlinkRunAction: String { text(en: "Unlink", ja: "解除", vi: "Bỏ liên kết") }
+    var unlinkRunRow: String { text(en: "Unlink run", ja: "ランの紐づけを解除", vi: "Bỏ liên kết buổi chạy") }
+    var linkRunSection: String { text(en: "Link a run", ja: "ランを紐づける", vi: "Liên kết buổi chạy") }
+    var linkRunFooter: String { text(en: "Runs recorded on this day.", ja: "この日に記録されたラン。", vi: "Các buổi chạy ghi nhận trong ngày này.") }
+    func skippedRunTitle(_ name: String) -> String { text(en: "Skipped: \(name)", ja: "スキップ: \(name)", vi: "Đã bỏ qua: \(name)") }
+    func unplannedRunTitle(_ detail: String) -> String { text(en: "Unplanned run: \(detail)", ja: "予定外のラン: \(detail)", vi: "Buổi chạy ngoài kế hoạch: \(detail)") }
+    func linkRunAccessibility(_ name: String) -> String { text(en: "Link run to \(name)", ja: "ランを\(name)に紐づける", vi: "Liên kết buổi chạy với \(name)") }
+    var linkUpdateFailed: String { text(en: "Couldn't update the run link. Try again.", ja: "ランの紐づけを更新できませんでした。もう一度お試しください。", vi: "Không cập nhật được liên kết buổi chạy. Hãy thử lại.") }
     var editWithCoach: String { text(en: "Edit with Coach", ja: "Coachと編集", vi: "Chỉnh sửa với Coach") }
     var askCoach: String { text(en: "Ask Coach", ja: "Coachに聞く", vi: "Hỏi Coach") }
     var reviewCompletedRunAccessibility: String { text(en: "Review completed run with Coach", ja: "完了したランをCoachと振り返る", vi: "Xem lại buổi chạy đã hoàn thành với Coach") }
