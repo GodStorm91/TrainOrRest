@@ -119,6 +119,7 @@ struct TrainOrRestApp: App {
 /// already saw the Health sheet skip the new tour.
 struct RootView: View {
     @EnvironmentObject private var engine: SyncEngine
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.system.rawValue
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
@@ -207,9 +208,22 @@ struct RootView: View {
             DevCoachLiveView()
         case .shoes:
             RunningShoesView()
-        }
+        case .workout:
+            if let workout = todayWorkout {
+                WorkoutDetailView(workout: workout)
+            } else {
+                ContentUnavailableView("No workout to preview", systemImage: "figure.run")
+            }
+    }
+    }
+    private var todayWorkout: PlannedWorkout? {
+        let workouts = (try? modelContext.fetch(
+            FetchDescriptor<PlannedWorkout>(sortBy: [SortDescriptor(\.date)])
+        )) ?? []
+        return workouts.first { Calendar.current.isDateInToday($0.date) }
     }
     #endif
+
 
     private func determineStage() async {
         guard HealthKitService.isAvailable else {

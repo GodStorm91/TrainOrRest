@@ -31,6 +31,7 @@ enum DevSeed {
         case profile
         case coach
         case shoes
+        case workout
     }
 
     /// The requested launch screen, or `nil` for the normal tab shell.
@@ -118,6 +119,7 @@ enum DevSeed {
         preloadAPIKey()
         applyRequestedLanguage()
         seedPlanIfRequested(context)
+        seedTodayRunIfRequested(context)
         seedHistoryIfRequested(context)
         seedShoesIfRequested(context)
         if isLiveRequested { return seedLiveThread(context) }
@@ -228,6 +230,77 @@ enum DevSeed {
         )
         let fitness = FitnessProfile(vdot: 48, weeklyVolumeKm: 40, volumeTrend: 0, longestRecentRunKm: 16)
         try? PlanStore.replaceGoal(spec: spec, fitness: fitness, today: today, calendar: calendar, in: context)
+    }
+
+    @MainActor
+    private static func seedTodayRunIfRequested(_ context: ModelContext) {
+        guard ProcessInfo.processInfo.environment["TOR_DEV_PLAN"] == "1",
+              let mode = ProcessInfo.processInfo.environment["TOR_DEV_TODAY_RUN"],
+              mode == "linked" || mode == "suggested" else { return }
+
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let activities = (try? context.fetch(FetchDescriptor<CompletedActivity>())) ?? []
+        guard !activities.contains(where: { calendar.isDate($0.date, inSameDayAs: today) }) else { return }
+
+        let workouts = (try? context.fetch(
+            FetchDescriptor<PlannedWorkout>(sortBy: [SortDescriptor(\.date)])
+        )) ?? []
+        let workout: PlannedWorkout
+        if let todayWorkout = workouts.first(where: {
+            $0.status == .planned
+                && $0.paceBand != nil
+                && calendar.isDate($0.date, inSameDayAs: today)
+        }) {
+            workout = todayWorkout
+        } else if let upcomingWorkout = workouts.first(where: {
+            $0.status == .planned && $0.paceBand != nil && $0.date >= today
+        }) {
+            upcomingWorkout.date = calendar.date(
+                bySettingHour: 8,
+                minute: 0,
+                second: 0,
+                of: today
+            ) ?? today
+            workout = upcomingWorkout
+        } else {
+            return
+        }
+
+        let expectedDuration = workout.expectedDurationSeconds ?? 30 * 60
+        func insertRun(hour: Int, minute: Int, distanceScale: Double, durationScale: Double) {
+            let distanceKm = workout.distanceKm * distanceScale
+            let duration = expectedDuration * durationScale
+            let date = calendar.date(
+                bySettingHour: hour,
+                minute: minute,
+                second: 0,
+                of: today
+            ) ?? today
+            context.insert(CompletedActivity(
+                hkUUID: UUID(),
+                date: date,
+                distanceMeters: distanceKm * 1_000,
+                durationSeconds: duration,
+                avgHeartRate: 148,
+                maxHeartRate: 165,
+                avgPaceSecondsPerKm: duration / max(distanceKm, 0.1),
+                sourceName: "Dev seed"
+            ))
+        }
+
+        switch mode {
+        case "linked":
+            insertRun(hour: 7, minute: 12, distanceScale: 1.02, durationScale: 1.05)
+        case "suggested":
+            insertRun(hour: 6, minute: 30, distanceScale: 0.30, durationScale: 0.30)
+            insertRun(hour: 18, minute: 10, distanceScale: 0.35, durationScale: 0.35)
+        default:
+            return
+        }
+
+        try? context.save()
+        try? PlanStore.autoMatch(in: context, calendar: calendar)
     }
 
     /// `TOR_DEV_HISTORY=1` seeds six months of wellness, runs, and readiness
