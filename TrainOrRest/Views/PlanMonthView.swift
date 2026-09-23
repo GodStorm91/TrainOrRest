@@ -787,7 +787,8 @@ struct PlanMonthView: View {
     }
 
     private func matchedWorkout(for activity: CompletedActivity) -> PlannedWorkout? {
-        workouts.first(where: { $0.matchedActivityUUID == activity.hkUUID }) ?? workouts(on: activity.date).first
+        workouts.first(where: { $0.matchedActivityUUID == activity.hkUUID })
+            ?? workouts(on: activity.date).first { !$0.isLinkDismissed(activity.hkUUID) }
     }
 
     private func assignedShoe(for workout: PlannedWorkout) -> RunningShoe? {

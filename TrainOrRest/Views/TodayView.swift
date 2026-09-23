@@ -205,7 +205,10 @@ struct TodayView: View {
         if let exact = plannedWorkouts.first(where: { $0.matchedActivityUUID == activity.hkUUID }) {
             return exact
         }
-        return plannedWorkouts.first { calendar.isDate($0.date, inSameDayAs: activity.date) }
+        return plannedWorkouts.first {
+            calendar.isDate($0.date, inSameDayAs: activity.date)
+                && !$0.isLinkDismissed(activity.hkUUID)
+        }
     }
 
     private var setGoalCard: some View {

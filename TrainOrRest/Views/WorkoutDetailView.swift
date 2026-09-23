@@ -26,6 +26,7 @@ struct WorkoutDetailView: View {
     @State private var smartOperationKey = UUID().uuidString
     @State private var isChoosingShoe = false
 
+    @State private var runLinkError: String?
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
 
     private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
@@ -76,6 +77,45 @@ struct WorkoutDetailView: View {
                     } label: {
                         ActivityRow(activity: matched)
                     }
+                    Button {
+                        unlinkRun()
+                    } label: {
+                        Label(language.plan.unlinkRunRow, systemImage: "arrow.uturn.backward")
+                            .foregroundStyle(Theme.accent)
+                    }
+                    .frame(minHeight: 44)
+                    if let runLinkError {
+                        Text(runLinkError)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.bad)
+                    }
+                }
+            } else if !freeDayActivities.isEmpty {
+                Section {
+                    ForEach(freeDayActivities, id: \.hkUUID) { activity in
+                        Button {
+                            link(activity)
+                        } label: {
+                            HStack(spacing: 12) {
+                                ActivityRow(activity: activity)
+                                Spacer(minLength: 0)
+                                Image(systemName: "link")
+                                    .foregroundStyle(Theme.accent)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .frame(minHeight: 44)
+                        .accessibilityLabel(language.plan.linkRunAccessibility(workout.kind.map(language.name) ?? language.genericRunLabel))
+                    }
+                    if let runLinkError {
+                        Text(runLinkError)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.bad)
+                    }
+                } header: {
+                    Text(language.plan.linkRunSection)
+                } footer: {
+                    Text(language.plan.linkRunFooter)
                 }
             }
 
@@ -196,6 +236,36 @@ struct WorkoutDetailView: View {
     private var matchedActivity: CompletedActivity? {
         guard let uuid = workout.matchedActivityUUID else { return nil }
         return activities.first { $0.hkUUID == uuid }
+    }
+
+    private var freeDayActivities: [CompletedActivity] {
+        let linkedActivityIDs = Set(
+            ((try? modelContext.fetch(FetchDescriptor<PlannedWorkout>())) ?? [])
+                .filter { Calendar.current.isDate($0.date, inSameDayAs: workout.date) }
+                .compactMap(\.matchedActivityUUID)
+        )
+        return activities.filter {
+            Calendar.current.isDate($0.date, inSameDayAs: workout.date)
+                && !linkedActivityIDs.contains($0.hkUUID)
+        }
+    }
+
+    private func link(_ activity: CompletedActivity) {
+        do {
+            try PlanStore.link(activity, to: workout, in: modelContext)
+            runLinkError = nil
+        } catch {
+            runLinkError = language.plan.linkUpdateFailed
+        }
+    }
+
+    private func unlinkRun() {
+        do {
+            try PlanStore.unlink(workout, in: modelContext)
+            runLinkError = nil
+        } catch {
+            runLinkError = language.plan.linkUpdateFailed
+        }
     }
 
     private var assignedShoe: RunningShoe? {
@@ -491,9 +561,16 @@ struct WorkoutDetailView: View {
 
     private func statusButton(status: WorkoutStatus, tint: Color) -> some View {
         Button(language.name(status)) {
+            if workout.status == .done, workout.matchedActivityUUID != nil, status != .done {
+                do {
+                    try PlanStore.unlink(workout, in: modelContext)
+                    runLinkError = nil
+                } catch {
+                    runLinkError = language.plan.linkUpdateFailed
+                    return
+                }
+            }
             workout.status = status
-            // Resetting to planned withdraws the manual decision, so auto-
-            // matching may apply again; done/skip stays user-owned.
             workout.manuallyOverridden = status != .planned
             if status != .done {
                 workout.matchedActivityUUID = nil

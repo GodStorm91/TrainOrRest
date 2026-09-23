@@ -238,6 +238,7 @@ struct ActivityDetailView: View {
         }
         return plannedWorkouts.first {
             calendar.isDate($0.date, inSameDayAs: activity.date)
+                && !$0.isLinkDismissed(activity.hkUUID)
         }
     }
 

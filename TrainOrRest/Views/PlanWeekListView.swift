@@ -313,7 +313,8 @@ struct PlanWeekListView: View {
         }
 
         func matchedWorkout(for activity: CompletedActivity) -> PlannedWorkout? {
-            workoutByMatchedActivity[activity.hkUUID] ?? workouts(on: activity.date).first
+            workoutByMatchedActivity[activity.hkUUID]
+                ?? workouts(on: activity.date).first { !$0.isLinkDismissed(activity.hkUUID) }
         }
     }
 
