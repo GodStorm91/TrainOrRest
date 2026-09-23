@@ -1447,7 +1447,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         let target = targetKm.rounded() == targetKm
             ? "\(Int(targetKm)) km"
             : String(format: "%.1f km", targetKm)
-        if lower.contains("volume") || lower.contains("load") || lower.contains("ramp") || lower.contains("safe") {
+        if lower.contains("volume") || lower.contains("ramp") {
             return language.contextualDistanceLoadBlocked(target: target)
         }
         if lower.contains("locked") || lower.contains("fixed") {

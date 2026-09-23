@@ -191,8 +191,8 @@ enum ReadinessStore {
     }
 
     /// Replaces future auto-managed rows with the regenerated schedule.
-    /// Rows the user decided on (done/skipped/manual) and past rows are
-    /// history — never touched. No-op when nothing would change.
+    /// Future rows the user decided on (done/skipped/manual) keep their content
+    /// and follow the plan's week grid. Past rows are history and never touched.
     private static func applyFutureSchedule(
         _ spec: TrainingPlanSpec,
         to plan: TrainingPlan,
@@ -238,24 +238,30 @@ enum ReadinessStore {
                 && row.paceFastSecondsPerKm == new.workout.paceBand?.fastSecondsPerKm
                 && row.structure == new.workout.structure
         }
-        guard !unchanged else { return }
-
-        for row in replaceable {
-            context.delete(row)
+        if !unchanged {
+            for row in replaceable {
+                context.delete(row)
+            }
+            var insertedWorkouts: [PlannedWorkout] = []
+            for (week, workoutSpec) in incoming {
+                let workout = PlannedWorkout(spec: workoutSpec, weekIndex: week.index, phase: week.phase)
+                workout.plan = plan
+                context.insert(workout)
+                insertedWorkouts.append(workout)
+            }
+            try ShoeAssignmentService.assignAutomaticShoes(to: insertedWorkouts, in: context)
+            plan.generatedAt = today
+            plan.anchorDate = spec.anchorDate
+            plan.weekPhasesRaw = spec.weeks.map(\.phase.rawValue)
+            plan.weekTargetVolumesKm = spec.weeks.map(\.targetVolumeKm)
+            plan.weekIsDown = spec.weeks.map(\.isDownWeek)
         }
-        var insertedWorkouts: [PlannedWorkout] = []
-        for (week, workoutSpec) in incoming {
-            let workout = PlannedWorkout(spec: workoutSpec, weekIndex: week.index, phase: week.phase)
-            workout.plan = plan
-            context.insert(workout)
-            insertedWorkouts.append(workout)
+        for row in kept {
+            guard let week = plan.weekIndex(containing: row.date, calendar: calendar),
+                  row.weekIndex != week || row.phaseRaw != plan.weekPhasesRaw[week] else { continue }
+            row.weekIndex = week
+            row.phaseRaw = plan.weekPhasesRaw[week]
         }
-        try ShoeAssignmentService.assignAutomaticShoes(to: insertedWorkouts, in: context)
-        plan.generatedAt = today
-        plan.anchorDate = spec.anchorDate
-        plan.weekPhasesRaw = spec.weeks.map(\.phase.rawValue)
-        plan.weekTargetVolumesKm = spec.weeks.map(\.targetVolumeKm)
-        plan.weekIsDown = spec.weeks.map(\.isDownWeek)
     }
 
     // MARK: - Snapshot / diff

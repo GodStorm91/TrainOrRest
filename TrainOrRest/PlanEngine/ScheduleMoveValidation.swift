@@ -59,7 +59,7 @@ struct ScheduleMoveValidationService {
             return ScheduleMoveValidation.sameDayTimeOnly()
         }
 
-        guard let targetWeek = weekIndex(containing: targetDate, plan: plan) else {
+        guard let targetWeek = plan.weekIndex(containing: targetDate, calendar: calendar) else {
             return ScheduleMoveValidation(
                 result: .outsidePlan,
                 reasons: ["The requested date falls outside the current training plan."],
@@ -133,14 +133,6 @@ struct ScheduleMoveValidationService {
             crossesTrainingPhase: false,
             suggestedActions: [.apply]
         )
-    }
-
-    private func weekIndex(containing date: Date, plan: TrainingPlan) -> Int? {
-        let planStart = PlanGenerator.mondayOfWeek(containing: plan.anchorDate, calendar: calendar)
-        guard date >= planStart else { return nil }
-        let week = calendar.dateComponents([.weekOfYear], from: planStart, to: date).weekOfYear ?? 0
-        guard plan.weekPhasesRaw.indices.contains(week) else { return nil }
-        return week
     }
 
     private func phase(at weekIndex: Int, plan: TrainingPlan) -> String? {

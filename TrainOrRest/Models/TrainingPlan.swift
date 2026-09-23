@@ -29,4 +29,12 @@ final class TrainingPlan {
         guard weekPhasesRaw.indices.contains(index) else { return nil }
         return TrainingPhase(rawValue: weekPhasesRaw[index])
     }
+
+    func weekIndex(containing date: Date, calendar: Calendar) -> Int? {
+        let planStart = PlanGenerator.mondayOfWeek(containing: anchorDate, calendar: calendar)
+        guard date >= planStart else { return nil }
+        let week = calendar.dateComponents([.weekOfYear], from: planStart, to: date).weekOfYear ?? 0
+        guard weekPhasesRaw.indices.contains(week) else { return nil }
+        return week
+    }
 }
