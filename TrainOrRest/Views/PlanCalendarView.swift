@@ -17,6 +17,7 @@ struct PlanCalendarView: View {
     @Query(sort: \CompletedActivity.date, order: .reverse) private var completedActivities: [CompletedActivity]
     @Query(sort: \PlanEdit.appliedAt, order: .reverse) private var planEdits: [PlanEdit]
     @Query private var goals: [Goal]
+    @Query private var plans: [TrainingPlan]
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var pushService: WorkoutPushService
     @EnvironmentObject private var googleCalendar: GoogleCalendarSyncService
@@ -42,6 +43,19 @@ struct PlanCalendarView: View {
     @State private var isShowingRunScheduleSetup = false
 
     private let calendar = Calendar.current
+    private var monthPhaseRibbon: PlanPhaseRibbonModel? {
+        guard let plan = plans.first,
+              let summary = ActivePlanSummaryBuilder.build(
+                goal: goals.first,
+                plan: plan,
+                activities: completedActivities,
+                calendar: calendar
+              ) else {
+            return nil
+        }
+        return PlanPhaseRibbonModel(plan: plan, summary: summary, calendar: calendar)
+    }
+
 
     var body: some View {
         VStack(spacing: 0) {
@@ -185,7 +199,8 @@ struct PlanCalendarView: View {
                 selectedDate: $selectedDate,
                 onReviewRunInChat: onReviewRunInChat,
                 onConfigureWeather: { isShowingRunScheduleSetup = true },
-                showsTodaysCall: !hidesTodaysCall
+                showsTodaysCall: !hidesTodaysCall,
+                phaseRibbon: monthPhaseRibbon
             )
         } else {
             PlanWeekListView(scrollToTodayToken: weekScrollToken, language: language, onReviewRunInChat: onReviewRunInChat)
