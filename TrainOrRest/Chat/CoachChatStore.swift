@@ -1442,7 +1442,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         return language.planRejectionGeneric
     }
 
-    private static func userFacingContextualDistanceRejection(targetKm: Double, raw: String, language: CoachLanguage) -> String {
+    static func userFacingContextualDistanceRejection(targetKm: Double, raw: String, language: CoachLanguage) -> String {
         let lower = raw.lowercased()
         let target = targetKm.rounded() == targetKm
             ? "\(Int(targetKm)) km"

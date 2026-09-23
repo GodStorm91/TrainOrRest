@@ -120,6 +120,59 @@ final class ReadinessStoreTests: XCTestCase {
         XCTAssertEqual(remaining.first?.uuid, original.uuid)
     }
 
+    func testDailyPipelineRealignsStaleManualWorkoutWeekWhenScheduleIsUnchanged() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let history = PlanEngineTestSupport.history(
+            weeks: 8,
+            runsPerWeek: 2,
+            distanceKm: 8,
+            paceSecondsPerKm: 330,
+            endingAt: today
+        )
+        for sample in history {
+            context.insert(CompletedActivity(
+                hkUUID: UUID(),
+                date: sample.date,
+                distanceMeters: sample.distanceKm * 1000,
+                durationSeconds: sample.durationSeconds,
+                avgHeartRate: nil,
+                maxHeartRate: nil,
+                avgPaceSecondsPerKm: sample.durationSeconds / sample.distanceKm,
+                sourceName: "Garmin"
+            ))
+        }
+        let fitness = try XCTUnwrap(PlanStore.currentFitness(in: context, today: today, calendar: calendar))
+        try PlanStore.replaceGoal(spec: goal, fitness: fitness, today: today, calendar: calendar, in: context)
+        try ReadinessStore.runDailyPipeline(in: context, today: today, calendar: calendar)
+
+        let plan = try XCTUnwrap(try PlanStore.activePlan(in: context))
+        let edited = try XCTUnwrap(
+            try context.fetch(FetchDescriptor<PlannedWorkout>(sortBy: [SortDescriptor(\.date)])).last {
+                $0.date >= today && $0.status == .planned && $0.kind == .easy
+            }
+        )
+        let expectedWeek = edited.weekIndex
+        let expectedPhase = edited.phaseRaw
+        edited.manuallyOverridden = true
+        edited.weekIndex = plan.weekPhasesRaw.count + 1
+        edited.phaseRaw = expectedPhase == TrainingPhase.taper.rawValue
+            ? TrainingPhase.base.rawValue
+            : TrainingPhase.taper.rawValue
+        try context.save()
+        let autoRows = try Set(context.fetch(FetchDescriptor<PlannedWorkout>()).filter {
+            $0.date >= today && $0.status == .planned && !$0.manuallyOverridden
+        }.map(\.uuid))
+
+        try ReadinessStore.runDailyPipeline(in: context, today: today, calendar: calendar)
+
+        let autoRowsAfter = try Set(context.fetch(FetchDescriptor<PlannedWorkout>()).filter {
+            $0.date >= today && $0.status == .planned && !$0.manuallyOverridden
+        }.map(\.uuid))
+        XCTAssertEqual(autoRowsAfter, autoRows)
+        XCTAssertEqual(edited.weekIndex, expectedWeek)
+        XCTAssertEqual(edited.phaseRaw, expectedPhase)
+    }
 
     private var goal: GoalSpec {
         GoalSpec(

@@ -721,6 +721,60 @@ final class ChatFeatureTests: XCTestCase {
         }
     }
 
+    func testContextualReplaceStagesCandidateForManuallyEditedWorkoutAfterPlanReanchors() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let reanchorDay = try XCTUnwrap(calendar.date(byAdding: .day, value: 28, to: today))
+        for sample in PlanEngineTestSupport.history(weeks: 8, runsPerWeek: 2, distanceKm: 8, paceSecondsPerKm: 330, endingAt: reanchorDay) {
+            context.insert(activity(on: sample.date, km: sample.distanceKm, minutes: sample.durationSeconds / 60))
+        }
+        try seedGoalOnly(in: context)
+        let edited = try XCTUnwrap(try context.fetch(FetchDescriptor<PlannedWorkout>(sortBy: [SortDescriptor(\.date)])).last {
+            $0.kind == .easy && $0.status == .planned
+        })
+        edited.manuallyOverridden = true
+        try context.save()
+        try ReadinessStore.runDailyPipeline(in: context, today: reanchorDay, calendar: calendar)
+
+        let client = MockClaudeClient(responses: [])
+        let store = CoachChatStore(client: client, calendar: calendar, now: { reanchorDay })
+        let targetKm = edited.distanceKm.rounded(.down) + 2
+        await store.submitTestTurn(text: "Thay thế buổi tập ngày \(calendar.component(.day, from: edited.date)) bằng chạy dễ \(Int(targetKm)) km",
+        model: "claude-test",
+        attachments: [.plannedWorkout(edited.uuid)],
+        apiKey: "test-key",
+        in: context)
+
+        XCTAssertTrue(client.requests.isEmpty)
+        let replacement = try replacementDetails(try XCTUnwrap(store.pendingPlanCandidate))
+        XCTAssertEqual(replacement.workoutID, edited.uuid)
+        XCTAssertEqual(replacement.proposed.kind, .easy)
+        XCTAssertEqual(replacement.proposed.distanceKm, targetKm, accuracy: 0.001)
+    }
+
+    func testContextualDistanceRejectionDoesNotReportMissingWorkoutAsLoadBlock() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedGoalOnly(in: context)
+        let emptyDay = try XCTUnwrap(calendar.date(byAdding: .day, value: 1, to: today))
+        XCTAssertTrue(try plannedWorkouts(on: emptyDay, in: context).isEmpty)
+        let payload = PlanAdjustmentProposal.CreateWorkout(kind: "easy", blocks: [
+            .init(repeatCount: 1, steps: [.init(role: "work", targetType: "distance_km", targetValue: 6, paceZone: "easy")])
+        ])
+        let proposal = PlanAdjustmentProposal(changes: [.init(
+            date: CoachContextBuilder.day(emptyDay, calendar: calendar),
+            action: .replace,
+            workout: payload
+        )])
+
+        XCTAssertThrowsError(try CoachPlanCandidateEngine.prepare(proposal: proposal, in: context, today: today, calendar: calendar, language: .vi)) { error in
+            let raw = error.coachTechnicalDescription
+            XCTAssertTrue(raw.contains("payload"), raw)
+            let copy = CoachChatStore.userFacingContextualDistanceRejection(targetKm: 6, raw: raw, language: .vi)
+            XCTAssertEqual(copy, CoachLanguage.vi.contextualDistanceGeneric(target: "6 km"))
+        }
+    }
+
     func testContextualTomorrowDistanceShortcutHandlesNaturalVietnamesePhrasing() async throws {
         let container = try makeContainer()
         let context = container.mainContext
