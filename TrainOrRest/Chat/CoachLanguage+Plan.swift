@@ -56,6 +56,37 @@ struct PlanCopy {
     var dismissRecentCoachChangesAccessibility: String { text(en: "Dismiss recent Coach changes", ja: "最近のCoachによる変更を閉じる", vi: "Đóng các thay đổi gần đây của Coach") }
     func workoutChangeSummary(beforeKind: String, beforeDistance: String, afterKind: String, afterDistance: String) -> String { "\(beforeKind) \(beforeDistance) km → \(afterKind) \(afterDistance) km" }
 
+    var reviewNextSevenDays: String { text(en: "Review next 7 days", ja: "次の7日間を確認", vi: "Xem lại 7 ngày tới") }
+    var nextWeekReviewQueued: String { text(en: "Run synced. A next-week review starts when sync finishes.", ja: "ランを同期しました。同期完了後に次週レビューを開始します。", vi: "Đã đồng bộ buổi chạy. Đánh giá tuần tới sẽ bắt đầu khi đồng bộ hoàn tất.") }
+    var nextWeekReviewNeedsKey: String { text(en: "Add a Coach provider key to review the next 7 days.", ja: "次の7日間を確認するにはCoachプロバイダーキーを追加してください。", vi: "Thêm khóa nhà cung cấp Coach để xem lại 7 ngày tới.") }
+    var nextWeekReviewPreparing: String { text(en: "Preparing a next-week review. No plan changes have been made.", ja: "次週レビューを準備中です。プランは変更されていません。", vi: "Đang chuẩn bị đánh giá tuần tới. Kế hoạch chưa thay đổi.") }
+    var nextWeekReviewReady: String { text(en: "Review ready. No changes have been made.", ja: "レビューの準備ができました。変更はまだありません。", vi: "Đánh giá đã sẵn sàng. Chưa có thay đổi nào.") }
+    func nextWeekReviewScope(_ dateRange: String) -> String {
+        text(
+            en: "Next 7 days · \(dateRange). Keep closes this review.",
+            ja: "次の7日間 · \(dateRange)。保持するとこのレビューを閉じます。",
+            vi: "7 ngày tới · \(dateRange). Giữ nguyên sẽ đóng bản đánh giá này."
+        )
+    }
+    var nextWeekReviewNoChange: String { text(en: "No changes needed for the next 7 days.", ja: "次の7日間に変更は必要ありません。", vi: "Không cần thay đổi cho 7 ngày tới.") }
+    var nextWeekReviewFailed: String { text(en: "Couldn't prepare a review. Retry manually.", ja: "レビューを準備できませんでした。手動で再試行してください。", vi: "Không thể chuẩn bị đánh giá. Hãy thử lại thủ công.") }
+    var nextWeekReviewStale: String { text(en: "This review is out of date. Review the new diff before applying.", ja: "このレビューは古くなっています。適用前に新しい差分を確認してください。", vi: "Đánh giá này đã cũ. Xem lại khác biệt mới trước khi áp dụng.") }
+    var nextWeekReviewApplied: String { text(en: "Applied. You can undo this in Recent Coach changes for 7 days.", ja: "適用しました。7日間は最近のCoach変更から元に戻せます。", vi: "Đã áp dụng. Bạn có thể hoàn tác trong Thay đổi Coach gần đây trong 7 ngày.") }
+    var nextWeekReviewReverted: String { text(en: "Reverted.", ja: "元に戻しました。", vi: "Đã hoàn tác.") }
+    var nextWeekReviewSuperseded: String { text(en: "A newer review replaced this one.", ja: "より新しいレビューに置き換えられました。", vi: "Một đánh giá mới hơn đã thay thế đánh giá này.") }
+    var retryManually: String { text(en: "Retry manually", ja: "手動で再試行", vi: "Thử lại thủ công") }
+    var addCoachProviderKey: String { text(en: "Add a Coach provider key", ja: "Coachプロバイダーキーを追加", vi: "Thêm khóa nhà cung cấp Coach") }
+    var nextWeekReviewSettingsTitle: String { text(en: "Next-week review", ja: "次週レビュー", vi: "Đánh giá tuần tới") }
+    func automaticNextWeekReview(provider: String) -> String { text(en: "Automatically review next week with \(provider)", ja: "\(provider)で次週を自動レビュー", vi: "Tự động đánh giá tuần tới với \(provider)") }
+    var addKeyForSelectedProvider: String { text(en: "Add a key for the selected provider below.", ja: "選択したプロバイダーのキーを以下に追加してください。", vi: "Thêm khóa cho nhà cung cấp đã chọn ở bên dưới.") }
+    func nextWeekReviewDisclosure(provider: String) -> String {
+        text(
+            en: "When enabled, \(provider) receives distance, duration, pace, and average and maximum heart rate for the finished run and up to 7 runs from the last 7 days, plus your current readiness and the next 7 planned days.",
+            ja: "有効にすると、\(provider)には完了したランと直近7日間の最大7件のランの距離、時間、ペース、平均・最大心拍数に加え、現在のレディネスと次の7日間の予定が送信されます。",
+            vi: "Khi bật, \(provider) nhận quãng đường, thời lượng, pace, nhịp tim trung bình và tối đa của buổi chạy hoàn thành và tối đa 7 buổi chạy trong 7 ngày qua, cùng mức sẵn sàng hiện tại và 7 ngày kế hoạch tiếp theo."
+        )
+    }
+
     // MARK: - Month and week views
 
     var todayCall: String { text(en: "Today's call", ja: "今日のメニュー", vi: "Buổi tập hôm nay") }

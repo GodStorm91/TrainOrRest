@@ -81,6 +81,7 @@ struct SettingsView: View {
                 }
             }
 
+
             Section(language.settings.dataPrivacySection) {
                 Link(destination: URL(string: UIApplication.openSettingsURLString)!) {
                     settingsRow(language.settings.healthDataPermissions, systemImage: "lock.shield", value: language.settings.iOSSettings)
@@ -754,6 +755,7 @@ struct CoachMemorySettingsView: View {
 struct CoachProviderSettingsView: View {
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
     @AppStorage("coachModel") private var model = CoachChatConfig.defaultModel
+    @AppStorage(AdaptivePlanReviewSettings.automaticKey) private var automaticNextWeekReview = false
     @StateObject private var chatStore = CoachChatStore()
     @State private var anthropicAPIKey = ""
     @State private var openAIAPIKey = ""
@@ -809,6 +811,21 @@ struct CoachProviderSettingsView: View {
                     message: receipt.message,
                     footnote: receipt.footnote
                 )
+            }
+
+            Section {
+                Toggle(
+                    language.plan.automaticNextWeekReview(provider: CoachModelProvider.displayName(for: model)),
+                    isOn: $automaticNextWeekReview
+                )
+                if !activeKeyPresent {
+                    Label(language.plan.addKeyForSelectedProvider, systemImage: "key")
+                        .foregroundStyle(Theme.dim)
+                }
+            } header: {
+                Text(language.plan.nextWeekReviewSettingsTitle)
+            } footer: {
+                Text(language.plan.nextWeekReviewDisclosure(provider: CoachModelProvider.displayName(for: model)))
             }
 
             Section {

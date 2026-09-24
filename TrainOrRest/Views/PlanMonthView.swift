@@ -61,8 +61,11 @@ struct PlanMonthView: View {
 
     var body: some View {
         if displaysOnlyTodaysCall {
-            if selectedDateFocus == .today {
-                todaysCall
+            VStack(alignment: .leading, spacing: 12) {
+                AdaptivePlanReviewSlot()
+                if selectedDateFocus == .today {
+                    todaysCall
+                }
             }
         } else {
             let index = MonthIndex(
@@ -74,6 +77,9 @@ struct PlanMonthView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
+                        if showsTodaysCall {
+                            AdaptivePlanReviewSlot()
+                        }
                         if showsTodaysCall && selectedDateFocus == .today {
                             todaysCall
                         }

@@ -31,6 +31,7 @@ struct PlanCalendarView: View {
     @Query private var googleCalendarChanges: [GoogleCalendarInboundChange]
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
 
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
@@ -79,18 +80,15 @@ struct PlanCalendarView: View {
                 )
             }
             content
-            // Landscape phones have ~320pt of height: the Google status lives in
-            // the nav bar there instead of a pinned row, and on regular width it
-            // sits in the side pane under Today's Call.
-            if horizontalSizeClass != .regular,
-               verticalSizeClass != .compact,
-               isBannerVisible(googleStatusBanner) {
-                googleCalendarStatusRow
-            }
         }
         .background(Theme.bg)
-        .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: 82)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                if pinsGoogleCalendarStatus {
+                    googleCalendarStatusRow
+                }
+                Color.clear.frame(height: 82)
+            }
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -116,7 +114,7 @@ struct PlanCalendarView: View {
                 } label: {
                     Label(goalButtonTitle, systemImage: "target")
                 }
-                if verticalSizeClass == .compact,
+                if (verticalSizeClass == .compact || (horizontalSizeClass != .regular && !pinsGoogleCalendarStatus)),
                    isBannerVisible(googleStatusBanner) {
                     Button {
                         isShowingGoogleCalendarStatus = true
@@ -228,8 +226,20 @@ struct PlanCalendarView: View {
                 phaseRibbon: monthPhaseRibbon
             )
         } else {
-            PlanWeekListView(scrollToTodayToken: weekScrollToken, language: language, onReviewRunInChat: onReviewRunInChat)
+            PlanWeekListView(
+                scrollToTodayToken: weekScrollToken,
+                language: language,
+                onReviewRunInChat: onReviewRunInChat,
+                showsAdaptiveReviewSlot: horizontalSizeClass != .regular
+            )
         }
+    }
+
+    // A pinned row costs too much height on landscape phones (about 320 pt) and at accessibility sizes.
+    private var pinsGoogleCalendarStatus: Bool {
+        horizontalSizeClass != .regular
+            && verticalSizeClass != .compact
+            && !dynamicTypeSize.isAccessibilitySize
     }
 
     private var topBar: some View {

@@ -8,6 +8,7 @@ struct PlanWeekListView: View {
     var scrollToTodayToken: Int
     let language: CoachLanguage
     var onReviewRunInChat: (CompletedActivity) -> Void = { _ in }
+    var showsAdaptiveReviewSlot = false
 
     @Query(sort: \PlannedWorkout.date) private var workouts: [PlannedWorkout]
     @Query(sort: \CompletedActivity.date, order: .reverse) private var completedActivities: [CompletedActivity]
@@ -99,25 +100,30 @@ struct PlanWeekListView: View {
     }
 
     private func dayRow(_ date: Date, index: WeekIndex) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            dayRail(date)
-
-            VStack(alignment: .leading, spacing: 8) {
-                if let activity = index.activity(on: date) {
-                    CalendarRunSummaryCard(
-                        activity: activity,
-                        plannedWorkout: index.matchedWorkout(for: activity),
-                        compact: true,
-                        reviewDestination: ChatView(contextualCompletedActivityID: activity.hkUUID),
-                        onReview: { onReviewRunInChat(activity) }
-                    )
-                } else if let workout = index.workouts(on: date).first {
-                    plannedDayCard(workout)
-                } else {
-                    restPlaceholder
-                }
+        VStack(alignment: .leading, spacing: 10) {
+            if showsAdaptiveReviewSlot, calendar.isDateInToday(date) {
+                AdaptivePlanReviewSlot()
             }
-            .frame(maxWidth: .infinity)
+            HStack(alignment: .top, spacing: 12) {
+                dayRail(date)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    if let activity = index.activity(on: date) {
+                        CalendarRunSummaryCard(
+                            activity: activity,
+                            plannedWorkout: index.matchedWorkout(for: activity),
+                            compact: true,
+                            reviewDestination: ChatView(contextualCompletedActivityID: activity.hkUUID),
+                            onReview: { onReviewRunInChat(activity) }
+                        )
+                    } else if let workout = index.workouts(on: date).first {
+                        plannedDayCard(workout)
+                    } else {
+                        restPlaceholder
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
         }
     }
 
