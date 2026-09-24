@@ -46,10 +46,17 @@ struct TrainOrRestApp: App {
             chatSession.activeThreadID = seededThreadID
         }
 #endif
+        let adaptiveReviewCoordinator = AdaptivePlanReviewCoordinator(
+            anthropicClient: ClaudeClient(),
+            openAIClient: OpenAIClient()
+        )
         let engine = SyncEngine(
             health: HealthKitService(),
             modelContext: container.mainContext,
-            pushService: pushService
+            pushService: pushService,
+            recordAdaptiveRuns: { runs in
+                try adaptiveReviewCoordinator.recordAutomaticRuns(runs, in: container.mainContext)
+            }
         )
         // Register observer queries at launch, not from view lifecycle:
         // HealthKit background launches never connect a scene, so view
@@ -62,10 +69,7 @@ struct TrainOrRestApp: App {
         _chatStore = StateObject(wrappedValue: chatStore)
         _chatSession = StateObject(wrappedValue: chatSession)
         _runSchedule = StateObject(wrappedValue: RunScheduleController())
-        _adaptiveReviewCoordinator = StateObject(wrappedValue: AdaptivePlanReviewCoordinator(
-            anthropicClient: ClaudeClient(),
-            openAIClient: OpenAIClient()
-        ))
+        _adaptiveReviewCoordinator = StateObject(wrappedValue: adaptiveReviewCoordinator)
 
         // Background tasks must be registered before launch finishes.
         BGTaskScheduler.shared.register(
@@ -187,6 +191,10 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .planDidChange)) { _ in
             adaptiveReviewCoordinator.planDidChange(in: modelContext)
+        }
+        .onChange(of: engine.isSyncing) { wasSyncing, isSyncing in
+            guard wasSyncing, !isSyncing else { return }
+            Task { await adaptiveReviewCoordinator.syncDidSettle(in: modelContext) }
         }
     }
 
