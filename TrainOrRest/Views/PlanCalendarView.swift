@@ -5,7 +5,7 @@ import SwiftUI
 /// The training plan tab. Switches between a month calendar grid and the
 /// week-by-week list; both share the plan's real workout data.
 struct PlanCalendarView: View {
-    var onReviewRunInChat: (CompletedActivity) -> Void = { _ in }
+    var onReviewRunInChat: (CompletedActivity) -> Void
     enum Mode: CaseIterable, Identifiable {
         case month
         case week
@@ -49,6 +49,25 @@ struct PlanCalendarView: View {
     @State private var didCheckGoogleCalendarOnOpen = false
     @State private var isShowingRunScheduleSetup = false
 
+
+    init(onReviewRunInChat: @escaping (CompletedActivity) -> Void = { _ in }) {
+        self.onReviewRunInChat = onReviewRunInChat
+        #if DEBUG
+        let environment = ProcessInfo.processInfo.environment
+        if environment["TOR_DEV_CAL_MODE"] == "week" {
+            _mode = State(initialValue: .week)
+        }
+        if let offset = environment["TOR_DEV_SELECTED_OFFSET"].flatMap(Int.init) {
+            let date = calendar.date(
+                byAdding: .day,
+                value: offset,
+                to: calendar.startOfDay(for: .now)
+            ) ?? .now
+            _selectedDate = State(initialValue: date)
+            _monthAnchor = State(initialValue: date)
+        }
+        #endif
+    }
     private let calendar = Calendar.current
     private var monthPhaseRibbon: PlanPhaseRibbonModel? {
         guard let plan = plans.first,

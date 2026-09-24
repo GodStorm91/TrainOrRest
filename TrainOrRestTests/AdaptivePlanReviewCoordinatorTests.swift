@@ -283,14 +283,14 @@ final class AdaptivePlanReviewCoordinatorTests: XCTestCase {
         let (context, today) = try contextWithPlan()
         try saveTestKey()
         defer { deleteTestKey() }
-        insertRun(in: context, date: calendar.date(byAdding: .day, value: -8, to: today)!)
+        let oldRun = insertRun(in: context, date: calendar.date(byAdding: .day, value: -8, to: today)!)
         let client = AdaptiveReviewClient(responses: [.success(noChangeResponse())])
 
         await coordinator(client: client, now: { today }).beginManualReview(activityID: nil, in: context)
 
         let request = try XCTUnwrap(client.requests.first)
         let body = try JSONEncoder().encode(request)
-        XCTAssertFalse(String(decoding: body, as: UTF8.self).contains("-8"))
+        XCTAssertFalse(String(decoding: body, as: UTF8.self).contains(oldRun.hkUUID.uuidString))
     }
 
     private func coordinator(

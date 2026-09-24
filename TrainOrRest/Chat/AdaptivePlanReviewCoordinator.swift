@@ -115,6 +115,11 @@ final class AdaptivePlanReviewCoordinator: ObservableObject {
     }
 
     func selectedProviderHasKey() -> Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["TOR_DEV_ADAPTIVE"] == "needs-key" {
+            return false
+        }
+        #endif
         let model = UserDefaults.standard.string(forKey: "coachModel") ?? CoachChatConfig.defaultModel
         let account = CoachModelProvider.apiKeyAccount(for: model)
         return ((try? KeychainStore.load(account: account)) ?? "")
@@ -320,6 +325,11 @@ final class AdaptivePlanReviewCoordinator: ObservableObject {
         let timestamp = now()
         var didChange = false
         for review in reviews(in: context) where review.phase == .preparing {
+            #if DEBUG
+            if DevSeed.preservesPreparingFixture(review) {
+                continue
+            }
+            #endif
             review.activeAttemptToken = nil
             review.transition(to: .failed, at: timestamp, error: "The previous review was interrupted.")
             didChange = true
