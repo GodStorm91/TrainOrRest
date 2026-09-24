@@ -402,6 +402,7 @@ enum PlanEditStore {
             targets[edit.weekIndex] = edit.weekTargetVolumeKmBefore
             plan.weekTargetVolumesKm = targets
             edit.revertedAt = today
+            markReviewReverted(for: edit, at: today, in: context)
 
             try context.save()
             NotificationCenter.default.post(name: .planDidChange, object: nil)
@@ -473,12 +474,24 @@ enum PlanEditStore {
             plan.weekTargetVolumesKm = targets
             plan.generatedAt = today
             edit.revertedAt = today
+            markReviewReverted(for: edit, at: today, in: context)
             try context.save()
         } catch {
             context.rollback()
             throw error
         }
         NotificationCenter.default.post(name: .planDidChange, object: nil)
+    }
+
+    private static func markReviewReverted(
+        for edit: PlanEdit,
+        at date: Date,
+        in context: ModelContext
+    ) {
+        let reviews = (try? context.fetch(FetchDescriptor<AdaptivePlanReview>())) ?? []
+        for review in reviews where review.planEditID == edit.id && review.phase == .applied {
+            review.transition(to: .reverted, at: date)
+        }
     }
 
     private static func isClose(_ lhs: Double, _ rhs: Double) -> Bool {

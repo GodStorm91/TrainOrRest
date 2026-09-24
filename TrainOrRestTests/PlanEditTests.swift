@@ -137,7 +137,7 @@ final class PlanEditTests: XCTestCase {
             CompletedActivity.self, DailyWellness.self, SyncState.self, Goal.self,
             TrainingPlan.self, PlannedWorkout.self, DailyReadiness.self, DailyCheckIn.self,
             RuleOverride.self, PlanSnapshot.self, ChatThread.self, ChatMessage.self,
-            CoachRequestSnapshot.self, PlanEdit.self
+            CoachRequestSnapshot.self, PlanEdit.self, AdaptivePlanReview.self
         ])
         let container = try ModelContainer(
             for: schema,
