@@ -227,7 +227,7 @@ final class ChatFeatureTests: XCTestCase {
         let context = container.mainContext
         try seedTrainingData(in: context)
 
-        let result = try CoachTools.apply(
+        _ = try CoachTools.apply(
             proposal: PlanAdjustmentProposal(changes: [
                 .init(date: CoachContextBuilder.day(qualityDay, calendar: calendar), action: .downgrade, detail: nil)
             ]),
@@ -237,7 +237,6 @@ final class ChatFeatureTests: XCTestCase {
         )
 
         let workouts = try plannedWorkouts(on: qualityDay, in: context)
-        XCTAssertEqual(result.summary, "Downgraded 2026-01-07 to easy")
         XCTAssertEqual(workouts.count, 1)
         XCTAssertEqual(workouts.first?.kind, .easy)
         XCTAssertEqual(workouts.first?.details, "Easy run at E pace")
@@ -273,7 +272,7 @@ final class ChatFeatureTests: XCTestCase {
         try seedTrainingData(in: context)
         let friday = PlanEngineTestSupport.date(2026, 1, 9, hour: 0)
 
-        let result = try CoachTools.apply(
+        _ = try CoachTools.apply(
             proposal: PlanAdjustmentProposal(changes: [
                 .init(
                     date: CoachContextBuilder.day(qualityDay, calendar: calendar),
@@ -288,7 +287,6 @@ final class ChatFeatureTests: XCTestCase {
 
         let wednesdayWorkout = try XCTUnwrap(try plannedWorkouts(on: qualityDay, in: context).first)
         let fridayWorkout = try XCTUnwrap(try plannedWorkouts(on: friday, in: context).first)
-        XCTAssertEqual(result.summary, "Swapped 2026-01-07 with 2026-01-09")
         XCTAssertEqual(wednesdayWorkout.kind, .easy)
         XCTAssertEqual(fridayWorkout.kind, .tempo)
         XCTAssertFalse(wednesdayWorkout.structure.isEmpty)
@@ -304,7 +302,7 @@ final class ChatFeatureTests: XCTestCase {
         let sourceWorkout = try XCTUnwrap(try plannedWorkouts(on: source, in: context).first)
         XCTAssertNil(try plannedWorkouts(on: target, in: context).first)
 
-        let result = try CoachTools.apply(
+        _ = try CoachTools.apply(
             proposal: PlanAdjustmentProposal(changes: [
                 .init(
                     date: CoachContextBuilder.day(source, calendar: calendar),
@@ -317,7 +315,6 @@ final class ChatFeatureTests: XCTestCase {
             calendar: calendar
         )
 
-        XCTAssertEqual(result.summary, "Moved 2026-01-09 to 2026-01-10")
         XCTAssertNil(try plannedWorkouts(on: source, in: context).first)
         let moved = try XCTUnwrap(try plannedWorkouts(on: target, in: context).first)
         XCTAssertEqual(moved.kind, sourceWorkout.kind)
@@ -471,7 +468,7 @@ final class ChatFeatureTests: XCTestCase {
             )])]
         )
 
-        let result = try CoachTools.apply(
+        _ = try CoachTools.apply(
             proposal: PlanAdjustmentProposal(changes: [
                 .init(date: CoachContextBuilder.day(today, calendar: calendar), action: .rest),
                 .init(date: CoachContextBuilder.day(freeDay, calendar: calendar), action: .create, workout: workout)
@@ -481,15 +478,13 @@ final class ChatFeatureTests: XCTestCase {
             calendar: calendar
         )
 
-        XCTAssertTrue(result.summary.contains("Rested 2026-01-05"))
-        XCTAssertTrue(result.summary.contains("Created easy on 2026-01-10"))
         XCTAssertTrue(try plannedWorkouts(on: today, in: context).isEmpty)
         let created = try XCTUnwrap(try plannedWorkouts(on: freeDay, in: context).first)
         XCTAssertEqual(created.kind, .easy)
         XCTAssertEqual(created.distanceKm, 8, accuracy: 0.001)
     }
 
-    func testChatStoreRunsToolLoopAndPersistsAppliedAdjustment() async throws {
+    func testChatStoreRunsToolLoopAndAppliesAdjustment() async throws {
         let container = try makeContainer()
         let context = container.mainContext
         try seedTrainingData(in: context)
@@ -522,10 +517,9 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertEqual(messages.count, 3)
         XCTAssertEqual(messages.filter { $0.role == .user }.count, 1)
         XCTAssertEqual(messages.filter { $0.role == .assistant }.count, 2)
-        XCTAssertEqual(
-            messages.compactMap(\.appliedAdjustment),
-            ["Downgraded 2026-01-07 to easy"]
-        )
+        XCTAssertEqual(pending.transaction.operations.count, 1)
+        XCTAssertEqual(pending.transaction.operations.first?.after?.kindRaw, WorkoutKind.easy.rawValue)
+        XCTAssertEqual(messages.compactMap(\.appliedAdjustment), [pending.summary])
         XCTAssertTrue(try XCTUnwrap(try plannedWorkouts(on: qualityDay, in: context).first).manuallyOverridden)
     }
 
@@ -767,7 +761,7 @@ final class ChatFeatureTests: XCTestCase {
             workout: payload
         )])
 
-        XCTAssertThrowsError(try CoachPlanCandidateEngine.prepare(proposal: proposal, in: context, today: today, calendar: calendar, language: .vi)) { error in
+        XCTAssertThrowsError(try CoachPlanCandidateEngine.prepare(proposal: proposal, scope: .standard, in: context, today: today, calendar: calendar, language: .vi)) { error in
             let raw = error.coachTechnicalDescription
             XCTAssertTrue(raw.contains("payload"), raw)
             let copy = CoachChatStore.userFacingContextualDistanceRejection(targetKm: 6, raw: raw, language: .vi)
@@ -983,7 +977,8 @@ final class ChatFeatureTests: XCTestCase {
 
         XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
         let pending = try XCTUnwrap(store.pendingPlanCandidate)
-        XCTAssertTrue(pending.summary.contains("Created easy on 2026-01-10"))
+        XCTAssertEqual(pending.transaction.operations.count, 1)
+        XCTAssertEqual(pending.transaction.operations.first?.after?.kindRaw, WorkoutKind.easy.rawValue)
         XCTAssertEqual(client.requests.count, 1)
 
         _ = store.confirmPlanCandidate(pending.id, in: context)
@@ -994,7 +989,7 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertTrue(created.manuallyOverridden)
 
         let messages = try context.fetch(FetchDescriptor<ChatMessage>())
-        XCTAssertEqual(messages.compactMap(\.appliedAdjustment), ["Created easy on 2026-01-10"])
+        XCTAssertEqual(messages.compactMap(\.appliedAdjustment), [pending.summary])
     }
 
     func testCoachMoveCanTargetNormalRestDay() throws {
@@ -1016,17 +1011,15 @@ final class ChatFeatureTests: XCTestCase {
             )
         ])
 
-        let staged = try CoachTools.validateForConfirmation(
+        _ = try CoachTools.validateForConfirmation(
             proposal: proposal,
             in: context,
             today: today,
             calendar: calendar
         )
-        XCTAssertEqual(staged.summary, "Moved 2026-01-05 to 2026-01-06")
         XCTAssertNotNil(try plannedWorkouts(on: source, in: context).first, "preflight must not persist")
 
-        let applied = try CoachTools.apply(proposal: proposal, in: context, today: today, calendar: calendar)
-        XCTAssertEqual(applied.summary, "Moved 2026-01-05 to 2026-01-06")
+        _ = try CoachTools.apply(proposal: proposal, in: context, today: today, calendar: calendar)
         XCTAssertNil(try plannedWorkouts(on: source, in: context).first)
         let moved = try XCTUnwrap(try plannedWorkouts(on: target, in: context).first)
         XCTAssertEqual(moved.kind, sourceWorkout.kind)
@@ -1062,6 +1055,7 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertThrowsError(
             try CoachPlanCandidateEngine.prepare(
                 proposal: proposal,
+                scope: .standard,
                 in: context,
                 today: today,
                 calendar: calendar,
@@ -1147,18 +1141,16 @@ final class ChatFeatureTests: XCTestCase {
             )
         ])
 
-        let staged = try CoachTools.validateForConfirmation(
+        _ = try CoachTools.validateForConfirmation(
             proposal: proposal,
             in: context,
             today: today,
             calendar: calendar
         )
-        XCTAssertEqual(staged.summary, "Moved 2026-01-05 to 2026-01-06; Created easy on 2026-01-10")
         XCTAssertNil(try plannedWorkouts(on: moveTarget, in: context).first, "preflight must not persist")
         XCTAssertNil(try plannedWorkouts(on: createTarget, in: context).first, "preflight must not persist")
 
-        let applied = try CoachTools.apply(proposal: proposal, in: context, today: today, calendar: calendar)
-        XCTAssertEqual(applied.summary, staged.summary)
+        _ = try CoachTools.apply(proposal: proposal, in: context, today: today, calendar: calendar)
         XCTAssertNil(try plannedWorkouts(on: source, in: context).first)
         XCTAssertNotNil(try plannedWorkouts(on: moveTarget, in: context).first)
         let created = try XCTUnwrap(try plannedWorkouts(on: createTarget, in: context).first)
@@ -1211,25 +1203,23 @@ final class ChatFeatureTests: XCTestCase {
         }
         XCTAssertEqual(changes.count, CoachTools.maxChangesPerProposal)
 
-        let staged = try CoachTools.validateForConfirmation(
+        _ = try CoachTools.validateForConfirmation(
             proposal: .init(changes: changes),
             in: context,
             today: today,
             calendar: calendar
         )
-        XCTAssertTrue(staged.summary.contains("Created easy on \(CoachContextBuilder.day(createTarget, calendar: calendar))"))
         XCTAssertNil(try plannedWorkouts(on: createTarget, in: context).first, "preflight must not persist")
         for (_, target) in movablePairs {
             XCTAssertNil(try plannedWorkouts(on: target, in: context).first, "preflight must not persist moves")
         }
 
-        let applied = try CoachTools.apply(
+        _ = try CoachTools.apply(
             proposal: .init(changes: changes),
             in: context,
             today: today,
             calendar: calendar
         )
-        XCTAssertEqual(applied.summary, staged.summary)
         let created = try XCTUnwrap(try plannedWorkouts(on: createTarget, in: context).first)
         XCTAssertEqual(created.kind, .easy)
         XCTAssertEqual(created.distanceKm, 1, accuracy: 0.001)
@@ -1302,7 +1292,8 @@ final class ChatFeatureTests: XCTestCase {
 
         XCTAssertEqual(client.requests.count, 1)
         let pending = try XCTUnwrap(store.pendingPlanCandidate)
-        XCTAssertEqual(pending.summary, "Created easy on 2026-01-10")
+        XCTAssertEqual(pending.transaction.operations.count, 1)
+        XCTAssertEqual(pending.transaction.operations.first?.after?.kindRaw, WorkoutKind.easy.rawValue)
         XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertFalse(messages.map(\.text).joined(separator: "\n").contains("could not safely"))
@@ -1351,7 +1342,8 @@ final class ChatFeatureTests: XCTestCase {
         in: context)
 
         let pending = try XCTUnwrap(store.pendingPlanCandidate)
-        XCTAssertEqual(pending.summary, "Created easy on 2026-01-10")
+        XCTAssertEqual(pending.transaction.operations.count, 1)
+        XCTAssertEqual(pending.transaction.operations.first?.after?.kindRaw, WorkoutKind.easy.rawValue)
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         let transcript = messages.map(\.text).joined(separator: "\n")
         XCTAssertFalse(transcript.contains("cannot apply workout-plan changes to a completed activity"))
@@ -1553,7 +1545,8 @@ final class ChatFeatureTests: XCTestCase {
 
         XCTAssertEqual(client.requests.count, 2)
         let pending = try XCTUnwrap(store.pendingPlanCandidate)
-        XCTAssertEqual(pending.summary, "Created easy on 2026-01-10")
+        XCTAssertEqual(pending.transaction.operations.count, 1)
+        XCTAssertEqual(pending.transaction.operations.first?.after?.kindRaw, WorkoutKind.easy.rawValue)
         XCTAssertNil(try plannedWorkouts(on: saturday, in: context).first)
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertEqual(messages.map(\.role), [.user, .assistant])

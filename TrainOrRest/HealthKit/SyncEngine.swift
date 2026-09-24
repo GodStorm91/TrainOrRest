@@ -27,18 +27,21 @@ final class SyncEngine: ObservableObject {
     private var resyncRequested = false
     private let calendar: Calendar
     private let pushService: WorkoutPushService?
+    private let recordAdaptiveRuns: (([NewRun]) throws -> Void)?
     private let logger = Logger(subsystem: "com.khanhnguyen.TrainOrRest", category: "sync")
 
     init(
         health: HealthKitService,
         modelContext: ModelContext,
         calendar: Calendar = .current,
-        pushService: WorkoutPushService? = nil
+        pushService: WorkoutPushService? = nil,
+        recordAdaptiveRuns: (([NewRun]) throws -> Void)? = nil
     ) {
         self.health = health
         self.modelContext = modelContext
         self.calendar = calendar
         self.pushService = pushService
+        self.recordAdaptiveRuns = recordAdaptiveRuns
     }
 
     /// Registers observer queries so Garmin Connect writes trigger a sync
@@ -67,7 +70,7 @@ final class SyncEngine: ObservableObject {
     private func performSync() async {
         lastError = nil
         do {
-            try await syncWorkouts()
+            let newRuns = try await syncWorkouts()
             try await syncWellness()
             try modelContext.save()
             // Matching and readiness failures must not read as sync failures —
@@ -76,6 +79,11 @@ final class SyncEngine: ObservableObject {
                 try PlanStore.autoMatch(in: modelContext, calendar: calendar)
             } catch {
                 logger.error("Workout auto-match failed: \(error, privacy: .public)")
+            }
+            do {
+                try recordAdaptiveRuns?(newRuns)
+            } catch {
+                logger.error("Next-week review trigger recording failed: \(error, privacy: .public)")
             }
             do {
                 try ShoeAssignmentService.assignAutomaticShoesToUnassignedActivities(in: modelContext)
@@ -104,9 +112,10 @@ final class SyncEngine: ObservableObject {
 
     // MARK: - Workouts
 
-    private func syncWorkouts() async throws {
+    private func syncWorkouts() async throws -> [NewRun] {
         let state = try fetchOrCreateSyncState(domain: SyncState.workoutsDomain)
         let delta = try await health.runningWorkoutDelta(anchorData: state.anchorData)
+        var newRuns: [NewRun] = []
 
         for summary in delta.added {
             let pace = ActivityMapper.averagePaceSecondsPerKm(
@@ -133,6 +142,10 @@ final class SyncEngine: ObservableObject {
                     avgPaceSecondsPerKm: pace,
                     sourceName: summary.sourceName
                 ))
+                newRuns.append(NewRun(
+                    hkUUID: summary.uuid,
+                    endDate: summary.start.addingTimeInterval(summary.durationSeconds)
+                ))
             }
         }
 
@@ -150,6 +163,7 @@ final class SyncEngine: ObservableObject {
         logger.info("Workouts sync: +\(delta.added.count) −\(delta.deletedUUIDs.count)")
 
         try await backfillMissingHeartRates()
+        return newRuns
     }
 
     /// Garmin can write a workout before its heart-rate series, and the

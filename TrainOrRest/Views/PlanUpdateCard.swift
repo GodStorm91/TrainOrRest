@@ -14,24 +14,9 @@ struct CoachTrustLedger: View {
     private var hasLoadWarning: Bool { !loadRisks.isEmpty }
 
     var body: some View {
-        HStack(spacing: 6) {
-            chip(language.ledgerProposedLabel, symbol: "sparkles", tint: Theme.accent)
-
-            Button { showsReceipt = true } label: {
-                if hasLoadWarning {
-                    chip(
-                        language.ledgerValidatedWithWarningLabel,
-                        symbol: "exclamationmark.triangle.fill",
-                        tint: Theme.warn
-                    )
-                } else {
-                    chip(language.ledgerValidatedLabel, symbol: "checkmark.seal", tint: Theme.good)
-                }
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(language.showValidationReceiptLabel)
-
-            chip(language.ledgerAwaitsLabel, symbol: "person", tint: Theme.dim)
+        ViewThatFits(in: .horizontal) {
+            ledger(horizontal: true, compactLabels: true)
+            ledger(horizontal: false, compactLabels: false)
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .sheet(isPresented: $showsReceipt) {
@@ -41,6 +26,64 @@ struct CoachTrustLedger: View {
                 rows: receiptRows
             )
         }
+    }
+
+    @ViewBuilder
+    private func ledger(horizontal: Bool, compactLabels: Bool) -> some View {
+        if horizontal {
+            HStack(spacing: 6) {
+                proposedChip(compactLabels: compactLabels)
+                validationReceiptButton(compactLabels: compactLabels)
+                awaitsChip(compactLabels: compactLabels)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                proposedChip(compactLabels: compactLabels)
+                validationReceiptButton(compactLabels: compactLabels)
+                awaitsChip(compactLabels: compactLabels)
+            }
+        }
+    }
+
+    private func proposedChip(compactLabels: Bool) -> some View {
+        chip(
+            language.ledgerProposedLabel,
+            symbol: "sparkles",
+            tint: Theme.dim,
+            background: Theme.chip,
+            compactLabels: compactLabels
+        )
+    }
+
+    private func validationReceiptButton(compactLabels: Bool) -> some View {
+        Button { showsReceipt = true } label: {
+            if hasLoadWarning {
+                chip(
+                    language.ledgerValidatedWithWarningLabel,
+                    symbol: "exclamationmark.triangle.fill",
+                    tint: Theme.warn,
+                    compactLabels: compactLabels
+                )
+            } else {
+                chip(
+                    language.ledgerValidatedLabel,
+                    symbol: "checkmark.seal",
+                    tint: Theme.good,
+                    compactLabels: compactLabels
+                )
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(language.showValidationReceiptLabel)
+    }
+
+    private func awaitsChip(compactLabels: Bool) -> some View {
+        chip(
+            language.ledgerAwaitsLabel,
+            symbol: "person",
+            tint: Theme.dim,
+            compactLabels: compactLabels
+        )
     }
 
     /// `Issue.Kind.allCases` order matches `planValidationChecks`.
@@ -65,20 +108,33 @@ struct CoachTrustLedger: View {
         return rows
     }
 
-    private func chip(_ title: String, symbol: String, tint: Color) -> some View {
+    private func chip(
+        _ title: String,
+        symbol: String,
+        tint: Color,
+        background: Color? = nil,
+        compactLabels: Bool
+    ) -> some View {
         HStack(spacing: 5) {
             Image(systemName: symbol)
                 .font(.caption.weight(.semibold))
                 .accessibilityHidden(true)
-            Text(title)
-                .font(.caption2.weight(.semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
+            if compactLabels {
+                Text(title)
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+            } else {
+                Text(title)
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .foregroundStyle(tint)
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, minHeight: 36)
-        .background(Theme.soft(tint), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(background ?? Theme.soft(tint), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -411,7 +467,7 @@ struct PlanProposalCard: View {
         }
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Theme.accent.opacity(0.55), lineWidth: 1)
+                .strokeBorder(Theme.border, lineWidth: 1)
         )
     }
 
@@ -433,7 +489,7 @@ struct PlanProposalCard: View {
                 .font(.torLabel(11, .bold))
                 .tracking(1.4)
         }
-        .foregroundStyle(Theme.accent)
+        .foregroundStyle(Theme.dim)
     }
 
 
@@ -456,7 +512,7 @@ struct PlanProposalCard: View {
         if let kind = change.workout?.kind, !kind.isEmpty {
             return WorkoutKind(rawValue: kind).map(language.name) ?? language.genericRunLabel
         }
-        return change.date
+        return (try? CoachTools.parseDay(change.date, calendar: .current)).map { language.shortWeekdayDate($0) } ?? change.date
     }
 
     private var applyLabel: String {

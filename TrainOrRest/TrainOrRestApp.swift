@@ -14,6 +14,7 @@ struct TrainOrRestApp: App {
     @StateObject private var googleCalendarService: GoogleCalendarSyncService
     @StateObject private var chatStore: CoachChatStore
     @StateObject private var chatSession: CoachChatSessionState
+    @StateObject private var adaptiveReviewCoordinator: AdaptivePlanReviewCoordinator
     @StateObject private var runSchedule: RunScheduleController
     @Environment(\.scenePhase) private var scenePhase
 
@@ -25,6 +26,7 @@ struct TrainOrRestApp: App {
                 Goal.self, TrainingPlan.self, PlannedWorkout.self,
                 DailyReadiness.self, DailyCheckIn.self, RuleOverride.self,
                 PlanSnapshot.self, ChatThread.self, ChatMessage.self, PlanEdit.self,
+                AdaptivePlanReview.self,
                 CoachRequestSnapshot.self, CoachMemoryItem.self, CoachPromptSuggestionRecord.self,
                 GoogleCalendarConnection.self, GoogleCalendarEventLink.self,
                 GoogleCalendarInboundChange.self, ScheduleChangeOperation.self,
@@ -44,10 +46,17 @@ struct TrainOrRestApp: App {
             chatSession.activeThreadID = seededThreadID
         }
 #endif
+        let adaptiveReviewCoordinator = AdaptivePlanReviewCoordinator(
+            anthropicClient: ClaudeClient(),
+            openAIClient: OpenAIClient()
+        )
         let engine = SyncEngine(
             health: HealthKitService(),
             modelContext: container.mainContext,
-            pushService: pushService
+            pushService: pushService,
+            recordAdaptiveRuns: { runs in
+                try adaptiveReviewCoordinator.recordAutomaticRuns(runs, in: container.mainContext)
+            }
         )
         // Register observer queries at launch, not from view lifecycle:
         // HealthKit background launches never connect a scene, so view
@@ -60,6 +69,7 @@ struct TrainOrRestApp: App {
         _chatStore = StateObject(wrappedValue: chatStore)
         _chatSession = StateObject(wrappedValue: chatSession)
         _runSchedule = StateObject(wrappedValue: RunScheduleController())
+        _adaptiveReviewCoordinator = StateObject(wrappedValue: adaptiveReviewCoordinator)
 
         // Background tasks must be registered before launch finishes.
         BGTaskScheduler.shared.register(
@@ -78,6 +88,7 @@ struct TrainOrRestApp: App {
                 .environmentObject(chatStore)
                 .environmentObject(chatSession)
                 .environmentObject(runSchedule)
+                .environmentObject(adaptiveReviewCoordinator)
         }
         .modelContainer(container)
         .onChange(of: scenePhase) { _, phase in
@@ -124,6 +135,7 @@ struct RootView: View {
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.system.rawValue
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
     @AppStorage(OnboardingGate.completedKey) private var onboardingCompleted = false
+    @EnvironmentObject private var adaptiveReviewCoordinator: AdaptivePlanReviewCoordinator
 
     private var appearance: AppAppearance {
         AppAppearance(rawValue: appearanceRaw) ?? .system
@@ -176,6 +188,13 @@ struct RootView: View {
                 #endif
                 Task { await engine.syncAll() }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .planDidChange)) { _ in
+            adaptiveReviewCoordinator.planDidChange(in: modelContext)
+        }
+        .onChange(of: engine.isSyncing) { wasSyncing, isSyncing in
+            guard wasSyncing, !isSyncing else { return }
+            Task { await adaptiveReviewCoordinator.syncDidSettle(in: modelContext) }
         }
     }
 

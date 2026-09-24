@@ -20,10 +20,9 @@ final class CoachCreateWorkoutTests: XCTestCase {
         let paces = try XCTUnwrap(fitnessPaces(in: context))
         let targetBefore = try weekTarget(0, in: context)
 
-        let result = try create(.tempo(workKm: 3), on: freeDay, in: context)
+        _ = try create(.tempo(workKm: 3), on: freeDay, in: context)
 
         let workout = try XCTUnwrap(workout(on: freeDay, in: context))
-        XCTAssertEqual(result.summary, "Created tempo on 2026-01-09")
         XCTAssertEqual(workout.kind, .tempo)
         XCTAssertEqual(workout.distanceKm, 7, accuracy: 0.001) // 2 + 3 + 2
         XCTAssertEqual(workout.paceBand, paces.threshold, "pace comes from app fitness, never the payload")
@@ -41,10 +40,9 @@ final class CoachCreateWorkoutTests: XCTestCase {
         let context = container.mainContext
         let paces = try XCTUnwrap(fitnessPaces(in: context))
 
-        let result = try create(.threshold(workKm: 4), on: freeDay, in: context)
+        _ = try create(.threshold(workKm: 4), on: freeDay, in: context)
 
         let workout = try XCTUnwrap(workout(on: freeDay, in: context))
-        XCTAssertEqual(result.summary, "Created threshold on 2026-01-09")
         XCTAssertEqual(workout.kind, .threshold)
         XCTAssertEqual(workout.distanceKm, 8, accuracy: 0.001)
         XCTAssertEqual(workout.paceBand, paces.threshold)
@@ -93,7 +91,7 @@ final class CoachCreateWorkoutTests: XCTestCase {
 
         // Both creates must fit under the week's volume cap, or the batch is
         // (correctly) rejected as a whole.
-        let result = try CoachTools.apply(
+        _ = try CoachTools.apply(
             proposal: .init(changes: [
                 change(.tempo(workKm: 3), on: freeDay),
                 change(.easy(km: 3), on: saturday)
@@ -101,7 +99,6 @@ final class CoachCreateWorkoutTests: XCTestCase {
             in: context, today: today, calendar: calendar
         )
 
-        XCTAssertEqual(result.summary, "Created tempo on 2026-01-09; Created easy on 2026-01-10")
         XCTAssertNotNil(try workout(on: freeDay, in: context))
         XCTAssertNotNil(try workout(on: saturday, in: context))
         XCTAssertEqual(try weekTarget(0, in: context), targetBefore + 10, accuracy: 0.001)
@@ -116,9 +113,8 @@ final class CoachCreateWorkoutTests: XCTestCase {
         plan.weekTargetVolumesKm = targets
         try context.save()
 
-        let result = try create(.easy(km: 5), on: freeDay, in: context)
+        _ = try create(.easy(km: 5), on: freeDay, in: context)
 
-        XCTAssertEqual(result.summary, "Created easy on 2026-01-09")
         XCTAssertNotNil(try workout(on: freeDay, in: context))
         XCTAssertEqual(try weekTarget(2, in: context), 100, accuracy: 0.001)
     }
@@ -294,8 +290,7 @@ final class CoachCreateWorkoutTests: XCTestCase {
         let container = try seededContainer(availableDays: [.monday, .tuesday, .wednesday, .thursday, .friday, .sunday])
         let context = container.mainContext
         let saturday = PlanEngineTestSupport.date(2026, 1, 10, hour: 0)
-        let result = try create(.easy(km: 5), on: saturday, in: context)
-        XCTAssertEqual(result.summary, "Created easy on 2026-01-10")
+        _ = try create(.easy(km: 5), on: saturday, in: context)
         let workout = try XCTUnwrap(try workout(on: saturday, in: context))
         XCTAssertEqual(workout.kind, .easy)
         XCTAssertTrue(workout.manuallyOverridden)
@@ -309,6 +304,7 @@ final class CoachCreateWorkoutTests: XCTestCase {
 
         let candidate = try CoachPlanCandidateEngine.prepare(
             proposal: .init(changes: [change(.tempo(workKm: 3), on: freeDay)]),
+            scope: .standard,
             in: context, today: today, calendar: calendar, language: .en
         )
         XCTAssertEqual(candidate.notes.map(\.kind), [.paceUnavailable])

@@ -19,3 +19,4 @@ This folder is the diagram-first onboarding layer. Keep long product/design rati
 
 - [User start here](user-start-here.md)
 - [Contributor start here](contributor-start-here.md)
+- [Adaptive next-week review coordinator](../../TrainOrRest/Chat/AdaptivePlanReviewCoordinator.swift) stages review state. [Calendar review slot](../../TrainOrRest/Views/AdaptivePlanReviewSlot.swift) renders it.

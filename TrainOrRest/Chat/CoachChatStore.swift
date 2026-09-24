@@ -462,6 +462,7 @@ final class CoachChatStore: ObservableObject {
         )])
         let candidate = try CoachPlanCandidateEngine.prepare(
             proposal: proposal,
+            scope: .standard,
             in: context,
             today: snapshot.createdAt,
             calendar: calendar,
@@ -514,6 +515,7 @@ final class CoachChatStore: ObservableObject {
         )])
         let candidate = try CoachPlanCandidateEngine.prepare(
             proposal: proposal,
+            scope: .standard,
             in: context,
             today: snapshot.createdAt,
             calendar: calendar,
@@ -931,6 +933,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
                 let proposal = try toolUse.2.decoded(PlanAdjustmentProposal.self)
                 let candidate = try CoachPlanCandidateEngine.prepare(
                     proposal: proposal,
+                    scope: .standard,
                     in: context,
                     today: today,
                     calendar: calendar,

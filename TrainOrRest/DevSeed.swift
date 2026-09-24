@@ -16,6 +16,7 @@ enum DevSeed {
     private static let threadID = UUID(uuidString: "00000000-0000-0000-0000-00000DE75EED")!
     /// Stable id for the empty thread used by the live coach verification seam.
     private static let liveThreadID = UUID(uuidString: "00000000-0000-0000-0000-00000C0AC11E")!
+    private static let adaptiveReviewTriggerKey = "manual:00000000-0000-0000-0000-00000000ad17"
 
     static var isRequested: Bool {
         ProcessInfo.processInfo.environment["TOR_DEV_SEED"] == "1"
@@ -119,6 +120,7 @@ enum DevSeed {
         preloadAPIKey()
         applyRequestedLanguage()
         seedPlanIfRequested(context)
+        seedAdaptiveReviewIfRequested(context)
         seedTodayRunIfRequested(context)
         seedHistoryIfRequested(context)
         seedShoesIfRequested(context)
@@ -230,6 +232,118 @@ enum DevSeed {
         )
         let fitness = FitnessProfile(vdot: 48, weeklyVolumeKm: 40, volumeTrend: 0, longestRecentRunKm: 16)
         try? PlanStore.replaceGoal(spec: spec, fitness: fitness, today: today, calendar: calendar, in: context)
+    }
+
+    /// `TOR_DEV_ADAPTIVE=queued|preparing|proposal|no-change|failed|stale|applied|reverted|superseded|needs-key|dismissed`
+    /// paired with `TOR_DEV_PLAN=1` renders a deterministic next-week review state.
+    @MainActor
+    private static func seedAdaptiveReviewIfRequested(_ context: ModelContext) {
+        guard ProcessInfo.processInfo.environment["TOR_DEV_PLAN"] == "1",
+              let raw = ProcessInfo.processInfo.environment["TOR_DEV_ADAPTIVE"],
+              let phase = adaptivePhase(for: raw)
+        else { return }
+        guard (try? context.fetch(FetchDescriptor<AdaptivePlanReview>()).isEmpty) != false else { return }
+
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let end = calendar.date(byAdding: .day, value: 7, to: today) ?? today
+        let activityID = UUID(uuidString: "00000000-0000-0000-0000-00000000ad18")!
+        if (try? context.fetch(FetchDescriptor<CompletedActivity>()).contains(where: { $0.hkUUID == activityID })) != true {
+            context.insert(CompletedActivity(
+                hkUUID: activityID,
+                date: calendar.date(byAdding: .hour, value: 7, to: today) ?? today,
+                distanceMeters: 8_000,
+                durationSeconds: 2_880,
+                avgHeartRate: 148,
+                maxHeartRate: 165,
+                avgPaceSecondsPerKm: 360,
+                sourceName: "Dev seed"
+            ))
+        }
+
+        let review = AdaptivePlanReview(
+            triggerKey: adaptiveReviewTriggerKey,
+            origin: .manual,
+            triggerActivityUUID: activityID,
+            window: NextSevenDayWindow(start: today, end: end),
+            createdAt: today
+        )
+        review.phaseRaw = phase.rawValue
+        review.summary = phase == .noChange ? "No changes needed." : "Review fixture"
+
+        if let proposal = adaptiveProposal(in: context, start: today, calendar: calendar),
+           phase == .proposal || phase == .stale || phase == .applied || phase == .reverted {
+            review.proposalJSON = try? String(decoding: JSONEncoder().encode(proposal), as: UTF8.self)
+            review.basePlanRevision = try? CoachPlanRevision.current(in: context)
+            if phase == .applied || phase == .reverted,
+               let candidate = try? CoachPlanCandidateEngine.prepare(
+                    proposal: proposal,
+                    scope: review.scope,
+                    in: context,
+                    today: today,
+                    calendar: calendar,
+                    language: .en
+               ),
+               let result = try? CoachPlanCandidateEngine.commit(
+                    candidate,
+                    in: context,
+                    today: today,
+                    calendar: calendar,
+                    language: .en
+               ),
+               case let .applied(receipt) = result {
+                review.planEditID = receipt.id
+                if phase == .reverted {
+                    try? PlanEditStore.revert(receipt.id, in: context, today: today, calendar: calendar)
+                }
+            }
+        }
+
+        context.insert(review)
+        try? context.save()
+    }
+
+    @MainActor
+    static func preservesPreparingFixture(_ review: AdaptivePlanReview) -> Bool {
+        ProcessInfo.processInfo.environment["TOR_DEV_ADAPTIVE"] == "preparing"
+            && review.triggerKey == adaptiveReviewTriggerKey
+    }
+
+    private static func adaptivePhase(for raw: String) -> AdaptivePlanReviewPhase? {
+        switch raw.lowercased() {
+        case "queued": .queued
+        case "preparing": .preparing
+        case "proposal": .proposal
+        case "no-change": .noChange
+        case "failed": .failed
+        case "stale": .stale
+        case "applied": .applied
+        case "reverted": .reverted
+        case "superseded": .superseded
+        case "needs-key": .needsKey
+        case "dismissed": .dismissed
+        default: nil
+        }
+    }
+
+    @MainActor
+    private static func adaptiveProposal(
+        in context: ModelContext,
+        start: Date,
+        calendar: Calendar
+    ) -> PlanAdjustmentProposal? {
+        let end = calendar.date(byAdding: .day, value: 7, to: start) ?? start
+        let workouts = (try? context.fetch(FetchDescriptor<PlannedWorkout>(sortBy: [SortDescriptor(\.date)]))) ?? []
+        guard let workout = workouts.first(where: {
+            $0.status == .planned
+                && !$0.isScheduleLocked
+                && $0.date >= start
+                && $0.date < end
+        }) else { return nil }
+        return PlanAdjustmentProposal(changes: [.init(
+            date: CoachContextBuilder.day(workout.date, calendar: calendar),
+            action: .rest
+        )])
     }
 
     @MainActor

@@ -3,6 +3,8 @@ erDiagram
   TrainingPlan ||--o{ PlannedWorkout : contains
   TrainingPlan ||--o{ PlanSnapshot : snapshots
   TrainingPlan ||--o{ PlanEdit : journals
+  TrainingPlan ||--o{ AdaptivePlanReview : targets_by_revision
+  AdaptivePlanReview o|--o| PlanEdit : records_receipt_id
   CompletedActivity ||--o{ PlannedWorkout : auto_matches
   DailyWellness ||--o{ DailyReadiness : informs
   DailyCheckIn ||--o{ DailyReadiness : corroborates
