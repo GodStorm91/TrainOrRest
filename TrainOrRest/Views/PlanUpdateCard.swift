@@ -512,7 +512,7 @@ struct PlanProposalCard: View {
         if let kind = change.workout?.kind, !kind.isEmpty {
             return WorkoutKind(rawValue: kind).map(language.name) ?? language.genericRunLabel
         }
-        return change.date
+        return (try? CoachTools.parseDay(change.date, calendar: .current)).map { language.shortWeekdayDate($0) } ?? change.date
     }
 
     private var applyLabel: String {

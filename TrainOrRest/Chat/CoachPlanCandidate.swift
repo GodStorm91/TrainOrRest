@@ -228,7 +228,12 @@ enum CoachPlanCandidateEngine {
             let snapshot = newSnapshot(date: date, weekIndex: weekIndex, phase: phase, built: built)
             workspace.snapshots[snapshot.uuid] = snapshot
             workspace.identityByDay[date] = snapshot.uuid
-            workspace.summaries.append("Created \(built.kind.rawValue) on \(change.date)")
+            workspace.summaries.append(
+                workspace.language.plan.createdWorkout(
+                    kind: workspace.language.kindName(built.kind),
+                    on: workspace.language.shortWeekdayDate(date, calendar: calendar)
+                )
+            )
         }
 
         let peakCap = fitness.map { max($0.weeklyVolumeKm * 1.35, $0.longestRecentRunKm * 2) }
@@ -530,7 +535,12 @@ enum CoachPlanCandidateEngine {
     ) throws {
         if let extras = workspace.duplicatesByDay.removeValue(forKey: date) {
             for extra in extras { workspace.snapshots.removeValue(forKey: extra) }
-            workspace.summaries.append("Removed \(extras.count) duplicate workout(s) on \(change.date)")
+            workspace.summaries.append(
+                workspace.language.plan.removedDuplicateWorkouts(
+                    extras.count,
+                    on: workspace.language.shortWeekdayDate(date, calendar: calendar)
+                )
+            )
         }
         guard let location = locate(date, in: workspace.candidate, calendar: calendar),
               let identity = workspace.identityByDay[date],
@@ -549,14 +559,21 @@ enum CoachPlanCandidateEngine {
             workspace.candidate.weeks[location.week].workouts.remove(at: location.workout)
             workspace.snapshots.removeValue(forKey: identity)
             workspace.identityByDay.removeValue(forKey: date)
-            workspace.summaries.append("Rested \(change.date)")
+            workspace.summaries.append(
+                workspace.language.plan.restedWorkout(on: workspace.language.shortWeekdayDate(date, calendar: calendar))
+            )
         case .downgrade:
             let built = WorkoutFactory.canonicalEasy(distanceKm: workout.distanceKm, paces: paces)
             workspace.candidate.weeks[location.week].workouts[location.workout] = spec(date: date, built: built)
             applyBuilt(built, to: &snapshot, resetCompletion: false)
             snapshot.manuallyOverridden = true
             workspace.snapshots[identity] = snapshot
-            workspace.summaries.append("Downgraded \(change.date) to easy")
+            workspace.summaries.append(
+                workspace.language.plan.downgradedWorkout(
+                    on: workspace.language.shortWeekdayDate(date, calendar: calendar),
+                    to: workspace.language.kindName(.easy)
+                )
+            )
         case .move:
             let target = try targetDay(change.detail, calendar: calendar)
             guard workspace.identityByDay[target] == nil else {
@@ -585,7 +602,12 @@ enum CoachPlanCandidateEngine {
             snapshot.phaseRaw = workspace.candidate.weeks[targetWeek].phase.rawValue
             snapshot.manuallyOverridden = true
             workspace.snapshots[identity] = snapshot
-            workspace.summaries.append("Moved \(change.date) to \(CoachContextBuilder.day(target, calendar: calendar))")
+            workspace.summaries.append(
+                workspace.language.plan.movedWorkout(
+                    from: workspace.language.shortWeekdayDate(date, calendar: calendar),
+                    to: workspace.language.shortWeekdayDate(target, calendar: calendar)
+                )
+            )
         case .swap:
             let target = try targetDay(change.detail, calendar: calendar)
             guard let otherLocation = locate(target, in: workspace.candidate, calendar: calendar),
@@ -607,7 +629,12 @@ enum CoachPlanCandidateEngine {
             workspace.snapshots[otherID] = otherSnapshot
             workspace.identityByDay[date] = otherID
             workspace.identityByDay[target] = identity
-            workspace.summaries.append("Swapped \(change.date) with \(CoachContextBuilder.day(target, calendar: calendar))")
+            workspace.summaries.append(
+                workspace.language.plan.swappedWorkouts(
+                    workspace.language.shortWeekdayDate(date, calendar: calendar),
+                    with: workspace.language.shortWeekdayDate(target, calendar: calendar)
+                )
+            )
         case .replace:
             guard let payload = change.workout else {
                 throw CoachTools.ValidationError("replace requires a workout.")
@@ -626,7 +653,12 @@ enum CoachPlanCandidateEngine {
             applyBuilt(built, to: &snapshot, resetCompletion: true)
             snapshot.manuallyOverridden = true
             workspace.snapshots[identity] = snapshot
-            workspace.summaries.append("Replaced \(change.date) with \(built.kind.rawValue)")
+            workspace.summaries.append(
+                workspace.language.plan.replacedWorkout(
+                    on: workspace.language.shortWeekdayDate(date, calendar: calendar),
+                    with: workspace.language.kindName(built.kind)
+                )
+            )
         }
     }
 

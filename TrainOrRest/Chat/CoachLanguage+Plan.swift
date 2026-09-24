@@ -225,6 +225,31 @@ struct PlanCopy {
     var workoutUpdatedDetails: String { text(en: "Workout kept in place with updated training details.", ja: "ワークアウトはそのままでトレーニング詳細を更新しました。", vi: "Giữ nguyên buổi tập và cập nhật chi tiết tập luyện.") }
     var workoutRemovedRecovery: String { text(en: "Workout removed so the day becomes recovery.", ja: "ワークアウトを削除して回復日にしました。", vi: "Đã bỏ buổi tập để ngày này trở thành ngày hồi phục.") }
     func workoutAddedBalanced(_ kind: String) -> String { text(en: "Added \(kind.lowercased()) to keep the plan balanced.", ja: "プランのバランスを保つため\(kind)を追加。", vi: "Đã thêm \(kind.lowercased()) để giữ cân bằng kế hoạch.") }
+    func createdWorkout(kind: String, on day: String) -> String {
+        text(en: "Created \(kind) on \(day)", ja: "\(day)に\(kind)を作成しました", vi: "Đã tạo \(kind) vào \(day)")
+    }
+    func removedDuplicateWorkouts(_ count: Int, on day: String) -> String {
+        text(
+            en: "Removed \(count) duplicate workout\(count == 1 ? "" : "s") on \(day)",
+            ja: "\(day)の重複したワークアウトを\(count)件削除しました",
+            vi: "Đã xóa \(count) buổi tập trùng lặp vào \(day)"
+        )
+    }
+    func restedWorkout(on day: String) -> String {
+        text(en: "Rested \(day)", ja: "\(day)を休養日にしました", vi: "Đã chuyển \(day) thành ngày nghỉ")
+    }
+    func downgradedWorkout(on day: String, to kind: String) -> String {
+        text(en: "Downgraded \(day) to \(kind)", ja: "\(day)を\(kind)に軽減しました", vi: "Đã giảm buổi tập \(day) xuống \(kind)")
+    }
+    func movedWorkout(from source: String, to target: String) -> String {
+        text(en: "Moved \(source) to \(target)", ja: "\(source)を\(target)に移動しました", vi: "Đã chuyển \(source) sang \(target)")
+    }
+    func swappedWorkouts(_ first: String, with second: String) -> String {
+        text(en: "Swapped \(first) with \(second)", ja: "\(first)と\(second)を入れ替えました", vi: "Đã đổi \(first) với \(second)")
+    }
+    func replacedWorkout(on day: String, with kind: String) -> String {
+        text(en: "Replaced \(day) with \(kind)", ja: "\(day)を\(kind)に変更しました", vi: "Đã thay buổi tập vào \(day) bằng \(kind)")
+    }
 
     // MARK: - Plan detail
 

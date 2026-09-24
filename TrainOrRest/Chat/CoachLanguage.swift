@@ -736,7 +736,7 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         }
     }
 
-    private func kindName(_ kind: WorkoutKind) -> String {
+    func kindName(_ kind: WorkoutKind) -> String {
         switch (self, kind) {
         case (.en, .easy): "Easy run"
         case (.en, .long): "Long run"

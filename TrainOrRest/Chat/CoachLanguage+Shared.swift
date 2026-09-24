@@ -370,8 +370,12 @@ extension CoachLanguage {
     }
 
     /// Abbreviated weekday + abbreviated month + day, e.g. "Mon, Mar 3".
-    func shortWeekdayDate(_ date: Date) -> String {
-        date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().locale(uiLocale))
+    func shortWeekdayDate(_ date: Date, calendar: Calendar = .current) -> String {
+        var style = Date.FormatStyle.dateTime.weekday(.abbreviated).month(.abbreviated).day()
+        style.calendar = calendar
+        style.timeZone = calendar.timeZone
+        style.locale = uiLocale
+        return date.formatted(style)
     }
 
     /// Month + year for calendar navigation, e.g. "March 2026".
