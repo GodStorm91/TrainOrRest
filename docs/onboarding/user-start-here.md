@@ -13,3 +13,4 @@ TrainOrRest is a calm training cockpit for one serious recreational runner. It a
 - Garmin-derived data arrives through Apple Health.
 - Today shows a verdict with receipts: Train, Go easy, Rest, or Building baseline.
 - AI can explain or propose. Local validators and your approval decide whether a plan changes.
+- Calendar can review the next 7 days after a finished run, or when you ask. It never changes the plan without your Apply. Its receipt can revert for 7 days.

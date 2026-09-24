@@ -14,6 +14,7 @@
 - App target: `TrainOrRest/`.
 - Tests: `TrainOrRestTests/`.
 - Product source of truth: `PRODUCT.md` and `DESIGN.md`.
+- Calendar review flow: [AdaptivePlanReviewCoordinator](../../TrainOrRest/Chat/AdaptivePlanReviewCoordinator.swift) stages reviews. [AdaptivePlanReviewSlot](../../TrainOrRest/Views/AdaptivePlanReviewSlot.swift) renders them.
 
 ## Mermaid diagrams
 
