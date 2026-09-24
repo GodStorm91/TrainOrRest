@@ -99,6 +99,7 @@ final class PlanEditTests: XCTestCase {
     private func applyCandidate(in context: ModelContext) throws -> PlanEdit {
         let candidate = try CoachPlanCandidateEngine.prepare(
             proposal: replacementProposal(),
+            scope: .standard,
             in: context,
             today: today,
             calendar: calendar,

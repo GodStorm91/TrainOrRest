@@ -767,7 +767,7 @@ final class ChatFeatureTests: XCTestCase {
             workout: payload
         )])
 
-        XCTAssertThrowsError(try CoachPlanCandidateEngine.prepare(proposal: proposal, in: context, today: today, calendar: calendar, language: .vi)) { error in
+        XCTAssertThrowsError(try CoachPlanCandidateEngine.prepare(proposal: proposal, scope: .standard, in: context, today: today, calendar: calendar, language: .vi)) { error in
             let raw = error.coachTechnicalDescription
             XCTAssertTrue(raw.contains("payload"), raw)
             let copy = CoachChatStore.userFacingContextualDistanceRejection(targetKm: 6, raw: raw, language: .vi)
@@ -1062,6 +1062,7 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertThrowsError(
             try CoachPlanCandidateEngine.prepare(
                 proposal: proposal,
+                scope: .standard,
                 in: context,
                 today: today,
                 calendar: calendar,

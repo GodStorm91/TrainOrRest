@@ -309,6 +309,7 @@ final class CoachCreateWorkoutTests: XCTestCase {
 
         let candidate = try CoachPlanCandidateEngine.prepare(
             proposal: .init(changes: [change(.tempo(workKm: 3), on: freeDay)]),
+            scope: .standard,
             in: context, today: today, calendar: calendar, language: .en
         )
         XCTAssertEqual(candidate.notes.map(\.kind), [.paceUnavailable])

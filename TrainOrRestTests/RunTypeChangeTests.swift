@@ -52,6 +52,7 @@ final class RunTypeChangeTests: XCTestCase {
                 detail: nil,
                 workout: tempo
             )]),
+            scope: .standard,
             in: context,
             today: today,
             calendar: calendar,

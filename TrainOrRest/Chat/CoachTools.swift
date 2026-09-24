@@ -129,53 +129,8 @@ struct PlanEditPreflight: Equatable {
 
 
 @MainActor
-enum CoachTools {
-    static let toolName = "propose_plan_adjustment"
-    /// Bounds untrusted batches before any allocation or persistence.
-    static let maxChangesPerProposal = 5
-    static let staleReplacementMessage = ReplacementError.staleTargetMessage
-
-    enum ReplacementError: LocalizedError, Equatable {
-        case staleTarget
-
-        static let staleTargetMessage = "That scheduled workout changed before confirmation. Please ask again."
-
-        var errorDescription: String? {
-            switch self {
-            case .staleTarget:
-                return Self.staleTargetMessage
-            }
-        }
-    }
-
-    static var tool: ClaudeTool {
-        ClaudeTool(
-            name: toolName,
-            description: """
-            Propose safe edits to the user's planned workouts, or create a new structured workout \
-            on a free training day. This is the only supported way for the coach to change the \
-            app Calendar and downstream intervals.icu workouts. Do not output ICS/iCalendar files \
-            or calendar import instructions. The app validates every proposal (dates, collisions, \
-            volume, intensity spacing), sets paces when it has enough recent runs, and otherwise \
-            shows a note before applying it.
-            """,
-            inputSchema: .object([
-                "type": .string("object"),
-                "additionalProperties": .bool(false),
-                "properties": .object([
-                    "changes": .object([
-                        "type": .string("array"),
-                        "minItems": .number(1),
-                        "maxItems": .number(Double(maxChangesPerProposal)),
-                        "items": changeSchema
-                    ])
-                ]),
-                "required": .array([.string("changes")])
-            ])
-        )
-    }
-
-    private static var changeSchema: JSONValue {
+enum PlanProposalSchema {
+    static var changeSchema: JSONValue {
         .object([
             "type": .string("object"),
             "additionalProperties": .bool(false),
@@ -199,7 +154,7 @@ enum CoachTools {
         ])
     }
 
-    private static var workoutSchema: JSONValue {
+    static var workoutSchema: JSONValue {
         .object([
             "type": .string("object"),
             "additionalProperties": .bool(false),
@@ -265,6 +220,54 @@ enum CoachTools {
             "required": .array(["role", "target_type", "target_value", "pace_zone"].map(JSONValue.string))
         ])
     }
+}
+@MainActor
+enum CoachTools {
+    static let toolName = "propose_plan_adjustment"
+    /// Bounds untrusted batches before any allocation or persistence.
+    static let maxChangesPerProposal = 5
+    static let staleReplacementMessage = ReplacementError.staleTargetMessage
+
+    enum ReplacementError: LocalizedError, Equatable {
+        case staleTarget
+
+        static let staleTargetMessage = "That scheduled workout changed before confirmation. Please ask again."
+
+        var errorDescription: String? {
+            switch self {
+            case .staleTarget:
+                return Self.staleTargetMessage
+            }
+        }
+    }
+
+    static var tool: ClaudeTool {
+        ClaudeTool(
+            name: toolName,
+            description: """
+            Propose safe edits to the user's planned workouts, or create a new structured workout \
+            on a free training day. This is the only supported way for the coach to change the \
+            app Calendar and downstream intervals.icu workouts. Do not output ICS/iCalendar files \
+            or calendar import instructions. The app validates every proposal (dates, collisions, \
+            volume, intensity spacing), sets paces when it has enough recent runs, and otherwise \
+            shows a note before applying it.
+            """,
+            inputSchema: .object([
+                "type": .string("object"),
+                "additionalProperties": .bool(false),
+                "properties": .object([
+                    "changes": .object([
+                        "type": .string("array"),
+                        "minItems": .number(1),
+                        "maxItems": .number(Double(maxChangesPerProposal)),
+                        "items": PlanProposalSchema.changeSchema
+                    ])
+                ]),
+                "required": .array([.string("changes")])
+            ])
+        )
+    }
+
 
     // MARK: - Apply
 
@@ -298,6 +301,7 @@ enum CoachTools {
     ) throws -> AppliedAdjustment {
         let candidate = try CoachPlanCandidateEngine.prepare(
             proposal: proposal,
+            scope: .standard,
             in: context,
             today: today,
             calendar: calendar,
@@ -329,6 +333,7 @@ enum CoachTools {
     ) throws -> PlanEditPreflight {
         let candidate = try CoachPlanCandidateEngine.prepare(
             proposal: proposal,
+            scope: .standard,
             in: context,
             today: today,
             calendar: calendar,

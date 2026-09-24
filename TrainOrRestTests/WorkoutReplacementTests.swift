@@ -243,6 +243,7 @@ final class WorkoutReplacementTests: XCTestCase {
                 detail: nil,
                 workout: workout
             )]),
+            scope: .standard,
             in: context,
             today: today,
             calendar: calendar,

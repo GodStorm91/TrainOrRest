@@ -13,6 +13,17 @@ struct WorkoutReplacementPresentation: Equatable {
     let keepAction: String
 }
 
+struct NextSevenDayWindow: Codable, Equatable {
+    let start: Date
+    let end: Date
+}
+
+enum PlanEditScope: Codable, Equatable {
+    case standard
+    case adaptiveNextWeek(NextSevenDayWindow)
+}
+
+
 
 struct CoachPlanCandidate: Identifiable {
     enum Presentation {
@@ -36,6 +47,7 @@ struct CoachPlanCandidate: Identifiable {
     let warnings: [PlanValidator.Issue]
     let presentation: Presentation
     let threadID: UUID?
+    let scope: PlanEditScope
     let changedSinceProposed: Bool
 
     var primaryDate: Date? {
@@ -123,6 +135,7 @@ enum CoachPlanCandidateEngine {
 
     static func prepare(
         proposal: PlanAdjustmentProposal,
+        scope: PlanEditScope,
         in context: ModelContext,
         today: Date,
         calendar: Calendar,
@@ -144,6 +157,7 @@ enum CoachPlanCandidateEngine {
         let paces = fitness.map { VDOTTable.trainingPaces(vdot: $0.vdot) }
         let baseline = try currentPlanSpec(plan: plan, goal: goal, in: context, today: today, calendar: calendar)
         let rows = try context.fetch(FetchDescriptor<PlannedWorkout>()).filter { $0.plan === plan }
+        try validate(scope: scope, proposal: proposal, rows: rows, goal: goal, today: today, calendar: calendar)
         let original = Dictionary(uniqueKeysWithValues: rows.map {
             let snapshot = PlanWorkoutReceiptSnapshot(workout: $0)
             return (snapshot.uuid, snapshot)
@@ -244,6 +258,7 @@ enum CoachPlanCandidateEngine {
             warnings: warnings,
             presentation: presentation,
             threadID: threadID,
+            scope: scope,
             changedSinceProposed: changedSinceProposed
         )
     }
@@ -255,11 +270,12 @@ enum CoachPlanCandidateEngine {
         calendar: Calendar,
         language: CoachLanguage,
         acknowledging warnings: [PlanValidator.Issue] = [],
-        beforeSave: ((CoachPlanReceipt) -> Void)? = nil
+        beforeSave: ((CoachPlanReceipt) throws -> Void)? = nil
     ) throws -> CoachPlanCommitResult {
         if try CoachPlanRevision.current(in: context) != candidate.baseRevision {
             let fresh = try prepare(
                 proposal: candidate.proposal,
+                scope: candidate.scope,
                 in: context,
                 today: today,
                 calendar: calendar,
@@ -289,6 +305,7 @@ enum CoachPlanCandidateEngine {
                       ) else {
                     return .stale(try prepare(
                         proposal: candidate.proposal,
+                        scope: candidate.scope,
                         in: context,
                         today: today,
                         calendar: calendar,
@@ -300,6 +317,7 @@ enum CoachPlanCandidateEngine {
             } else if let after = operation.after, byID[after.uuid] != nil {
                 return .stale(try prepare(
                     proposal: candidate.proposal,
+                    scope: candidate.scope,
                     in: context,
                     today: today,
                     calendar: calendar,
@@ -310,6 +328,14 @@ enum CoachPlanCandidateEngine {
             }
         }
 
+        try validate(
+            scope: candidate.scope,
+            transaction: candidate.transaction,
+            rowsByID: byID,
+            goal: try PlanStore.activeGoal(in: context)?.spec,
+            today: today,
+            calendar: calendar
+        )
         let operationData = try PlanEditReceiptCodec.encode(candidate.transaction)
         let transaction = try PlanEditReceiptCodec.decode(operationData)
         let edit = PlanEdit(
@@ -353,7 +379,7 @@ enum CoachPlanCandidateEngine {
             plan.weekTargetVolumesKm = targets
             plan.generatedAt = today
             edit.appliedPlanRevision = try CoachPlanRevision.current(in: context)
-            beforeSave?(receipt)
+            try beforeSave?(receipt)
             try context.save()
         } catch {
             context.rollback()
@@ -361,6 +387,138 @@ enum CoachPlanCandidateEngine {
         }
         NotificationCenter.default.post(name: .planDidChange, object: nil)
         return .applied(receipt)
+    }
+
+    private static func validate(
+        scope: PlanEditScope,
+        proposal: PlanAdjustmentProposal,
+        rows: [PlannedWorkout],
+        goal: GoalSpec,
+        today: Date,
+        calendar: Calendar
+    ) throws {
+        guard case let .adaptiveNextWeek(window) = scope else { return }
+        let allowed = try adaptiveWindow(window, today: today, calendar: calendar)
+        let rowsByDay = Dictionary(grouping: rows, by: { calendar.startOfDay(for: $0.date) })
+
+        for change in proposal.changes {
+            let source = try CoachTools.parseDay(change.date, calendar: calendar)
+            try requireAllowed(source, in: allowed)
+            try requireNotRaceDay(source, goal: goal, calendar: calendar)
+            if change.action != .create {
+                let row = try plannedRow(on: source, in: rowsByDay)
+                try validateExisting(row, on: source, goal: goal, calendar: calendar)
+            }
+
+            switch change.action {
+            case .move:
+                let target = try targetDay(change.detail, calendar: calendar)
+                try requireAllowed(target, in: allowed)
+                try requireNotRaceDay(target, goal: goal, calendar: calendar)
+            case .swap:
+                let target = try targetDay(change.detail, calendar: calendar)
+                try requireAllowed(target, in: allowed)
+                let row = try plannedRow(on: target, in: rowsByDay)
+                try validateExisting(row, on: target, goal: goal, calendar: calendar)
+            case .create, .replace, .rest, .downgrade:
+                break
+            }
+        }
+    }
+
+    private static func validate(
+        scope: PlanEditScope,
+        transaction: PlanEditTransaction,
+        rowsByID: [UUID: PlannedWorkout],
+        goal: GoalSpec?,
+        today: Date,
+        calendar: Calendar
+    ) throws {
+        guard case let .adaptiveNextWeek(window) = scope else { return }
+        guard let goal else {
+            throw CoachTools.ValidationError("The active goal is no longer available.")
+        }
+        let allowed = try adaptiveWindow(window, today: today, calendar: calendar)
+        let raceDay = calendar.startOfDay(for: goal.raceDate)
+        for operation in transaction.operations {
+            for snapshot in [operation.before, operation.after].compactMap({ $0 }) {
+                try requireAllowed(calendar.startOfDay(for: snapshot.date), in: allowed)
+                guard calendar.startOfDay(for: snapshot.date) != raceDay,
+                      snapshot.kindRaw != WorkoutKind.race.rawValue else {
+                    throw CoachTools.ValidationError("Race day cannot be edited.")
+                }
+            }
+            if let before = operation.before {
+                guard let row = rowsByID[before.uuid],
+                      row.status == .planned else {
+                    throw CoachTools.ValidationError("Only planned workouts can be reviewed.")
+                }
+                guard !row.isScheduleLocked else {
+                    throw CoachTools.ValidationError("Locked workouts cannot be reviewed.")
+                }
+            }
+        }
+    }
+
+    private static func adaptiveWindow(
+        _ stored: NextSevenDayWindow,
+        today: Date,
+        calendar: Calendar
+    ) throws -> NextSevenDayWindow {
+        let liveStart = calendar.startOfDay(for: today)
+        guard let liveEnd = calendar.date(byAdding: .day, value: 7, to: liveStart) else {
+            throw CoachTools.ValidationError("Could not calculate the review window.")
+        }
+        let start = max(stored.start, liveStart)
+        let end = min(stored.end, liveEnd)
+        guard start < end else {
+            throw CoachTools.ValidationError("The review window is no longer available.")
+        }
+        return NextSevenDayWindow(start: start, end: end)
+    }
+
+    private static func requireAllowed(_ date: Date, in window: NextSevenDayWindow) throws {
+        guard date >= window.start, date < window.end else {
+            throw CoachTools.ValidationError("All next-week review changes must stay within the active seven-day window.")
+        }
+    }
+
+    private static func requireNotRaceDay(
+        _ date: Date,
+        goal: GoalSpec,
+        calendar: Calendar
+    ) throws {
+        guard calendar.startOfDay(for: date) != calendar.startOfDay(for: goal.raceDate) else {
+            throw CoachTools.ValidationError("Race day cannot be edited.")
+        }
+    }
+
+    private static func plannedRow(
+        on day: Date,
+        in rowsByDay: [Date: [PlannedWorkout]]
+    ) throws -> PlannedWorkout {
+        guard let row = rowsByDay[day].flatMap(PlannedWorkout.preferredAmongDuplicates) else {
+            throw CoachTools.ValidationError("No planned workout exists on the requested day.")
+        }
+        return row
+    }
+
+    private static func validateExisting(
+        _ row: PlannedWorkout,
+        on day: Date,
+        goal: GoalSpec,
+        calendar: Calendar
+    ) throws {
+        guard row.status == .planned else {
+            throw CoachTools.ValidationError("Only planned workouts can be reviewed.")
+        }
+        guard !row.isScheduleLocked else {
+            throw CoachTools.ValidationError("Locked workouts cannot be reviewed.")
+        }
+        let raceDay = calendar.startOfDay(for: goal.raceDate)
+        guard day != raceDay, row.kind != .race else {
+            throw CoachTools.ValidationError("Race day cannot be edited.")
+        }
     }
 
     private static func applyExisting(
