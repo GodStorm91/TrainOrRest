@@ -172,7 +172,9 @@ final class AdaptivePlanReviewCoordinator: ObservableObject {
                 openAIClient: openAIClient,
                 chatGPTClient: chatGPTClient
             )
-            let response = try await client.send(request, credential: credential)
+            let response = try await ChatGPTDiagnostics.$label.withValue("weekly review") {
+                try await client.send(request, credential: credential)
+            }
             guard let current = self.review(id: reviewID, in: context),
                   current.phase == .preparing,
                   current.activeAttemptToken == token else {

@@ -780,6 +780,10 @@ struct CoachProviderSettingsView: View {
     @State private var awaitingKeyReturn = false
     @State private var highlightsPaste = false
     @State private var showsPlanNotice = false
+    @State private var showsChatGPTDiagnostics = false
+    @State private var isRunningChatGPTProbe = false
+    @State private var chatGPTProbeSummary: [String] = []
+    @State private var chatGPTDiagnosticsReport = ""
 
     private let anthropicModels = [
         CoachChatConfig.defaultModel,
@@ -891,6 +895,9 @@ struct CoachProviderSettingsView: View {
             }
 
             chatGPTSection
+            if showsChatGPTDiagnostics, chatGPTState != .signedOut {
+                chatGPTDiagnosticsSection
+            }
             claudeSection
 
             Section {
@@ -926,6 +933,8 @@ struct CoachProviderSettingsView: View {
             anthropicAPIKey = (try? KeychainStore.load()) ?? ""
             openAIAPIKey = (try? KeychainStore.load(account: KeychainStore.openAIAPIKeyAccount)) ?? ""
             refreshStoredKeys()
+            showsChatGPTDiagnostics = await ChatGPTDiagnostics.isAvailableInThisBuild()
+            refreshChatGPTDiagnosticsReport()
         }
         .task(id: chatGPTState) { await loadChatGPTModels() }
         .onReceive(ChatGPTTokenStore.shared.statePublisher.receive(on: DispatchQueue.main)) { chatGPTState = $0 }
@@ -972,6 +981,63 @@ struct CoachProviderSettingsView: View {
         } footer: {
             Text(copy.chatGPTPrivacyFooter)
         }
+    }
+
+    private var chatGPTDiagnosticsSection: some View {
+        Section {
+            Button {
+                runChatGPTProbe()
+            } label: {
+                if isRunningChatGPTProbe {
+                    ProgressView()
+                } else {
+                    Label(copy.runChatGPTDiagnostics, systemImage: "stethoscope")
+                }
+            }
+            .disabled(isRunningChatGPTProbe)
+            if !chatGPTDiagnosticsReport.isEmpty {
+                Button {
+                    UIPasteboard.general.string = chatGPTDiagnosticsReport
+                } label: {
+                    Label(copy.copyDiagnosticsReport, systemImage: "doc.on.doc")
+                }
+                ShareLink(item: chatGPTDiagnosticsReport)
+                DebugReportView(text: String(chatGPTDiagnosticsReport.prefix(6_000)))
+                Button(copy.clearDiagnosticsLog, role: .destructive) {
+                    ChatGPTDiagnostics.shared.clear()
+                    chatGPTProbeSummary = []
+                    refreshChatGPTDiagnosticsReport()
+                }
+            }
+        } header: {
+            Text(copy.chatGPTDiagnosticsHeader)
+        } footer: {
+            Text(copy.chatGPTDiagnosticsFooter)
+        }
+    }
+
+    private func runChatGPTProbe() {
+        isRunningChatGPTProbe = true
+        Task {
+            chatGPTProbeSummary = await ChatGPTDiagnosticsProbe.run(selectedModel: chatGPTModel)
+            isRunningChatGPTProbe = false
+            chatGPTState = ChatGPTTokenStore.shared.state
+            refreshChatGPTDiagnosticsReport()
+        }
+    }
+
+    private func refreshChatGPTDiagnosticsReport() {
+        let diagnostics = ChatGPTDiagnostics.shared
+        guard !diagnostics.entries.isEmpty || !chatGPTProbeSummary.isEmpty else {
+            chatGPTDiagnosticsReport = ""
+            return
+        }
+        let info = Bundle.main.infoDictionary
+        let summary = chatGPTProbeSummary.isEmpty
+            ? ["TrainOrRest \(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))",
+               "automatic weekly review: \(automaticNextWeekReview)"]
+            : chatGPTProbeSummary + ["automatic weekly review: \(automaticNextWeekReview)"]
+        chatGPTDiagnosticsReport = diagnostics.report(summary: summary)
     }
 
     private var claudeSection: some View {

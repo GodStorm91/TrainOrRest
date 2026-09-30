@@ -160,6 +160,54 @@ final class ChatGPTResponsesClientTests: XCTestCase {
         XCTAssertEqual(recordedErrors, [.planUsageLimit])
     }
 
+    func testHTTPUsageLimitIsRecordedWithoutCredentials() async throws {
+        let diagnostics = Self.diagnostics()
+        let client = makeClient(diagnostics: diagnostics) { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 429,
+                httpVersion: nil,
+                headerFields: ["x-request-id": "req_123", "set-cookie": "session=secret", "retry-after": "60"]
+            )!
+            let body = #"{"error":{"code":"subscription_sharing_usage_limit_exceeded","message":"app limit","param":null}}"#
+            return (response, Data(body.utf8))
+        }
+
+        do {
+            _ = try await client.send(Self.request(), credential: .chatGPT(ResponsesTokenProvider()))
+            XCTFail("A 429 usage limit must not succeed")
+        } catch let error as ClaudeClientError {
+            XCTAssertEqual(error, .planUsageLimit)
+        }
+
+        let entry = try XCTUnwrap(diagnostics.entries.last)
+        XCTAssertEqual(entry.status, 429)
+        XCTAssertEqual(entry.errorCode, "subscription_sharing_usage_limit_exceeded")
+        XCTAssertEqual(entry.errorMessage, "app limit")
+        XCTAssertEqual(entry.requestID, "req_123")
+        XCTAssertEqual(entry.model, "gpt-5.5")
+        XCTAssertEqual(entry.headers["retry-after"], "60")
+        XCTAssertNil(entry.headers["set-cookie"])
+        XCTAssertEqual(entry.request?.inputItems, 1)
+        XCTAssertFalse(diagnostics.report(summary: []).contains("secret"))
+        XCTAssertFalse(diagnostics.report(summary: []).contains("How should I pace today?"))
+    }
+
+    func testStreamUsageLimitRecordsReportedCode() async throws {
+        let diagnostics = Self.diagnostics()
+        let client = makeClient(diagnostics: diagnostics) { request in
+            (Self.response(for: request, status: 200), try self.fixtureData(named: "usage-limit", extension: "sse"))
+        }
+
+        _ = try? await client.send(Self.request(), credential: .chatGPT(ResponsesTokenProvider()))
+
+        let entry = try XCTUnwrap(diagnostics.entries.last)
+        XCTAssertEqual(entry.status, 200)
+        XCTAssertEqual(entry.outcome, "stream failed")
+        XCTAssertEqual(entry.errorCode, "subscription_sharing_usage_limit_exceeded")
+        XCTAssertEqual(entry.errorMessage, "limit reached")
+    }
+
     func testUnauthorizedRequestRefreshesOnceThenRetries() async throws {
         let provider = ResponsesTokenProvider(accessToken: "stale", refreshedToken: "fresh")
         var authorizations: [String] = []
@@ -244,12 +292,18 @@ final class ChatGPTResponsesClientTests: XCTestCase {
     }
 
     private func makeClient(
+        diagnostics: ChatGPTDiagnostics = ChatGPTResponsesClientTests.diagnostics(),
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> ChatGPTResponsesClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ResponsesStubURLProtocol.self]
         ResponsesStubURLProtocol.requestHandler = handler
-        return ChatGPTResponsesClient(session: URLSession(configuration: configuration))
+        return ChatGPTResponsesClient(session: URLSession(configuration: configuration), diagnostics: diagnostics)
+    }
+
+    private static func diagnostics() -> ChatGPTDiagnostics {
+        let suite = "ChatGPTResponsesClientTests.\(UUID().uuidString)"
+        return ChatGPTDiagnostics(defaults: UserDefaults(suiteName: suite)!)
     }
 
     private func fixtureData(named name: String, extension fileExtension: String) throws -> Data {

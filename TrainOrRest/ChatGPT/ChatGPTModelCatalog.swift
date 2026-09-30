@@ -13,11 +13,13 @@ actor ChatGPTModelCatalog {
 
     private let session: URLSession
     private let defaults: UserDefaults
+    private let diagnostics: ChatGPTDiagnostics
     private var cachedModels: [ChatGPTModel]?
 
-    init(session: URLSession = .shared, defaults: UserDefaults = .standard) {
+    init(session: URLSession = .shared, defaults: UserDefaults = .standard, diagnostics: ChatGPTDiagnostics = .shared) {
         self.session = session
         self.defaults = defaults
+        self.diagnostics = diagnostics
     }
 
     /// Listed models for the signed-in account, cached per launch.
@@ -91,23 +93,44 @@ actor ChatGPTModelCatalog {
             guard let http = response as? HTTPURLResponse else {
                 throw ClaudeClientError.invalidResponse
             }
-            if http.statusCode == 401 {
-                throw ChatGPTModelCatalogUnauthorized()
-            }
+            var entry = ChatGPTDiagnostics.Entry(
+                date: Date(),
+                endpoint: "GET /v1/models",
+                status: http.statusCode,
+                outcome: "ok",
+                requestID: http.value(forHTTPHeaderField: "x-request-id"),
+                headers: ChatGPTDiagnostics.headers(from: http)
+            )
             guard (200..<300).contains(http.statusCode) else {
+                let body = try? JSONDecoder().decode(ChatGPTModelsErrorBody.self, from: data)
+                entry.outcome = "failed"
+                entry.errorCode = body?.error?.code
+                entry.errorMessage = body?.error?.message ?? body?.detail
+                entry.errorParam = body?.error?.param
+                entry.body = ChatGPTDiagnostics.truncatedBody(data)
+                diagnostics.record(entry)
+                if http.statusCode == 401 {
+                    throw ChatGPTModelCatalogUnauthorized()
+                }
                 throw Self.error(for: http.statusCode, data: data)
             }
 
             let decoded = try JSONDecoder().decode(ChatGPTModelsResponse.self, from: data)
             if let models = decoded.models {
+                entry.note = "models: " + models.map { "\($0.slug)[\($0.visibility ?? "?")]" }.joined(separator: " ")
+                diagnostics.record(entry)
                 return models.compactMap { model in
                     guard model.visibility == "list" else { return nil }
                     return ChatGPTModel(id: model.slug, displayName: model.displayName ?? model.slug)
                 }
             }
             if let models = decoded.data {
+                entry.note = "models: " + models.map(\.id).joined(separator: " ")
+                diagnostics.record(entry)
                 return models.map { ChatGPTModel(id: $0.id, displayName: $0.id) }
             }
+            entry.outcome = "undecodable"
+            diagnostics.record(entry)
             throw ClaudeClientError.invalidResponse
         } catch let error as ClaudeClientError {
             throw error

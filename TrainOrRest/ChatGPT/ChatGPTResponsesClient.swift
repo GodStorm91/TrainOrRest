@@ -9,10 +9,12 @@ final class ChatGPTResponsesClient: ClaudeServicing {
 
     private let session: URLSession
     private let catalog: ChatGPTModelCatalog
+    private let diagnostics: ChatGPTDiagnostics
 
-    init(session: URLSession = .shared, catalog: ChatGPTModelCatalog = .shared) {
+    init(session: URLSession = .shared, catalog: ChatGPTModelCatalog = .shared, diagnostics: ChatGPTDiagnostics = .shared) {
         self.session = session
         self.catalog = catalog
+        self.diagnostics = diagnostics
     }
 
     func send(_ request: ClaudeRequest, credential: CoachCredential) async throws -> ClaudeResponse {
@@ -33,7 +35,12 @@ final class ChatGPTResponsesClient: ClaudeServicing {
         if resolvedRequest.model.isEmpty {
             resolvedRequest.model = try await catalog.resolveSelectedModel(tokenProvider: provider)
         }
-        let requestBody = try JSONEncoder().encode(ResponsesRequest(from: resolvedRequest))
+        let responsesRequest = ResponsesRequest(from: resolvedRequest)
+        let requestBody = try JSONEncoder().encode(responsesRequest)
+        let attempt = ChatGPTRequestAttempt(
+            model: resolvedRequest.model,
+            shape: responsesRequest.shape(bodyBytes: requestBody.count)
+        )
 
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -47,6 +54,7 @@ final class ChatGPTResponsesClient: ClaudeServicing {
                             _ = try await self.streamOnce(
                                 body: requestBody,
                                 token: token,
+                                attempt: attempt,
                                 continuation: continuation
                             )
                             continuation.finish()
@@ -115,6 +123,7 @@ final class ChatGPTResponsesClient: ClaudeServicing {
     private func streamOnce(
         body: Data,
         token: String,
+        attempt: ChatGPTRequestAttempt,
         continuation: AsyncThrowingStream<AnthropicStreamEvent, Error>.Continuation
     ) async throws -> Bool {
         var request = URLRequest(url: URL(string: "https://api.openai.com/v1/responses")!)
@@ -129,14 +138,29 @@ final class ChatGPTResponsesClient: ClaudeServicing {
         guard let http = response as? HTTPURLResponse else {
             throw ClaudeClientError.invalidResponse
         }
-        let requestID = http.value(forHTTPHeaderField: "x-request-id")
+        var entry = ChatGPTDiagnostics.Entry(
+            date: Date(),
+            endpoint: "POST /v1/responses",
+            model: attempt.model,
+            status: http.statusCode,
+            outcome: "ok",
+            requestID: http.value(forHTTPHeaderField: "x-request-id"),
+            headers: ChatGPTDiagnostics.headers(from: http),
+            request: attempt.shape
+        )
 
         guard (200..<300).contains(http.statusCode) else {
             var responseData = Data()
             for try await byte in bytes {
                 responseData.append(byte)
             }
-            Self.logRequestID(requestID)
+            let errorBody = try? JSONDecoder().decode(ChatGPTErrorBody.self, from: responseData)
+            entry.outcome = "http error"
+            entry.errorCode = errorBody?.error?.code
+            entry.errorMessage = errorBody?.error?.message ?? errorBody?.detail
+            entry.errorParam = errorBody?.error?.param
+            entry.body = ChatGPTDiagnostics.truncatedBody(responseData)
+            record(entry)
             if http.statusCode == 401 {
                 throw ChatGPTUnauthorizedResponse()
             }
@@ -146,6 +170,22 @@ final class ChatGPTResponsesClient: ClaudeServicing {
         var parser = ResponsesSSEParser()
         var translator = ResponsesStreamTranslator()
         var didYieldContent = false
+
+        func finishEntry(outcome: String, error: Error?) {
+            entry.outcome = outcome
+            entry.usage = translator.usage
+            if let failure = translator.reportedFailure {
+                entry.errorCode = failure.code
+                entry.errorMessage = failure.message
+                entry.errorParam = failure.param
+            }
+            var note = "stream events \(translator.eventCount), content yielded \(didYieldContent)"
+            if let reason = translator.incompleteReason { note += ", incomplete \(reason)" }
+            if let lastEvent = translator.lastEventType { note += ", last event \(lastEvent)" }
+            if let error { note += ", error \(String(describing: error))" }
+            entry.note = note
+            record(entry)
+        }
 
         do {
             for try await line in bytes.lines {
@@ -171,19 +211,38 @@ final class ChatGPTResponsesClient: ClaudeServicing {
             guard translator.completed else {
                 throw ClaudeClientError.connectionLost
             }
+            finishEntry(outcome: "ok", error: nil)
             return didYieldContent
         } catch let error as ClaudeClientError {
-            Self.logRequestID(requestID)
+            finishEntry(outcome: "stream failed", error: error)
             throw ChatGPTStreamAttemptFailure(error: error, didYieldContent: didYieldContent)
         } catch let error as URLError {
-            Self.logRequestID(requestID)
+            finishEntry(outcome: "stream failed", error: error)
             throw ChatGPTStreamAttemptFailure(
                 error: Self.clientError(for: error),
                 didYieldContent: didYieldContent
             )
         } catch {
-            Self.logRequestID(requestID)
+            finishEntry(outcome: "stream failed", error: error)
             throw error
+        }
+    }
+
+    private func record(_ entry: ChatGPTDiagnostics.Entry) {
+        diagnostics.record(entry)
+        let code = entry.errorCode ?? "-"
+        let message = entry.errorMessage ?? "-"
+        let requestID = entry.requestID ?? "-"
+        let bytes = entry.request?.bodyBytes ?? 0
+        let status = entry.status ?? 0
+        if entry.outcome == "ok" {
+            Self.logger.notice(
+                "ChatGPT Responses ok: HTTP \(status, privacy: .public), model \(entry.model ?? "-", privacy: .public), request \(bytes, privacy: .public) B, x-request-id \(requestID, privacy: .public)"
+            )
+        } else {
+            Self.logger.error(
+                "ChatGPT Responses \(entry.outcome, privacy: .public): HTTP \(status, privacy: .public), code \(code, privacy: .public), message \(message, privacy: .public), model \(entry.model ?? "-", privacy: .public), request \(bytes, privacy: .public) B, x-request-id \(requestID, privacy: .public)"
+            )
         }
     }
 
@@ -256,14 +315,14 @@ final class ChatGPTResponsesClient: ClaudeServicing {
         }
         return .api(error?.message ?? fallback)
     }
-
-    private static func logRequestID(_ requestID: String?) {
-        guard let requestID, !requestID.isEmpty else { return }
-        logger.debug("ChatGPT Responses request failed (x-request-id: \(requestID, privacy: .public)).")
-    }
 }
 
 private struct ChatGPTUnauthorizedResponse: Error {}
+
+private struct ChatGPTRequestAttempt: Sendable {
+    var model: String
+    var shape: ChatGPTDiagnostics.RequestShape
+}
 
 private struct ResponsesRequest: Encodable {
     var model: String
@@ -303,6 +362,21 @@ private struct ResponsesRequest: Encodable {
         // keeps a forced call unambiguous without relying on an unverified form.
         return request.tools.filter { $0.name == name }
     }
+
+    func shape(bodyBytes: Int) -> ChatGPTDiagnostics.RequestShape {
+        let toolChoiceName: String? = switch toolChoice {
+        case .mode(let value)?: value
+        case nil: nil
+        }
+        return ChatGPTDiagnostics.RequestShape(
+            bodyBytes: bodyBytes,
+            instructionsCharacters: instructions.count,
+            inputItems: input.count,
+            images: input.reduce(0) { $0 + $1.imageCount },
+            tools: tools?.reduce(0) { $0 + $1.tools.count } ?? 0,
+            toolChoice: toolChoiceName
+        )
+    }
 }
 
 private enum ResponsesInputItem: Encodable {
@@ -313,6 +387,14 @@ private enum ResponsesInputItem: Encodable {
     private enum CodingKeys: String, CodingKey {
         case type, role, content, name, arguments, output
         case callID = "call_id"
+    }
+
+    var imageCount: Int {
+        guard case .message(_, let content) = self else { return 0 }
+        return content.filter {
+            if case .image = $0 { return true }
+            return false
+        }.count
     }
 
     static func items(from message: ClaudeMessageParam) -> [ResponsesInputItem] {
@@ -454,6 +536,11 @@ private enum ResponsesToolChoice: Encodable {
 
 private struct ResponsesStreamTranslator {
     private(set) var completed = false
+    private(set) var eventCount = 0
+    private(set) var lastEventType: String?
+    private(set) var usage: ChatGPTDiagnostics.Usage?
+    private(set) var reportedFailure: ChatGPTAPIError?
+    private(set) var incompleteReason: String?
     private var startedIndices: Set<Int> = []
     private var sawArgumentDelta: Set<Int> = []
     private var sawFunctionCall = false
@@ -464,6 +551,11 @@ private struct ResponsesStreamTranslator {
         }
         let type = message.event ?? payload.type
         guard let type else { return [] }
+        eventCount += 1
+        lastEventType = type
+        if let reported = payload.response?.usage {
+            usage = reported.diagnostics
+        }
 
         switch type {
         case "response.created":
@@ -518,8 +610,10 @@ private struct ResponsesStreamTranslator {
             ]
         case "response.incomplete":
             let reason = payload.response?.incompleteDetails?.reason ?? "unknown"
+            incompleteReason = reason
             throw ClaudeClientError.api("ChatGPT stopped early: \(reason)")
         case "response.failed", "error":
+            reportedFailure = payload.reportedError
             throw ChatGPTResponsesClient.mapError(
                 payload.reportedError,
                 status: nil,
@@ -570,15 +664,49 @@ private struct ResponsesOutputItem: Decodable {
 private struct ResponsesResponse: Decodable {
     var error: ChatGPTAPIError?
     var incompleteDetails: ResponsesIncompleteDetails?
+    var usage: ResponsesUsage?
 
     enum CodingKeys: String, CodingKey {
-        case error
+        case error, usage
         case incompleteDetails = "incomplete_details"
     }
 }
 
 private struct ResponsesIncompleteDetails: Decodable {
     var reason: String?
+}
+
+private struct ResponsesUsage: Decodable {
+    var inputTokens: Int?
+    var outputTokens: Int?
+    var inputTokensDetails: Details?
+    var outputTokensDetails: Details?
+
+    struct Details: Decodable {
+        var cachedTokens: Int?
+        var reasoningTokens: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case cachedTokens = "cached_tokens"
+            case reasoningTokens = "reasoning_tokens"
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+        case inputTokensDetails = "input_tokens_details"
+        case outputTokensDetails = "output_tokens_details"
+    }
+
+    var diagnostics: ChatGPTDiagnostics.Usage {
+        ChatGPTDiagnostics.Usage(
+            inputTokens: inputTokens,
+            cachedInputTokens: inputTokensDetails?.cachedTokens,
+            outputTokens: outputTokens,
+            reasoningTokens: outputTokensDetails?.reasoningTokens
+        )
+    }
 }
 
 fileprivate struct ChatGPTAPIError: Decodable {
