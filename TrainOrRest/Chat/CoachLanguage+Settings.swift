@@ -759,17 +759,17 @@ struct SettingsCopy {
 
     var chatGPTLimitTitle: String {
         switch language {
-        case .en: "ChatGPT limit reached"
-        case .ja: "ChatGPT の上限に達しました"
-        case .vi: "Đã chạm giới hạn ChatGPT"
+        case .en: "ChatGPT usage limit reached"
+        case .ja: "ChatGPT の利用上限に達しました"
+        case .vi: "Đã chạm giới hạn dùng ChatGPT"
         }
     }
 
     var chatGPTLimitMessage: String {
         switch language {
-        case .en: "Your plan's usage limit is reached. Check usage or use a Claude key."
-        case .ja: "プランの利用上限に達しました。利用状況を確認するか、Claude のキーを使ってください。"
-        case .vi: "Gói của bạn đã chạm giới hạn sử dụng. Kiểm tra mức dùng hoặc dùng khóa Claude."
+        case .en: "The limit may be on your ChatGPT plan or on TrainOrRest's own limit. Check usage, or use a Claude key."
+        case .ja: "上限はプラン全体、または TrainOrRest 個別の場合があります。利用状況を確認するか、Claude のキーを使ってください。"
+        case .vi: "Giới hạn có thể thuộc gói ChatGPT của bạn hoặc riêng TrainOrRest. Kiểm tra mức dùng hoặc dùng khóa Claude."
         }
     }
 
@@ -778,6 +778,46 @@ struct SettingsCopy {
         case .en: "Manage usage"
         case .ja: "利用状況を管理"
         case .vi: "Quản lý mức dùng"
+        }
+    }
+
+    var chatGPTDiagnosticsHeader: String {
+        switch language {
+        case .en: "ChatGPT diagnostics"
+        case .ja: "ChatGPT 診断"
+        case .vi: "Chẩn đoán ChatGPT"
+        }
+    }
+
+    var runChatGPTDiagnostics: String {
+        switch language {
+        case .en: "Run ChatGPT check"
+        case .ja: "ChatGPT をチェック"
+        case .vi: "Kiểm tra ChatGPT"
+        }
+    }
+
+    var copyDiagnosticsReport: String {
+        switch language {
+        case .en: "Copy report"
+        case .ja: "レポートをコピー"
+        case .vi: "Sao chép báo cáo"
+        }
+    }
+
+    var clearDiagnosticsLog: String {
+        switch language {
+        case .en: "Clear log"
+        case .ja: "ログを消去"
+        case .vi: "Xóa nhật ký"
+        }
+    }
+
+    var chatGPTDiagnosticsFooter: String {
+        switch language {
+        case .en: "TestFlight only. Lists recent ChatGPT request statuses, error codes, and request IDs. No sign-in tokens, messages, or health data. The check sends a few tiny requests."
+        case .ja: "TestFlight 版のみ。最近の ChatGPT リクエストの状態、エラーコード、リクエスト ID を表示します。サインイントークン、メッセージ、ヘルスデータは含みません。チェックでは小さなリクエストをいくつか送信します。"
+        case .vi: "Chỉ có trong bản TestFlight. Liệt kê trạng thái, mã lỗi và request ID của các yêu cầu ChatGPT gần đây. Không chứa token đăng nhập, tin nhắn hay dữ liệu sức khỏe. Lần kiểm tra sẽ gửi vài yêu cầu rất nhỏ."
         }
     }
 

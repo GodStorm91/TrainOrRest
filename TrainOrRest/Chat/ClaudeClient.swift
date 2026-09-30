@@ -70,7 +70,7 @@ enum ClaudeClientError: LocalizedError, Equatable {
         case .timedOut: "The coach provider did not respond in time. A large plan edit can exceed the limit; try one change at a time."
         case .invalidResponse: "The coach provider returned an unexpected response."
         case .api(let message): message
-        case .planUsageLimit: "Your ChatGPT plan's usage limit is reached. Check usage in ChatGPT settings."
+        case .planUsageLimit: "ChatGPT reports a usage limit (subscription_sharing_usage_limit_exceeded). It can be your plan's limit or the limit set for TrainOrRest."
         case .planNotEligible: "ChatGPT plan use isn't available for this account. Add a Claude or OpenAI key in Settings."
         case .needsReconnect: "Your ChatGPT session ended. Reconnect ChatGPT in Settings; your chats are safe."
         case .unsupportedCapability(let param):

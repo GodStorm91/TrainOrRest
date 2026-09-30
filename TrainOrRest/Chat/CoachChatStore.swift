@@ -784,7 +784,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         var underlyingRejection: String?
         let shouldPublishStreamingText = snapshot.actionType != .planMutation
 
-        for _ in 0..<CoachChatConfig.maxToolRounds {
+        for round in 0..<CoachChatConfig.maxToolRounds {
             let tools = tools(for: snapshot.actionType)
             let request = ClaudeRequest(
                 model: model,
@@ -797,7 +797,9 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             if assistantTurn.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 generationState = .processing(messageId: assistantTurn.turnID, stage: .buildingRecommendation)
             }
-            let events = try await client.stream(request, credential: access.credential)
+            let events = try await ChatGPTDiagnostics.$label.withValue("chat round \(round + 1)") {
+                try await client.stream(request, credential: access.credential)
+            }
             var replacementStarted = false
             var lastStreamSave = Date.distantPast
             let streamSaveInterval: TimeInterval = 0.15
@@ -994,7 +996,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         let category = failureCategory(for: error, snapshot: snapshot)
         assistantTurn.assistantStatus = category == .mutationUnknown ? .reconciling : .failed
         assistantTurn.errorCategory = category
-        assistantTurn.errorMessage = userFacingInlineError(for: category, raw: message)
+        assistantTurn.errorMessage = userFacingInlineError(for: category, error: error, raw: message)
         assistantTurn.errorDetail = message
         assistantTurn.isIncomplete = !assistantTurn.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         assistantTurn.activeAttemptID = nil
@@ -1047,7 +1049,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         }
     }
 
-    private func userFacingInlineError(for category: CoachErrorCategory, raw: String) -> String {
+    private func userFacingInlineError(for category: CoachErrorCategory, error: Error, raw: String) -> String {
         switch category {
         case .retryableResponse, .offline:
             return CoachLanguage.current.interruptedFailureMessage
@@ -1060,7 +1062,16 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         case .responseTruncated:
             return CoachLanguage.current.responseTruncatedMessage
         case .nonRetryable:
-            return raw
+            switch error as? ClaudeClientError {
+            case .planUsageLimit:
+                return CoachLanguage.current.chatGPTUsageLimitFailureMessage
+            case .planNotEligible:
+                return CoachLanguage.current.chatGPTNotEligibleFailureMessage
+            case .unsupportedCapability(let param):
+                return CoachLanguage.current.chatGPTUnsupportedCapabilityFailureMessage(param: param)
+            default:
+                return raw
+            }
         }
     }
 

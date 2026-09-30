@@ -15,12 +15,12 @@ final class CoachConnectionStatusTests: XCTestCase {
 
     func testEveryChatGPTStateMapsToItsTitleAndAction() {
         let expectations: [(ChatGPTConnectionState, String, CoachConnectionStatus.Action)] = [
-            (.signedOut, "Connect your coach", .none),
-            (.connected(email: "runner@example.com"), "Coach connected", .none),
-            (.planUsageDisabled, "ChatGPT plan use is off", .allowPlanUse),
-            (.usageLimited(until: nil), "ChatGPT limit reached", .manageUsage),
-            (.notEligible, "ChatGPT plan not available", .none),
-            (.needsReconnect, "Reconnect ChatGPT", .reconnect)
+            (.signedOut, copy.connectCoachTitle, .none),
+            (.connected(email: "runner@example.com"), copy.coachConnected, .none),
+            (.planUsageDisabled, copy.chatGPTPlanUseOffTitle, .allowPlanUse),
+            (.usageLimited(until: nil), copy.chatGPTLimitTitle, .manageUsage),
+            (.notEligible, copy.chatGPTNotEligibleTitle, .none),
+            (.needsReconnect, copy.reconnectChatGPTTitle, .reconnect)
         ]
         for (state, title, action) in expectations {
             for keys in [false, true] {

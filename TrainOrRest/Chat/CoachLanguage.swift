@@ -408,6 +408,31 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         }
     }
 
+    var chatGPTUsageLimitFailureMessage: String {
+        switch self {
+        case .en: "ChatGPT reports a usage limit. It can be your plan's limit or the limit set for TrainOrRest. Check ChatGPT Settings → Usage."
+        case .ja: "ChatGPT の利用上限に達しました。上限はプラン全体、または TrainOrRest 個別の場合があります。ChatGPT の設定 → 利用状況で確認してください。"
+        case .vi: "ChatGPT báo đã chạm giới hạn dùng. Giới hạn có thể thuộc gói của bạn hoặc riêng TrainOrRest. Kiểm tra trong ChatGPT → Cài đặt → Mức dùng."
+        }
+    }
+
+    var chatGPTNotEligibleFailureMessage: String {
+        switch self {
+        case .en: "ChatGPT plan use isn't available for this account. Add a Claude or OpenAI key in Settings."
+        case .ja: "このアカウントでは ChatGPT プランを利用できません。設定で Claude または OpenAI のキーを追加してください。"
+        case .vi: "Tài khoản này không dùng được gói ChatGPT. Thêm khóa Claude hoặc OpenAI trong Cài đặt."
+        }
+    }
+
+    func chatGPTUnsupportedCapabilityFailureMessage(param: String?) -> String {
+        let suffix = param.map { " (\($0))" } ?? ""
+        return switch self {
+        case .en: "ChatGPT rejected part of the coach request\(suffix)."
+        case .ja: "ChatGPT がコーチのリクエストの一部を拒否しました\(suffix)。"
+        case .vi: "ChatGPT đã từ chối một phần yêu cầu của Coach\(suffix)."
+        }
+    }
+
     var checkConnectionLabel: String {
         switch self {
         case .en: "Check connection"
