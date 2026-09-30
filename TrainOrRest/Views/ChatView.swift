@@ -31,6 +31,7 @@ struct ChatView: View {
     @State private var chatGPTState = ChatGPTTokenStore.shared.state
     @State private var grokState = GrokTokenStore.shared.state
     @State private var isSigningInWithChatGPT = false
+    @State private var chatGPTSignInError: String?
     @State private var isSigningInWithGrok = false
     @State private var grokSignInError: String?
     @State private var showsChatGPTPlanNotice = false
@@ -961,6 +962,11 @@ struct ChatView: View {
                 ) {
                     signInWithChatGPT(requestConsent: false)
                 }
+                if let chatGPTSignInError {
+                    Text(chatGPTSignInError)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.bad)
+                }
                 grokSignInControl
                 Button(language.settings.otherCoachOptions) { isProviderSettingsPresented = true }
             }
@@ -994,6 +1000,7 @@ struct ChatView: View {
 
     private func signInWithChatGPT(requestConsent: Bool) {
         isSigningInWithChatGPT = true
+        chatGPTSignInError = nil
         Task {
             let outcome = await ChatGPTSignInAction.run(requestConsent: requestConsent)
             isSigningInWithChatGPT = false
@@ -1006,11 +1013,12 @@ struct ChatView: View {
                 }
             case .cancelled:
                 break
-            case .failed:
-                isProviderSettingsPresented = true
+            case .failed(let message):
+                chatGPTSignInError = message
             }
         }
     }
+
     @ViewBuilder
     private var grokSignInControl: some View {
         switch grokState {

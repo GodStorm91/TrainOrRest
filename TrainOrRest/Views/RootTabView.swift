@@ -1,6 +1,27 @@
 import SwiftUI
 import UIKit
 
+enum RootTabLaunchSelection {
+    static func consume(
+        defaults: UserDefaults = .standard,
+        debugRequestedTab: String? = nil
+    ) -> RootTabView.Tab {
+        #if DEBUG
+        switch debugRequestedTab {
+        case "calendar": return .calendar
+        case "profile": return .profile
+        case "chat": return .chat
+        default: break
+        }
+        #endif
+        guard defaults.bool(forKey: OnboardingGate.openCalendarAfterCompletionKey) else {
+            return .chat
+        }
+        defaults.removeObject(forKey: OnboardingGate.openCalendarAfterCompletionKey)
+        return .calendar
+    }
+}
+
 /// Three-destination shell with a compact floating Liquid Glass dock.
 struct RootTabView: View {
     enum Tab: Hashable { case calendar, chat, profile }
@@ -93,13 +114,9 @@ struct RootTabView: View {
 
     private static var initialTab: Tab {
         #if DEBUG
-        switch DevSeed.requestedTab {
-        case "calendar": return .calendar
-        case "profile": return .profile
-        default: return .chat
-        }
+        RootTabLaunchSelection.consume(debugRequestedTab: DevSeed.requestedTab)
         #else
-        return .chat
+        RootTabLaunchSelection.consume()
         #endif
     }
 }
