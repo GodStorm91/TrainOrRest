@@ -5,6 +5,7 @@ enum KeychainStore {
     static let apiKeyAccount = "anthropic-api-key"
     static let openAIAPIKeyAccount = "openai-api-key"
     static let intervalsICUAccount = "intervals-icu-api-key"
+    static let intervalsICUOAuthTokenAccount = "intervals-icu-oauth-token-v1"
     static let chatGPTCredentialAccount = "chatgpt-credential-v1"
     static let chatGPTHostIDAccount = "chatgpt-host-id"
     static let grokCredentialAccount = "grok-credential-v1"

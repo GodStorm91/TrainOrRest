@@ -7,14 +7,13 @@ struct SettingsView: View {
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
     @AppStorage(PersonalCoachSettings.weightKgKey) private var weightKg = ""
     @AppStorage(WorkoutPushSettings.enabledKey) private var watchPushEnabled = false
-    @AppStorage(WorkoutPushSettings.athleteIDKey) private var athleteID = ""
 
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var pushService: WorkoutPushService
     @EnvironmentObject private var googleCalendar: GoogleCalendarSyncService
+    @EnvironmentObject private var intervalsConnection: IntervalsConnectionStore
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \CoachMemoryItem.updatedAt, order: .reverse) private var memoryItems: [CoachMemoryItem]
-    @State private var intervalsAPIKey = ""
 
     private var appearance: AppAppearance { AppAppearance(rawValue: appearanceRaw) ?? .system }
     private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
@@ -100,7 +99,7 @@ struct SettingsView: View {
         }
         .task {
             try? PersonalCoachSettings.migrateLegacyCoachMemoryIfNeeded(in: modelContext)
-            intervalsAPIKey = (try? KeychainStore.load(account: KeychainStore.intervalsICUAccount)) ?? ""
+            intervalsConnection.reload()
         }
     }
 
@@ -128,9 +127,16 @@ struct SettingsView: View {
     }
 
     private var intervalsStatusSummary: String {
-        let hasAthlete = !athleteID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let hasKey = !intervalsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return hasAthlete && hasKey ? language.settings.connected : language.settings.notConnected
+        switch intervalsConnection.state {
+        case .connected(let connection):
+            return connection.method == .oauth
+                ? language.settings.oauthConnected
+                : language.settings.apiKeyConnected
+        case .needsReconnect:
+            return language.settings.needsAttention
+        case .disconnected:
+            return language.settings.notConnected
+        }
     }
 
     private var watchPushSummary: String {
@@ -262,16 +268,15 @@ struct IntervalsConnectionSettingsView: View {
     @AppStorage(WorkoutPushSettings.athleteIDKey) private var athleteID = ""
     @AppStorage(WorkoutPushSettings.enabledKey) private var watchPushEnabled = false
     @EnvironmentObject private var pushService: WorkoutPushService
+    @EnvironmentObject private var connection: IntervalsConnectionStore
     @State private var apiKey = ""
     @State private var showAPIKey = false
     @State private var status: SettingsStatus?
     @State private var isSyncing = false
+    @State private var isAuthorizing = false
+    @State private var oauthService = IntervalsOAuthService()
 
     private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
-    private var isConnected: Bool {
-        !athleteID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
 
     var body: some View {
         Form {
@@ -279,34 +284,40 @@ struct IntervalsConnectionSettingsView: View {
                 connectionSummary
             }
 
-            Section {
-                TextField(language.settings.athleteID, text: $athleteID)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                HStack {
-                    if showAPIKey {
-                        TextField(language.settings.apiKey, text: $apiKey)
+            if shouldShowAPIKeyFallback {
+                Section {
+                    DisclosureGroup(language.settings.advancedConnection) {
+                        TextField(language.settings.athleteID, text: $athleteID)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                    } else {
-                        SecureField(language.settings.apiKey, text: $apiKey)
-                            .textContentType(.password)
-                            .autocorrectionDisabled()
+                        HStack {
+                            if showAPIKey {
+                                TextField(language.settings.apiKey, text: $apiKey)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                            } else {
+                                SecureField(language.settings.apiKey, text: $apiKey)
+                                    .textContentType(.password)
+                                    .autocorrectionDisabled()
+                            }
+                            Button(showAPIKey ? language.settings.hide : language.settings.reveal) {
+                                showAPIKey.toggle()
+                            }
+                            .font(.caption.weight(.semibold))
+                        }
+                        Button {
+                            saveAPIKey()
+                        } label: {
+                            Label(language.settings.saveConnection, systemImage: "checkmark.shield")
+                        }
+                        .disabled(!canSaveAPIKey)
+                        .accessibilityLabel(language.settings.saveIntervalsConnectionAccessibilityLabel)
                     }
-                    Button(showAPIKey ? language.settings.hide : language.settings.reveal) { showAPIKey.toggle() }
-                        .font(.caption.weight(.semibold))
+                } header: {
+                    Text(language.settings.apiKeyFallback)
+                } footer: {
+                    Text(language.settings.intervalsConnectionFooter)
                 }
-                Button {
-                    saveConnection()
-                } label: {
-                    Label(language.settings.saveConnection, systemImage: "checkmark.shield")
-                }
-                .disabled(!canSave)
-                .accessibilityLabel(language.settings.saveIntervalsConnectionAccessibilityLabel)
-            } header: {
-                Text(language.settings.manageConnection)
-            } footer: {
-                Text(language.settings.intervalsConnectionFooter)
             }
 
             Section {
@@ -339,54 +350,124 @@ struct IntervalsConnectionSettingsView: View {
         }
         .navigationTitle(language.settings.intervalsICU)
         .navigationBarTitleDisplayMode(.inline)
-        .task { apiKey = (try? KeychainStore.load(account: KeychainStore.intervalsICUAccount)) ?? "" }
+        .task {
+            connection.reload()
+            apiKey = (try? KeychainStore.load(account: KeychainStore.intervalsICUAccount)) ?? ""
+        }
+    }
+
+    private var shouldShowAPIKeyFallback: Bool {
+        switch connection.state {
+        case .disconnected: true
+        case .connected, .needsReconnect: false
+        }
     }
 
     private var connectionSummary: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Image(systemName: isConnected ? "checkmark.circle.fill" : "link.badge.plus")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(isConnected ? Theme.good : Theme.accent)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(isConnected ? language.settings.connected : language.settings.connectIntervals)
-                        .font(.headline)
-                    Text(isConnected ? lastSyncText : language.settings.intervalsSyncDescription)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            if isConnected {
-                Button {
-                    syncNow()
-                } label: {
-                    if isSyncing {
-                        ProgressView()
-                    } else {
+            switch connection.state {
+            case .connected(let activeConnection):
+                Label(
+                    activeConnection.method == .oauth
+                        ? language.settings.oauthConnected
+                        : language.settings.apiKeyConnected,
+                    systemImage: "checkmark.circle.fill"
+                )
+                .font(.headline)
+                .foregroundStyle(Theme.good)
+                Text(activeConnection.method == .oauth
+                    ? language.settings.oauthPermissions
+                    : language.settings.intervalsSyncDescription)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if isSyncing {
+                    ProgressView()
+                } else {
+                    Button {
+                        syncNow()
+                    } label: {
                         Label(language.settings.syncNow, systemImage: "arrow.triangle.2.circlepath")
                     }
+                    .disabled(isAuthorizing)
                 }
-                .disabled(isSyncing)
+                if activeConnection.method == .apiKey, connection.oauthAvailable {
+                    Button {
+                        connectOAuth()
+                    } label: {
+                        Label(language.settings.switchToSecureSignIn, systemImage: "lock.shield")
+                    }
+                    .disabled(isAuthorizing)
+                }
+                Button(language.settings.disconnect, role: .destructive) {
+                    connection.disconnect()
+                    apiKey = ""
+                }
+            case .needsReconnect:
+                Label(language.settings.oauthNeedsReconnect, systemImage: "exclamationmark.triangle.fill")
+                    .font(.headline)
+                    .foregroundStyle(Theme.warn)
+                Text(language.settings.oauthNeedsReconnectDescription)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if connection.oauthAvailable {
+                    Button {
+                        connectOAuth()
+                    } label: {
+                        if isAuthorizing {
+                            ProgressView()
+                        } else {
+                            Label(language.settings.reconnectIntervals, systemImage: "arrow.clockwise")
+                        }
+                    }
+                    .disabled(isAuthorizing)
+                }
+                Button(language.settings.disconnect, role: .destructive) {
+                    connection.disconnect()
+                    apiKey = ""
+                }
+            case .disconnected:
+                Label(language.settings.connectIntervals, systemImage: "link.badge.plus")
+                    .font(.headline)
+                Text(language.settings.intervalsSyncDescription)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if connection.oauthAvailable {
+                    Button {
+                        connectOAuth()
+                    } label: {
+                        if isAuthorizing {
+                            ProgressView()
+                        } else {
+                            Label(language.settings.connectWithIntervals, systemImage: "lock.shield")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isAuthorizing)
+                    Text(language.settings.oauthRecommended)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(language.settings.oauthPermissions)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(language.settings.oauthUnavailable)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 
-    private var lastSyncText: String {
-        if pushService.lastPushError != nil { return language.settings.lastSyncFailed }
-        if let last = pushService.lastPushAt { return language.settings.lastSync(last) }
-        return language.settings.readyToSync
-    }
-
-    private var canSave: Bool {
+    private var canSaveAPIKey: Bool {
         !athleteID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private func saveConnection() {
+    private func saveAPIKey() {
         do {
-            try KeychainStore.save(apiKey.trimmingCharacters(in: .whitespacesAndNewlines), account: KeychainStore.intervalsICUAccount)
+            try connection.saveAPIKey(athleteID: athleteID, apiKey: apiKey)
             status = SettingsStatus(
                 symbol: "checkmark.circle.fill",
                 tint: Theme.good,
@@ -404,6 +485,38 @@ struct IntervalsConnectionSettingsView: View {
                 message: language.settings.intervalsKeyWriteFailed,
                 footnote: language.settings.checkDeviceAccess
             )
+        }
+    }
+
+    private func connectOAuth() {
+        isAuthorizing = true
+        status = nil
+        Task {
+            switch await IntervalsOAuthAction.connect(
+                store: connection,
+                oauth: oauthService,
+                client: IntervalsICUClient()
+            ) {
+            case .connected:
+                status = SettingsStatus(
+                    symbol: "checkmark.circle.fill",
+                    tint: Theme.good,
+                    title: language.settings.oauthConnected,
+                    message: language.settings.oauthPermissions,
+                    footnote: nil
+                )
+            case .cancelled:
+                break
+            case .failed(let message):
+                status = SettingsStatus(
+                    symbol: "exclamationmark.triangle.fill",
+                    tint: Theme.bad,
+                    title: language.settings.oauthConnectionFailed,
+                    message: message,
+                    footnote: language.settings.reconnectIntervals
+                )
+            }
+            isAuthorizing = false
         }
     }
 
@@ -446,15 +559,12 @@ struct IntervalsConnectionSettingsView: View {
 struct WatchDeliverySettingsView: View {
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
     @AppStorage(WorkoutPushSettings.enabledKey) private var watchPushEnabled = false
-    @AppStorage(WorkoutPushSettings.athleteIDKey) private var athleteID = ""
     @EnvironmentObject private var pushService: WorkoutPushService
+    @EnvironmentObject private var connection: IntervalsConnectionStore
     @State private var isSyncing = false
-    @State private var intervalsConnected = false
 
     private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
-    private var isConnected: Bool {
-        intervalsConnected && !athleteID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
+    private var isConnected: Bool { connection.state.isConnected }
 
     var body: some View {
         Form {
@@ -505,13 +615,7 @@ struct WatchDeliverySettingsView: View {
         }
         .navigationTitle(language.settings.watchDeliverySection)
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { reloadIntervalsKey() }
-        .onChange(of: athleteID) { _, _ in reloadIntervalsKey() }
-    }
-
-    private func reloadIntervalsKey() {
-        let key = (try? KeychainStore.load(account: KeychainStore.intervalsICUAccount)) ?? ""
-        intervalsConnected = !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        .onAppear { connection.reload() }
     }
 
     private var receipt: (symbol: String, tint: Color, title: String, message: String?, footnote: String?) {

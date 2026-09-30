@@ -12,6 +12,7 @@ struct TrainOrRestApp: App {
     @StateObject private var engine: SyncEngine
     @StateObject private var pushService: WorkoutPushService
     @StateObject private var googleCalendarService: GoogleCalendarSyncService
+    @StateObject private var intervalsConnection: IntervalsConnectionStore
     @StateObject private var chatStore: CoachChatStore
     @StateObject private var chatSession: CoachChatSessionState
     @StateObject private var adaptiveReviewCoordinator: AdaptivePlanReviewCoordinator
@@ -38,7 +39,11 @@ struct TrainOrRestApp: App {
         }
         self.container = container
         CoachCredentialResolver.migrateIfNeeded()
-        let pushService = WorkoutPushService(modelContext: container.mainContext)
+        let intervalsConnection = IntervalsConnectionStore()
+        let pushService = WorkoutPushService(
+            modelContext: container.mainContext,
+            connectionStore: intervalsConnection
+        )
         let googleCalendarService = GoogleCalendarSyncService(modelContext: container.mainContext)
         let chatStore = CoachChatStore()
         let chatSession = CoachChatSessionState()
@@ -67,6 +72,7 @@ struct TrainOrRestApp: App {
         _engine = StateObject(wrappedValue: engine)
         _pushService = StateObject(wrappedValue: pushService)
         _googleCalendarService = StateObject(wrappedValue: googleCalendarService)
+        _intervalsConnection = StateObject(wrappedValue: intervalsConnection)
         _chatStore = StateObject(wrappedValue: chatStore)
         _chatSession = StateObject(wrappedValue: chatSession)
         _runSchedule = StateObject(wrappedValue: RunScheduleController())
@@ -86,6 +92,7 @@ struct TrainOrRestApp: App {
                 .environmentObject(engine)
                 .environmentObject(pushService)
                 .environmentObject(googleCalendarService)
+                .environmentObject(intervalsConnection)
                 .environmentObject(chatStore)
                 .environmentObject(chatSession)
                 .environmentObject(runSchedule)

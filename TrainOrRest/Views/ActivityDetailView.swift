@@ -8,7 +8,7 @@ struct ActivityDetailView: View {
     @Query private var mileageEntries: [ShoeMileageEntry]
     @Query private var storedShoePreferences: [RunningShoePreferences]
     @Environment(\.modelContext) private var modelContext
-    @AppStorage(WorkoutPushSettings.athleteIDKey) private var intervalsAthleteID = ""
+    @EnvironmentObject private var intervalsConnection: IntervalsConnectionStore
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
 
     private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
@@ -206,18 +206,14 @@ struct ActivityDetailView: View {
 
     @MainActor
     private func loadIntervalsAnalysis() async {
-        let athleteID = intervalsAthleteID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !athleteID.isEmpty,
-              let apiKey = try? KeychainStore.load(account: KeychainStore.intervalsICUAccount)?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-              !apiKey.isEmpty else {
+        guard intervalsConnection.state.isConnected else {
             intervalsLoadState = .unconfigured
             return
         }
 
         intervalsLoadState = .loading
         do {
-            let credentials = IntervalsICUCredentials(athleteID: athleteID, apiKey: apiKey)
+            let credentials = try intervalsConnection.credentials()
             let loader = IntervalsActivityAnalysisLoader(client: IntervalsICUClient())
             if let analysis = try await loader.analysis(for: activity, credentials: credentials, calendar: calendar) {
                 intervalsAnalysis = analysis
@@ -227,6 +223,9 @@ struct ActivityDetailView: View {
                 intervalsLoadState = .notFound
             }
         } catch {
+            if error as? IntervalsICUError == .unauthorized {
+                intervalsConnection.markNeedsReconnectIfOAuth()
+            }
             intervalsAnalysis = nil
             intervalsLoadState = .failed
         }

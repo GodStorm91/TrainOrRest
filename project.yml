@@ -35,6 +35,8 @@ targets:
         CFBundleVersion: "202609301724"
         GoogleCalendarOAuthClientID: "119351365161-2vtfr02trs185c4u2aah2lcomtad9m5b.apps.googleusercontent.com"
         GoogleCalendarOAuthRedirectScheme: "com.googleusercontent.apps.119351365161-2vtfr02trs185c4u2aah2lcomtad9m5b"
+        IntervalsICUOAuthClientID: "1144"
+        IntervalsICUOAuthWorkerCallbackURL: "https://trainorrest-oauth.trainorrest.workers.dev/intervals/callback"
         CFBundleURLTypes:
           - CFBundleURLSchemes:
               - com.googleusercontent.apps.119351365161-2vtfr02trs185c4u2aah2lcomtad9m5b
