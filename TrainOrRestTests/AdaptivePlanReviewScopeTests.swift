@@ -162,8 +162,8 @@ final class AdaptivePlanReviewScopeTests: XCTestCase {
 
 @MainActor
 private final class AdaptiveScopeClient: ClaudeServicing {
-    func send(_ request: ClaudeRequest, apiKey: String) async throws -> ClaudeResponse { throw ScopeError.unused }
-    func stream(_ request: ClaudeRequest, apiKey: String) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error> { AsyncThrowingStream { $0.finish() } }
+    func send(_ request: ClaudeRequest, credential: CoachCredential) async throws -> ClaudeResponse { throw ScopeError.unused }
+    func stream(_ request: ClaudeRequest, credential: CoachCredential) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error> { AsyncThrowingStream { $0.finish() } }
 }
 
 private enum ScopeError: Error { case unused }

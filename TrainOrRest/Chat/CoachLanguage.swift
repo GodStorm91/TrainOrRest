@@ -448,11 +448,20 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         }
     }
 
-    func missingCoachKeyError(provider: String) -> String {
-        switch self {
-        case .en: "Add your \(provider) API key in Settings first."
-        case .ja: "先に設定で\(provider) APIキーを追加してください。"
-        case .vi: "Thêm API key \(provider) trong Cài đặt trước."
+    func missingCoachConnectionError(_ connection: CoachConnection) -> String {
+        switch connection {
+        case .chatGPT:
+            switch self {
+            case .en: "Connect ChatGPT in Settings first."
+            case .ja: "先に設定で ChatGPT に接続してください。"
+            case .vi: "Kết nối ChatGPT trong Cài đặt trước."
+            }
+        case .anthropicKey, .openAIKey:
+            switch self {
+            case .en: "Add your \(connection.displayName) API key in Settings first."
+            case .ja: "先に設定で\(connection.displayName) APIキーを追加してください。"
+            case .vi: "Thêm API key \(connection.displayName) trong Cài đặt trước."
+            }
         }
     }
 
@@ -481,11 +490,11 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         if lower.contains("api key") || lower.contains("key") || lower.contains("rejected") {
             switch self {
             case .en:
-                return ("Coach needs a valid API key.", "Check Settings, then try again.")
+                return ("Coach needs to be connected again.", "Check Settings, then try again.")
             case .ja:
-                return ("有効なAPIキーが必要です。", "設定を確認してからもう一度お試しください。")
+                return ("Coach への再接続が必要です。", "設定を確認してからもう一度お試しください。")
             case .vi:
-                return ("Coach cần API key hợp lệ.", "Kiểm tra Cài đặt rồi thử lại.")
+                return ("Coach cần được kết nối lại.", "Kiểm tra Cài đặt rồi thử lại.")
             }
         }
         switch self {
@@ -1008,9 +1017,8 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
     var hideKeyboardLabel: String { self == .vi ? "Ẩn bàn phím" : self == .ja ? "キーボードを閉じる" : "Hide keyboard" }
     var sendMessageLabel: String { self == .vi ? "Gửi tin nhắn" : self == .ja ? "メッセージを送信" : "Send message" }
 
-    var apiKeyNeededTitle: String { self == .vi ? "Cần API key" : self == .ja ? "APIキーが必要です" : "API key needed" }
-    func apiKeyNeededMessage(provider: String) -> String { self == .vi ? "Thêm API key \(provider) trước khi trò chuyện." : self == .ja ? "チャットの前に\(provider) APIキーを追加してください。" : "Add a \(provider) API key before chatting." }
-    var addApiKeyLabel: String { self == .vi ? "Thêm API key" : self == .ja ? "APIキーを追加" : "Add API key" }
+    var connectCoachTitle: String { settings.connectCoachTitle }
+    var connectCoachMessage: String { self == .vi ? "Dùng gói ChatGPT của bạn để bắt đầu trò chuyện với Coach." : self == .ja ? "ChatGPT プランを使って Coach とのチャットを始めましょう。" : "Use your ChatGPT plan to start chatting with Coach." }
 
     var openingPrompts: [String] {
         switch self {

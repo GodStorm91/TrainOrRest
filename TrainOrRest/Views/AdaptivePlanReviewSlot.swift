@@ -14,7 +14,7 @@ struct AdaptivePlanReviewSlot: View {
     @Query(sort: \AdaptivePlanReview.updatedAt, order: .reverse) private var reviews: [AdaptivePlanReview]
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
     @State private var candidate: CoachPlanCandidate?
-    @State private var selectedProviderHasKey = false
+    @State private var selectedCoachIsConnected = false
 
     private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
     private var review: AdaptivePlanReview? {
@@ -25,7 +25,7 @@ struct AdaptivePlanReviewSlot: View {
         Group {
             if let review {
                 Group {
-                    if review.phase == .needsKey && selectedProviderHasKey {
+                    if review.phase == .needsKey && selectedCoachIsConnected {
                         manualReviewAction
                     } else {
                         content(for: review)
@@ -33,11 +33,11 @@ struct AdaptivePlanReviewSlot: View {
                 }
                 .task(id: presentationID(for: review)) {
                     candidate = nil
-                    selectedProviderHasKey = coordinator.selectedProviderHasKey()
+                    selectedCoachIsConnected = coordinator.selectedCoachIsConnected()
                     candidate = coordinator.candidateForPresentation(reviewID: review.id, in: modelContext)
                 }
                 .onAppear {
-                    selectedProviderHasKey = coordinator.selectedProviderHasKey()
+                    selectedCoachIsConnected = coordinator.selectedCoachIsConnected()
                 }
             } else {
                 manualReviewAction
@@ -97,7 +97,7 @@ struct AdaptivePlanReviewSlot: View {
 
     @ViewBuilder
     private func actionButtons(for review: AdaptivePlanReview) -> some View {
-        switch Self.actions(for: review, selectedProviderHasKey: selectedProviderHasKey).first {
+        switch Self.actions(for: review, selectedCoachIsConnected: selectedCoachIsConnected).first {
         case .manualReview:
             manualReviewAction
         case .retry:
@@ -106,7 +106,7 @@ struct AdaptivePlanReviewSlot: View {
             NavigationLink {
                 CoachProviderSettingsView()
             } label: {
-                Label(language.plan.addCoachProviderKey, systemImage: "key")
+                Label(language.plan.connectCoach, systemImage: "bubble.left.and.text.bubble.right")
             }
             .buttonStyle(.borderedProminent)
             .tint(Theme.accent)
@@ -117,12 +117,12 @@ struct AdaptivePlanReviewSlot: View {
 
     static func actions(
         for review: AdaptivePlanReview,
-        selectedProviderHasKey: Bool
+        selectedCoachIsConnected: Bool
     ) -> [AdaptivePlanReviewSlotAction] {
         switch review.phase {
         case .failed:
             [.retry]
-        case .needsKey where selectedProviderHasKey:
+        case .needsKey where selectedCoachIsConnected:
             [.manualReview]
         case .needsKey:
             [.addKey]

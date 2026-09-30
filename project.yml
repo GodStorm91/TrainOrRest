@@ -38,6 +38,7 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLSchemes:
               - com.googleusercontent.apps.119351365161-2vtfr02trs185c4u2aah2lcomtad9m5b
+              - trainorrest
         NSHealthShareUsageDescription: >-
           TrainOrRest reads running workouts, heart rate, heart-rate variability,
           resting heart rate, VO2 max, walking and running distance, and sleep

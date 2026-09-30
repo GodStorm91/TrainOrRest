@@ -219,7 +219,7 @@ final class WorkoutReplacementTests: XCTestCase {
                     isCustomResponse: false
                 )
             ),
-            apiKey: "test-key",
+            access: CoachAccess(connection: .anthropicKey, credential: .apiKey("test-key")),
             in: context
         )
 

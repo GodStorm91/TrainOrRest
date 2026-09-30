@@ -564,13 +564,13 @@ private final class InteractionMockCoachClient: ClaudeServicing {
         self.error = error
     }
 
-    func send(_ request: ClaudeRequest, apiKey: String) async throws -> ClaudeResponse {
+    func send(_ request: ClaudeRequest, credential: CoachCredential) async throws -> ClaudeResponse {
         requests.append(request)
         if let error { throw error }
         return response(for: responses.isEmpty ? .textOnly : responses.removeFirst())
     }
 
-    func stream(_ request: ClaudeRequest, apiKey: String) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error> {
+    func stream(_ request: ClaudeRequest, credential: CoachCredential) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error> {
         requests.append(request)
         if let error {
             return AsyncThrowingStream { $0.finish(throwing: error) }

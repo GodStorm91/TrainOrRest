@@ -1,13 +1,13 @@
 import Foundation
 
 protocol ClaudeServicing {
-    func send(_ request: ClaudeRequest, apiKey: String) async throws -> ClaudeResponse
-    func stream(_ request: ClaudeRequest, apiKey: String) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error>
+    func send(_ request: ClaudeRequest, credential: CoachCredential) async throws -> ClaudeResponse
+    func stream(_ request: ClaudeRequest, credential: CoachCredential) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error>
 }
 
 extension ClaudeServicing {
-    func stream(_ request: ClaudeRequest, apiKey: String) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error> {
-        let response = try await send(request, apiKey: apiKey)
+    func stream(_ request: ClaudeRequest, credential: CoachCredential) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error> {
+        let response = try await send(request, credential: credential)
         return AsyncThrowingStream { continuation in
             continuation.yield(.messageStart)
             for (index, block) in response.content.enumerated() {
@@ -52,6 +52,14 @@ enum CoachChatConfig {
 
 enum ClaudeClientError: LocalizedError, Equatable {
     case badKey, rateLimited, offline, connectionLost, timedOut, invalidResponse, api(String)
+    /// ChatGPT plan usage limit reached (`subscription_sharing_usage_limit_exceeded`).
+    case planUsageLimit
+    /// ChatGPT plan usage is unavailable for this account (`subscription_sharing_user_not_eligible`).
+    case planNotEligible
+    /// The ChatGPT session ended and the user has to sign in again.
+    case needsReconnect
+    /// The ChatGPT route rejected part of the request (`subscription_sharing_unsupported_capability`).
+    case unsupportedCapability(param: String?)
 
     var errorDescription: String? {
         switch self {
@@ -62,7 +70,20 @@ enum ClaudeClientError: LocalizedError, Equatable {
         case .timedOut: "The coach provider did not respond in time. A large plan edit can exceed the limit; try one change at a time."
         case .invalidResponse: "The coach provider returned an unexpected response."
         case .api(let message): message
+        case .planUsageLimit: "Your ChatGPT plan's usage limit is reached. Check usage in ChatGPT settings."
+        case .planNotEligible: "ChatGPT plan use isn't available for this account. Add a Claude or OpenAI key in Settings."
+        case .needsReconnect: "Your ChatGPT session ended. Reconnect ChatGPT in Settings; your chats are safe."
+        case .unsupportedCapability(let param):
+            "ChatGPT rejected part of the coach request\(param.map { " (\($0))" } ?? "")."
         }
+    }
+}
+
+extension CoachCredential {
+    /// The API key for key-based clients; ChatGPT tokens are not API keys.
+    func requireAPIKey() throws -> String {
+        guard case .apiKey(let key) = self else { throw ClaudeClientError.badKey }
+        return key
     }
 }
 
@@ -114,7 +135,8 @@ final class ClaudeClient: ClaudeServicing {
         self.session = session
     }
 
-    func send(_ request: ClaudeRequest, apiKey: String) async throws -> ClaudeResponse {
+    func send(_ request: ClaudeRequest, credential: CoachCredential) async throws -> ClaudeResponse {
+        let apiKey = try credential.requireAPIKey()
         var urlRequest = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue(apiKey, forHTTPHeaderField: "x-api-key")
@@ -142,8 +164,8 @@ final class ClaudeClient: ClaudeServicing {
         }
     }
 
-    func stream(_ request: ClaudeRequest, apiKey: String) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error> {
-        let urlRequest = try makeStreamingRequest(request, apiKey: apiKey)
+    func stream(_ request: ClaudeRequest, credential: CoachCredential) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error> {
+        let urlRequest = try makeStreamingRequest(request, apiKey: credential.requireAPIKey())
 
         return AsyncThrowingStream { continuation in
             let task = Task {

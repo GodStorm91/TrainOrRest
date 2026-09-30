@@ -81,6 +81,7 @@ final class CoachChatStore: ObservableObject {
 
     private let anthropicClient: ClaudeServicing
     private let openAIClient: ClaudeServicing
+    private let chatGPTClient: ClaudeServicing
     private let calendar: Calendar
     private let now: () -> Date
 
@@ -88,11 +89,13 @@ final class CoachChatStore: ObservableObject {
         client: ClaudeServicing? = nil,
         anthropicClient: ClaudeServicing = ClaudeClient(),
         openAIClient: ClaudeServicing = OpenAIClient(),
+        chatGPTClient: ClaudeServicing = ChatGPTResponsesClient(),
         calendar: Calendar = .current,
         now: @escaping () -> Date = { .now }
     ) {
         self.anthropicClient = client ?? anthropicClient
         self.openAIClient = client ?? openAIClient
+        self.chatGPTClient = client ?? chatGPTClient
         self.calendar = calendar
         self.now = now
     }
@@ -169,20 +172,19 @@ final class CoachChatStore: ObservableObject {
         }
     }
 
+    /// Sends on the selected coach connection; the request's model belongs to that connection.
     @discardableResult
     func submit(_ request: CoachTurnRequest, in context: ModelContext) async -> Bool {
-        let account = CoachModelProvider.apiKeyAccount(for: request.model)
-        guard let apiKey = try? KeychainStore.load(account: account), !apiKey.isEmpty else {
-            lastError = CoachLanguage.current.missingCoachKeyError(
-                provider: CoachModelProvider.displayName(for: request.model)
-            )
+        let connection = CoachCredentialResolver.current().connection
+        guard let access = CoachCredentialResolver.access(for: connection) else {
+            lastError = CoachLanguage.current.missingCoachConnectionError(connection)
             return false
         }
-        return await submit(request, apiKey: apiKey, in: context)
+        return await submit(request, access: access, in: context)
     }
 
     @discardableResult
-    func submit(_ request: CoachTurnRequest, apiKey: String, in context: ModelContext) async -> Bool {
+    func submit(_ request: CoachTurnRequest, access: CoachAccess, in context: ModelContext) async -> Bool {
         guard !isSending else { return false }
         guard !hasPendingPlanDecision else {
             lastError = CoachLanguage.current.replacementPendingMessage
@@ -217,7 +219,7 @@ final class CoachChatStore: ObservableObject {
             try? context.save()
         }
 
-        let didSend = await performSubmission(request, apiKey: apiKey, in: context)
+        let didSend = await performSubmission(request, access: access, in: context)
         if !didSend {
             if let messageID = request.interactionMessageID, let previousInteraction {
                 restoreInteraction(messageID: messageID, interaction: previousInteraction, in: context)
@@ -238,7 +240,7 @@ final class CoachChatStore: ObservableObject {
 
     private func performSubmission(
         _ request: CoachTurnRequest,
-        apiKey: String,
+        access: CoachAccess,
         in context: ModelContext
     ) async -> Bool {
         let text = request.text
@@ -383,7 +385,7 @@ final class CoachChatStore: ObservableObject {
             assistantTurn,
             snapshot: snapshot,
             model: model,
-            apiKey: apiKey,
+            access: access,
             in: context,
             statusBeforeStreaming: .streaming
         )
@@ -534,7 +536,7 @@ final class CoachChatStore: ObservableObject {
         return true
     }
 
-    func retryFailedResponse(_ assistantTurnID: UUID, model: String, apiKey: String, in context: ModelContext) async {
+    func retryFailedResponse(_ assistantTurnID: UUID, model: String, access: CoachAccess, in context: ModelContext) async {
         guard !isSending, !isRetrying, !hasPendingPlanDecision, !isConfirmingPlanCandidate,
               let assistantTurn = message(assistantTurnID, in: context),
               assistantTurn.role == .assistant,
@@ -554,7 +556,7 @@ final class CoachChatStore: ObservableObject {
             assistantTurn,
             snapshot: snapshot,
             model: model,
-            apiKey: apiKey,
+            access: access,
             in: context,
             statusBeforeStreaming: .retrying
         )
@@ -563,12 +565,12 @@ final class CoachChatStore: ObservableObject {
     }
 
     func retryFailedResponse(_ assistantTurnID: UUID, model: String, in context: ModelContext) async {
-        let account = CoachModelProvider.apiKeyAccount(for: model)
-        guard let apiKey = try? KeychainStore.load(account: account), !apiKey.isEmpty else {
-            lastError = CoachLanguage.current.missingCoachKeyError(provider: CoachModelProvider.displayName(for: model))
+        let connection = CoachCredentialResolver.current().connection
+        guard let access = CoachCredentialResolver.access(for: connection) else {
+            lastError = CoachLanguage.current.missingCoachConnectionError(connection)
             return
         }
-        await retryFailedResponse(assistantTurnID, model: model, apiKey: apiKey, in: context)
+        await retryFailedResponse(assistantTurnID, model: model, access: access, in: context)
     }
 
     func dismissFailedResponse(_ assistantTurnID: UUID, in context: ModelContext) {
@@ -665,7 +667,8 @@ final class CoachChatStore: ObservableObject {
         try? context.save()
     }
 
-    func testConnection(apiKey: String, model: String) async -> String {
+    /// One short round trip on `access`; `nil` means the connection works.
+    func testConnection(_ access: CoachAccess, model: String) async -> Error? {
         let request = ClaudeRequest(
             model: model,
             system: "Reply with a short health check.",
@@ -673,18 +676,27 @@ final class CoachChatStore: ObservableObject {
             messages: [ClaudeMessageParam(role: "user", content: [.text("Say OK.")])]
         )
         do {
-            _ = try await CoachModelProvider.client(for: model, anthropicClient: anthropicClient, openAIClient: openAIClient).send(request, apiKey: apiKey)
-            return "Connection OK"
+            _ = try await client(for: access.connection).send(request, credential: access.credential)
+            return nil
         } catch {
-            return technicalErrorMessage(error)
+            return error
         }
+    }
+
+    private func client(for connection: CoachConnection) -> ClaudeServicing {
+        CoachClientRouter.client(
+            for: connection,
+            anthropicClient: anthropicClient,
+            openAIClient: openAIClient,
+            chatGPTClient: chatGPTClient
+        )
     }
 
     private func executeAttempt(
         _ assistantTurn: ChatMessage,
         snapshot: CoachRequestSnapshot,
         model: String,
-        apiKey: String,
+        access: CoachAccess,
         in context: ModelContext,
         statusBeforeStreaming: AssistantTurnStatus
     ) async {
@@ -701,7 +713,7 @@ final class CoachChatStore: ObservableObject {
 
         do {
             try await runLoop(
-                apiKey: apiKey,
+                access: access,
                 model: model,
                 snapshot: snapshot,
                 assistantTurn: assistantTurn,
@@ -723,7 +735,7 @@ final class CoachChatStore: ObservableObject {
     }
 
     private func runLoop(
-        apiKey: String,
+        access: CoachAccess,
         model: String,
         snapshot: CoachRequestSnapshot,
         assistantTurn: ChatMessage,
@@ -781,11 +793,11 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
                 toolChoice: toolChoice(for: snapshot.actionType),
                 messages: conversation
             )
-            let client = CoachModelProvider.client(for: model, anthropicClient: anthropicClient, openAIClient: openAIClient)
+            let client = client(for: access.connection)
             if assistantTurn.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 generationState = .processing(messageId: assistantTurn.turnID, stage: .buildingRecommendation)
             }
-            let events = try await client.stream(request, apiKey: apiKey)
+            let events = try await client.stream(request, credential: access.credential)
             var replacementStarted = false
             var lastStreamSave = Date.distantPast
             let streamSaveInterval: TimeInterval = 0.15
@@ -1026,8 +1038,10 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         switch clientError {
         case .offline:
             return .offline
-        case .badKey:
+        case .badKey, .needsReconnect:
             return .authentication
+        case .planUsageLimit, .planNotEligible, .unsupportedCapability:
+            return .nonRetryable
         case .connectionLost, .timedOut, .rateLimited, .invalidResponse, .api:
             return .retryableResponse
         }
@@ -1523,28 +1537,6 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return "New chat" }
         return String(clean.prefix(48))
-    }
-}
-
-enum CoachModelProvider {
-    static func isOpenAIModel(_ model: String) -> Bool {
-        model.hasPrefix("gpt-") || model.hasPrefix("o")
-    }
-
-    static func apiKeyAccount(for model: String) -> String {
-        isOpenAIModel(model) ? KeychainStore.openAIAPIKeyAccount : KeychainStore.apiKeyAccount
-    }
-
-    static func displayName(for model: String) -> String {
-        isOpenAIModel(model) ? "OpenAI" : "Anthropic"
-    }
-
-    static func client(
-        for model: String,
-        anthropicClient: ClaudeServicing,
-        openAIClient: ClaudeServicing
-    ) -> ClaudeServicing {
-        isOpenAIModel(model) ? openAIClient : anthropicClient
     }
 }
 
