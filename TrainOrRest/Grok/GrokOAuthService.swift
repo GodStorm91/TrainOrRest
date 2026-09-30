@@ -6,6 +6,7 @@ enum GrokOAuthError: LocalizedError, Equatable {
     case declined
     case invalidResponse
     case endpointRejected
+    case transport
     case http(Int, code: String?)
 
     var errorDescription: String? {
@@ -15,6 +16,7 @@ enum GrokOAuthError: LocalizedError, Equatable {
         case .declined: "Grok sign-in was declined."
         case .invalidResponse: "Grok returned an unexpected sign-in response."
         case .endpointRejected: "Grok sign-in refused an untrusted address."
+        case .transport: "Grok sign-in could not reach xAI. Check your connection."
         case .http(let status, let code):
             "Grok sign-in failed (\(code ?? "HTTP \(status)"))."
         }
@@ -269,7 +271,13 @@ final class GrokOAuthService: @unchecked Sendable {
         var interval = authorization.interval
         while !Task.isCancelled {
             if now() >= authorization.expiresAt { throw GrokOAuthError.expired }
-            switch try await poll(authorization, tokenEndpoint: tokenEndpoint) {
+            let outcome: GrokDevicePoll
+            do {
+                outcome = try await poll(authorization, tokenEndpoint: tokenEndpoint)
+            } catch GrokOAuthError.transport {
+                outcome = .pending
+            }
+            switch outcome {
             case .pending:
                 break
             case .slowDown:
@@ -301,7 +309,7 @@ final class GrokOAuthService: @unchecked Sendable {
         } catch let error as URLError where error.code == .cancelled {
             throw GrokOAuthError.cancelled
         } catch {
-            throw GrokOAuthError.http(-1, code: "network")
+            throw GrokOAuthError.transport
         }
         guard let http = response as? HTTPURLResponse else { throw GrokOAuthError.invalidResponse }
         if (300..<400).contains(http.statusCode) { throw GrokOAuthError.endpointRejected }
