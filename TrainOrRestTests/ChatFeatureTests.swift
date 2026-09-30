@@ -715,6 +715,63 @@ final class ChatFeatureTests: XCTestCase {
         }
     }
 
+    func testAttachedTempoRequestStagesTempoNotTheExistingEasyKind() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let selected = try XCTUnwrap(try context.fetch(FetchDescriptor<PlannedWorkout>()).first {
+            $0.kind == .easy && $0.status == .planned && $0.date > today
+        })
+        let client = MockClaudeClient(responses: [])
+        let contextualToday = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: selected.date)))
+        let store = CoachChatStore(client: client, calendar: calendar, now: { contextualToday })
+
+        await store.submitTestTurn(
+            text: "đổi thành tempo 10km",
+            model: "claude-test",
+            attachments: [.plannedWorkout(selected.uuid)],
+            apiKey: "test-key",
+            in: context
+        )
+
+        XCTAssertTrue(client.requests.isEmpty, "a named kind plus distance is a local edit, not a model call")
+        let replacement = try replacementDetails(try XCTUnwrap(store.pendingPlanCandidate))
+        XCTAssertEqual(replacement.workoutID, selected.uuid)
+        XCTAssertEqual(replacement.existing.kind, .easy)
+        XCTAssertEqual(replacement.proposed.kind, .tempo)
+        XCTAssertEqual(replacement.proposed.distanceKm, 10, accuracy: 0.001)
+        let transcript = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+            .map(\.text)
+            .joined(separator: "\n")
+        XCTAssertFalse(transcript.contains("đổi cự li"), "a type change must not be described as a distance-only edit")
+    }
+
+    func testAttachedTypeOnlyRequestKeepsDistanceAndChangesKind() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let selected = try XCTUnwrap(try context.fetch(FetchDescriptor<PlannedWorkout>()).first {
+            $0.kind == .easy && $0.status == .planned && $0.date > today
+        })
+        let client = MockClaudeClient(responses: [])
+        let contextualToday = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: selected.date)))
+        let store = CoachChatStore(client: client, calendar: calendar, now: { contextualToday })
+
+        await store.submitTestTurn(
+            text: "đổi thành tempo",
+            model: "claude-test",
+            attachments: [.plannedWorkout(selected.uuid)],
+            apiKey: "test-key",
+            in: context
+        )
+
+        XCTAssertTrue(client.requests.isEmpty)
+        let replacement = try replacementDetails(try XCTUnwrap(store.pendingPlanCandidate))
+        XCTAssertEqual(replacement.existing.kind, .easy)
+        XCTAssertEqual(replacement.proposed.kind, .tempo)
+        XCTAssertEqual(replacement.proposed.distanceKm, selected.distanceKm, accuracy: 0.05)
+    }
+
     func testContextualReplaceStagesCandidateForManuallyEditedWorkoutAfterPlanReanchors() async throws {
         let container = try makeContainer()
         let context = container.mainContext
