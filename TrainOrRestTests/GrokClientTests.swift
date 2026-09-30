@@ -36,6 +36,31 @@ final class GrokClientTests: XCTestCase {
         }
     }
 
+    func testSignInKeepsPollingAfterTheConnectionDropsWhileTheUserApproves() async throws {
+        let attempts = Counter()
+        let service = makeOAuthService { request in
+            switch attempts.next() {
+            case 1: throw URLError(.networkConnectionLost)
+            case 2: return (Self.response(for: request, status: 400), Data(#"{"error":"authorization_pending"}"#.utf8))
+            default: return (Self.response(for: request, status: 200),
+                             Data(#"{"access_token":"grok-access","refresh_token":"grok-refresh","expires_in":3600}"#.utf8))
+            }
+        }
+        let authorization = GrokDeviceAuthorization(
+            deviceCode: "device",
+            userCode: "CODE",
+            verificationURL: URL(string: "https://accounts.x.ai/oauth2/device")!,
+            expiresAt: Date().addingTimeInterval(1_800),
+            interval: 0.01
+        )
+        let tokens = try await service.pollUntilComplete(
+            authorization,
+            tokenEndpoint: URL(string: "https://auth.x.ai/oauth2/token")!
+        )
+        XCTAssertEqual(tokens.accessToken, "grok-access")
+        XCTAssertEqual(attempts.value, 3)
+    }
+
     func testRequestOmitsBillingHeaderAndUsesResponsesToolShape() async throws {
         var captured: URLRequest?
         let client = makeClient { request in
@@ -158,6 +183,15 @@ final class GrokClientTests: XCTestCase {
         return GrokResponsesClient(session: URLSession(configuration: configuration))
     }
 
+    private func makeOAuthService(
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> GrokOAuthService {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [GrokStubURLProtocol.self]
+        GrokStubURLProtocol.requestHandler = handler
+        return GrokOAuthService(session: URLSession(configuration: configuration))
+    }
+
     private static func request() -> ClaudeRequest {
         ClaudeRequest(
             model: "grok-4.6",
@@ -218,6 +252,24 @@ final class GrokClientTests: XCTestCase {
 
     private static func response(for request: URLRequest, status: Int) -> HTTPURLResponse {
         HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+    }
+}
+
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+
+    func next() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        count += 1
+        return count
     }
 }
 
