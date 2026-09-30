@@ -481,6 +481,12 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
             case .ja: "先に設定で ChatGPT に接続してください。"
             case .vi: "Kết nối ChatGPT trong Cài đặt trước."
             }
+        case .grok:
+            switch self {
+            case .en: "Sign in with Grok in Settings first."
+            case .ja: "先に設定で Grok にサインインしてください。"
+            case .vi: "Đăng nhập Grok trong Cài đặt trước."
+            }
         case .anthropicKey, .openAIKey:
             switch self {
             case .en: "Add your \(connection.displayName) API key in Settings first."
@@ -1043,7 +1049,7 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
     var sendMessageLabel: String { self == .vi ? "Gửi tin nhắn" : self == .ja ? "メッセージを送信" : "Send message" }
 
     var connectCoachTitle: String { settings.connectCoachTitle }
-    var connectCoachMessage: String { self == .vi ? "Dùng gói ChatGPT của bạn để bắt đầu trò chuyện với Coach." : self == .ja ? "ChatGPT プランを使って Coach とのチャットを始めましょう。" : "Use your ChatGPT plan to start chatting with Coach." }
+    var connectCoachMessage: String { self == .vi ? "Dùng gói ChatGPT hoặc đăng nhập Grok để bắt đầu trò chuyện với Coach." : self == .ja ? "ChatGPT プランか Grok で Coach とのチャットを始めましょう。" : "Use your ChatGPT plan or sign in with Grok to start chatting with Coach." }
 
     var openingPrompts: [String] {
         switch self {

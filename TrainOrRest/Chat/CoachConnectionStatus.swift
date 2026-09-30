@@ -7,10 +7,12 @@ struct CoachConnectionStatus: Equatable {
         case notConnected
         case chatGPTConnected(email: String?)
         case keyConnected(CoachConnection)
+        case grokConnected(email: String?)
         case planUsageDisabled
         case usageLimited
         case notEligible
         case needsReconnect
+        case grokNeedsReconnect
     }
 
     enum Action: Equatable {
@@ -26,7 +28,13 @@ struct CoachConnectionStatus: Equatable {
 
     let kind: Kind
 
-    init(selected: CoachConnection, chatGPT: ChatGPTConnectionState, hasAnthropicKey: Bool, hasOpenAIKey: Bool) {
+    init(
+        selected: CoachConnection,
+        chatGPT: ChatGPTConnectionState,
+        hasAnthropicKey: Bool,
+        hasOpenAIKey: Bool,
+        grok: GrokConnectionState = .signedOut
+    ) {
         switch selected {
         case .chatGPT:
             switch chatGPT {
@@ -41,6 +49,12 @@ struct CoachConnectionStatus: Equatable {
             kind = hasAnthropicKey ? .keyConnected(.anthropicKey) : .notConnected
         case .openAIKey:
             kind = hasOpenAIKey ? .keyConnected(.openAIKey) : .notConnected
+        case .grok:
+            switch grok {
+            case .signedOut, .authorizing: kind = .notConnected
+            case .connected(let email): kind = .grokConnected(email: email)
+            case .needsReconnect: kind = .grokNeedsReconnect
+            }
         }
     }
 
@@ -48,8 +62,8 @@ struct CoachConnectionStatus: Equatable {
         switch kind {
         case .planUsageDisabled: .allowPlanUse
         case .usageLimited: .manageUsage
-        case .needsReconnect: .reconnect
-        case .notConnected, .chatGPTConnected, .keyConnected, .notEligible: .none
+        case .needsReconnect, .grokNeedsReconnect: .reconnect
+        case .notConnected, .chatGPTConnected, .keyConnected, .notEligible, .grokConnected: .none
         }
     }
 
@@ -57,13 +71,13 @@ struct CoachConnectionStatus: Equatable {
     var isChatGPTAttention: Bool {
         switch kind {
         case .planUsageDisabled, .usageLimited, .notEligible, .needsReconnect: true
-        case .notConnected, .chatGPTConnected, .keyConnected: false
+        case .notConnected, .chatGPTConnected, .keyConnected, .grokConnected, .grokNeedsReconnect: false
         }
     }
 
     var isConnected: Bool {
         switch kind {
-        case .chatGPTConnected, .keyConnected: true
+        case .chatGPTConnected, .keyConnected, .grokConnected: true
         default: false
         }
     }
@@ -71,11 +85,12 @@ struct CoachConnectionStatus: Equatable {
     func title(_ copy: SettingsCopy) -> String {
         switch kind {
         case .notConnected: copy.connectCoachTitle
-        case .chatGPTConnected, .keyConnected: copy.coachConnected
+        case .chatGPTConnected, .keyConnected, .grokConnected: copy.coachConnected
         case .planUsageDisabled: copy.chatGPTPlanUseOffTitle
         case .usageLimited: copy.chatGPTLimitTitle
         case .notEligible: copy.chatGPTNotEligibleTitle
         case .needsReconnect: copy.reconnectChatGPTTitle
+        case .grokNeedsReconnect: copy.reconnectGrokTitle
         }
     }
 
@@ -83,11 +98,13 @@ struct CoachConnectionStatus: Equatable {
         switch kind {
         case .notConnected: copy.connectCoachPrompt
         case .chatGPTConnected(let email): copy.usingChatGPTPlan(email: email, model: model)
+        case .grokConnected(let email): copy.usingGrok(email: email, model: model)
         case .keyConnected: copy.modelSelected(copy.modelLabel(model ?? ""))
         case .planUsageDisabled: copy.chatGPTPlanUseOffMessage
         case .usageLimited: copy.chatGPTLimitMessage
         case .notEligible: copy.chatGPTNotEligibleMessage
         case .needsReconnect: copy.reconnectChatGPTMessage
+        case .grokNeedsReconnect: copy.reconnectGrokMessage
         }
     }
 
@@ -103,11 +120,11 @@ struct CoachConnectionStatus: Equatable {
     var symbol: String {
         switch kind {
         case .notConnected: "sparkles"
-        case .chatGPTConnected, .keyConnected: "checkmark.circle.fill"
+        case .chatGPTConnected, .keyConnected, .grokConnected: "checkmark.circle.fill"
         case .planUsageDisabled: "hand.raised.fill"
         case .usageLimited: "gauge.with.dots.needle.100percent"
         case .notEligible: "xmark.octagon.fill"
-        case .needsReconnect: "arrow.triangle.2.circlepath"
+        case .needsReconnect, .grokNeedsReconnect: "arrow.triangle.2.circlepath"
         }
     }
 }

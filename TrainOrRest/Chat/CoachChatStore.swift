@@ -82,6 +82,7 @@ final class CoachChatStore: ObservableObject {
     private let anthropicClient: ClaudeServicing
     private let openAIClient: ClaudeServicing
     private let chatGPTClient: ClaudeServicing
+    private let grokClient: ClaudeServicing
     private let calendar: Calendar
     private let now: () -> Date
 
@@ -90,12 +91,14 @@ final class CoachChatStore: ObservableObject {
         anthropicClient: ClaudeServicing = ClaudeClient(),
         openAIClient: ClaudeServicing = OpenAIClient(),
         chatGPTClient: ClaudeServicing = ChatGPTResponsesClient(),
+        grokClient: ClaudeServicing = GrokResponsesClient(),
         calendar: Calendar = .current,
         now: @escaping () -> Date = { .now }
     ) {
         self.anthropicClient = client ?? anthropicClient
         self.openAIClient = client ?? openAIClient
         self.chatGPTClient = client ?? chatGPTClient
+        self.grokClient = client ?? grokClient
         self.calendar = calendar
         self.now = now
     }
@@ -704,7 +707,8 @@ final class CoachChatStore: ObservableObject {
             for: connection,
             anthropicClient: anthropicClient,
             openAIClient: openAIClient,
-            chatGPTClient: chatGPTClient
+            chatGPTClient: chatGPTClient,
+            grokClient: grokClient
         )
     }
 
@@ -1060,6 +1064,8 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             return .authentication
         case .planUsageLimit, .planNotEligible, .unsupportedCapability:
             return .nonRetryable
+        case .api(let message) where message.contains("Grok session ended"):
+            return .authentication
         case .connectionLost, .timedOut, .rateLimited, .invalidResponse, .api:
             return .retryableResponse
         }

@@ -24,11 +24,15 @@ struct ChatView: View {
     @EnvironmentObject private var chatStore: CoachChatStore
     @EnvironmentObject private var chatSession: CoachChatSessionState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openURL) private var openURL
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var draft = ""
     @State private var isCoachConnected = false
     @State private var chatGPTState = ChatGPTTokenStore.shared.state
+    @State private var grokState = GrokTokenStore.shared.state
     @State private var isSigningInWithChatGPT = false
+    @State private var isSigningInWithGrok = false
+    @State private var grokSignInError: String?
     @State private var showsChatGPTPlanNotice = false
     @State private var evidence = EvidenceSelection()
     @State private var selectedPhotoItem: PhotosPickerItem?
@@ -174,6 +178,10 @@ struct ChatView: View {
         }
         .onReceive(ChatGPTTokenStore.shared.statePublisher.receive(on: DispatchQueue.main)) { state in
             chatGPTState = state
+            refreshConnectionState()
+        }
+        .onReceive(GrokTokenStore.shared.statePublisher.receive(on: DispatchQueue.main)) { state in
+            grokState = state
             refreshConnectionState()
         }
         .onChange(of: connectionRaw) { _, _ in refreshConnectionState() }
@@ -935,7 +943,8 @@ struct ChatView: View {
             selected: connection,
             chatGPT: chatGPTState,
             hasAnthropicKey: isCoachConnected,
-            hasOpenAIKey: isCoachConnected
+            hasOpenAIKey: isCoachConnected,
+            grok: grokState
         )
     }
 
@@ -952,6 +961,7 @@ struct ChatView: View {
                 ) {
                     signInWithChatGPT(requestConsent: false)
                 }
+                grokSignInControl
                 Button(language.settings.otherCoachOptions) { isProviderSettingsPresented = true }
             }
             .frame(maxWidth: 320)
@@ -1001,6 +1011,78 @@ struct ChatView: View {
             }
         }
     }
+    @ViewBuilder
+    private var grokSignInControl: some View {
+        switch grokState {
+        case .authorizing(let userCode, let url):
+            VStack(spacing: 8) {
+                Text(language.settings.grokEnterCode)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Text(userCode)
+                    .font(.title2.monospaced())
+                    .textSelection(.enabled)
+                Button {
+                    UIPasteboard.general.string = userCode
+                } label: {
+                    Label(language.settings.copyCode, systemImage: "doc.on.doc")
+                }
+                Link(language.settings.openGrokVerification, destination: url)
+                Button(language.settings.cancelGrokSignIn, role: .cancel) {
+                    Task {
+                        await GrokTokenStore.shared.cancelSignIn()
+                        grokState = GrokTokenStore.shared.state
+                        isSigningInWithGrok = false
+                    }
+                }
+            }
+        case .connected:
+            EmptyView()
+        case .signedOut, .needsReconnect:
+            Button {
+                startGrokSignIn()
+            } label: {
+                if isSigningInWithGrok {
+                    ProgressView()
+                } else {
+                    Label(language.settings.signInWithGrok, systemImage: "person.crop.circle.badge.plus")
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(isSigningInWithGrok)
+            if let grokSignInError {
+                Text(grokSignInError)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.bad)
+            }
+        }
+    }
+
+    private func startGrokSignIn() {
+        isSigningInWithGrok = true
+        grokSignInError = nil
+        Task {
+            defer { isSigningInWithGrok = false }
+            do {
+                try await GrokTokenStore.shared.signIn { authorization in
+                    Task { @MainActor in
+                        openURL(authorization.verificationURL)
+                    }
+                }
+                connectionRaw = CoachConnection.grok.rawValue
+                grokState = GrokTokenStore.shared.state
+                refreshConnectionState()
+            } catch is CancellationError {
+                return
+            } catch let error as GrokOAuthError where error == .cancelled {
+                return
+            } catch {
+                grokSignInError = error.localizedDescription
+                grokState = GrokTokenStore.shared.state
+            }
+        }
+    }
+
 
     private var chatFooter: some View {
         VStack(alignment: .leading, spacing: 8) {

@@ -7,6 +7,7 @@ enum KeychainStore {
     static let intervalsICUAccount = "intervals-icu-api-key"
     static let chatGPTCredentialAccount = "chatgpt-credential-v1"
     static let chatGPTHostIDAccount = "chatgpt-host-id"
+    static let grokCredentialAccount = "grok-credential-v1"
 
     enum StoreError: Error {
         case unexpectedStatus(OSStatus)

@@ -763,6 +763,7 @@ struct CoachProviderSettingsView: View {
     @AppStorage(CoachConnection.chatGPT.modelStorageKey) private var chatGPTModel = ""
     @AppStorage(CoachConnection.anthropicKey.modelStorageKey) private var claudeModel = CoachChatConfig.defaultModel
     @AppStorage(CoachConnection.openAIKey.modelStorageKey) private var openAIModel = CoachChatConfig.defaultOpenAIModel
+    @AppStorage(CoachConnection.grok.modelStorageKey) private var grokModel = GrokAuthConfiguration.defaultModel
     @AppStorage(AdaptivePlanReviewSettings.automaticKey) private var automaticNextWeekReview = false
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
@@ -772,6 +773,9 @@ struct CoachProviderSettingsView: View {
     @State private var hasAnthropicKey = false
     @State private var hasOpenAIKey = false
     @State private var chatGPTState = ChatGPTTokenStore.shared.state
+    @State private var grokState = GrokTokenStore.shared.state
+    @State private var isSigningInWithGrok = false
+    @State private var grokSignInError: String?
     @State private var chatGPTModels: [ChatGPTModel] = []
     @State private var keyCheck: KeyCheck?
     @State private var isSigningIn = false
@@ -809,7 +813,8 @@ struct CoachProviderSettingsView: View {
             selected: connection,
             chatGPT: chatGPTState,
             hasAnthropicKey: hasAnthropicKey,
-            hasOpenAIKey: hasOpenAIKey
+            hasOpenAIKey: hasOpenAIKey,
+            grok: grokState
         )
     }
 
@@ -822,6 +827,7 @@ struct CoachProviderSettingsView: View {
         if chatGPTStatus.isConnected { connections.append(.chatGPT) }
         if hasAnthropicKey { connections.append(.anthropicKey) }
         if hasOpenAIKey { connections.append(.openAIKey) }
+        if case .connected = grokState { connections.append(.grok) }
         return connections
     }
 
@@ -832,6 +838,7 @@ struct CoachProviderSettingsView: View {
             return chatGPTModels.first { $0.id == chatGPTModel }?.displayName ?? chatGPTModel
         case .anthropicKey: return claudeModel
         case .openAIKey: return openAIModel
+        case .grok: return grokModel
         }
     }
 
@@ -848,6 +855,10 @@ struct CoachProviderSettingsView: View {
                                   message: failureMessage(outcome, connection: checked))
         case nil:
             break
+        }
+        if let grokSignInError {
+            return SettingsStatus(symbol: "exclamationmark.triangle.fill", tint: Theme.bad,
+                                  title: copy.grokSignInFailed, message: grokSignInError)
         }
         if let signInError {
             return SettingsStatus(symbol: "exclamationmark.triangle.fill", tint: Theme.bad,
@@ -898,6 +909,7 @@ struct CoachProviderSettingsView: View {
             if showsChatGPTDiagnostics, chatGPTState != .signedOut {
                 chatGPTDiagnosticsSection
             }
+            grokSection
             claudeSection
 
             Section {
@@ -938,6 +950,7 @@ struct CoachProviderSettingsView: View {
         }
         .task(id: chatGPTState) { await loadChatGPTModels() }
         .onReceive(ChatGPTTokenStore.shared.statePublisher.receive(on: DispatchQueue.main)) { chatGPTState = $0 }
+        .onReceive(GrokTokenStore.shared.statePublisher.receive(on: DispatchQueue.main)) { grokState = $0 }
         .onChange(of: claudeModel) { _, _ in clearFinishedKeyCheck() }
         .onChange(of: openAIModel) { _, _ in clearFinishedKeyCheck() }
         .onChange(of: anthropicAPIKey) { _, _ in clearFinishedKeyCheck() }
@@ -982,6 +995,56 @@ struct CoachProviderSettingsView: View {
             Text(copy.chatGPTPrivacyFooter)
         }
     }
+    private var grokSection: some View {
+        Section {
+            switch grokState {
+            case .signedOut:
+                Button {
+                    startGrokSignIn()
+                } label: {
+                    if isSigningInWithGrok {
+                        ProgressView()
+                    } else {
+                        Label(copy.signInWithGrok, systemImage: "person.crop.circle.badge.plus")
+                    }
+                }
+                .disabled(isSigningInWithGrok)
+            case .authorizing(let userCode, let url):
+                Text(copy.grokEnterCode)
+                Text(userCode)
+                    .font(.title2.monospaced())
+                    .textSelection(.enabled)
+                Button {
+                    UIPasteboard.general.string = userCode
+                } label: {
+                    Label(copy.copyCode, systemImage: "doc.on.doc")
+                }
+                Link(copy.openGrokVerification, destination: url)
+                Button(copy.cancelGrokSignIn, role: .cancel) {
+                    cancelGrokSignIn()
+                }
+            case .connected:
+                Picker(copy.model, selection: $grokModel) {
+                    ForEach(GrokAuthConfiguration.models, id: \.self) { Text($0).tag($0) }
+                }
+                Button(copy.disconnectGrok, role: .destructive) { disconnectGrok() }
+            case .needsReconnect:
+                Button(copy.reconnect) { startGrokSignIn() }
+                    .disabled(isSigningInWithGrok)
+                Button(copy.disconnectGrok, role: .destructive) { disconnectGrok() }
+            }
+            if let grokSignInError {
+                Text(grokSignInError)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.bad)
+            }
+        } header: {
+            Text(copy.grokHeader)
+        } footer: {
+            Text(copy.grokPrivacyFooter)
+        }
+    }
+
 
     private var chatGPTDiagnosticsSection: some View {
         Section {
@@ -1165,6 +1228,54 @@ struct CoachProviderSettingsView: View {
             }
         }
     }
+    private func startGrokSignIn() {
+        isSigningInWithGrok = true
+        grokSignInError = nil
+        Task {
+            defer { isSigningInWithGrok = false }
+            do {
+                try await GrokTokenStore.shared.signIn { authorization in
+                    Task { @MainActor in
+                        openURL(authorization.verificationURL)
+                    }
+                }
+                connectionRaw = CoachConnection.grok.rawValue
+                grokState = GrokTokenStore.shared.state
+            } catch is CancellationError {
+                return
+            } catch let error as GrokOAuthError where error == .cancelled {
+                return
+            } catch {
+                grokSignInError = error.localizedDescription
+                grokState = GrokTokenStore.shared.state
+            }
+        }
+    }
+
+    private func cancelGrokSignIn() {
+        Task {
+            await GrokTokenStore.shared.cancelSignIn()
+            grokState = GrokTokenStore.shared.state
+            isSigningInWithGrok = false
+        }
+    }
+
+    private func disconnectGrok() {
+        grokSignInError = nil
+        Task {
+            await GrokTokenStore.shared.signOut()
+            grokState = GrokTokenStore.shared.state
+            guard connection == .grok else { return }
+            if case .connected = chatGPTState {
+                connectionRaw = CoachConnection.chatGPT.rawValue
+            } else if hasAnthropicKey {
+                connectionRaw = CoachConnection.anthropicKey.rawValue
+            } else if hasOpenAIKey {
+                connectionRaw = CoachConnection.openAIKey.rawValue
+            }
+        }
+    }
+
 
     private func saveAndTest(_ keyConnection: CoachConnection) {
         guard let account = keyConnection.apiKeyAccount else { return }

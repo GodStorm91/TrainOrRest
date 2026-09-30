@@ -9,6 +9,8 @@ enum CoachConnection: String, CaseIterable, Codable {
     case anthropicKey
     /// OpenAI API key (Chat Completions).
     case openAIKey
+    /// xAI Grok via the omp device-code login.
+    case grok
 
     static let storageKey = "coachConnection"
 
@@ -20,6 +22,7 @@ enum CoachConnection: String, CaseIterable, Codable {
         case .chatGPT: nil
         case .anthropicKey: CoachChatConfig.defaultModel
         case .openAIKey: CoachChatConfig.defaultOpenAIModel
+        case .grok: GrokAuthConfiguration.defaultModel
         }
     }
 
@@ -28,6 +31,7 @@ enum CoachConnection: String, CaseIterable, Codable {
         case .chatGPT: "ChatGPT"
         case .anthropicKey: "Claude"
         case .openAIKey: "OpenAI"
+        case .grok: "Grok"
         }
     }
 
@@ -37,6 +41,7 @@ enum CoachConnection: String, CaseIterable, Codable {
         case .chatGPT: nil
         case .anthropicKey: KeychainStore.apiKeyAccount
         case .openAIKey: KeychainStore.openAIAPIKeyAccount
+        case .grok: nil
         }
     }
 }
@@ -44,6 +49,7 @@ enum CoachConnection: String, CaseIterable, Codable {
 enum CoachCredential {
     case apiKey(String)
     case chatGPT(ChatGPTTokenProviding)
+    case grok(GrokTokenProviding)
 }
 
 protocol ChatGPTTokenProviding: Sendable {
@@ -94,6 +100,9 @@ enum CoachCredentialResolver {
             guard let account = connection.apiKeyAccount,
                   let key = storedKey(account: account) else { return nil }
             return .apiKey(key)
+        case .grok:
+            guard case .connected = GrokTokenStore.shared.state else { return nil }
+            return .grok(GrokTokenStore.shared)
         }
     }
 
@@ -147,12 +156,14 @@ enum CoachClientRouter {
         for connection: CoachConnection,
         anthropicClient: ClaudeServicing,
         openAIClient: ClaudeServicing,
-        chatGPTClient: ClaudeServicing
+        chatGPTClient: ClaudeServicing,
+        grokClient: ClaudeServicing = GrokResponsesClient()
     ) -> ClaudeServicing {
         switch connection {
         case .chatGPT: chatGPTClient
         case .anthropicKey: anthropicClient
         case .openAIKey: openAIClient
+        case .grok: grokClient
         }
     }
 }

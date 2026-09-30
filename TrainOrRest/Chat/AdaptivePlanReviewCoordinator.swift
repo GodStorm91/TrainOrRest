@@ -7,6 +7,7 @@ final class AdaptivePlanReviewCoordinator: ObservableObject {
     private let anthropicClient: ClaudeServicing
     private let openAIClient: ClaudeServicing
     private let chatGPTClient: ClaudeServicing
+    private let grokClient: ClaudeServicing
     private let now: () -> Date
     private let isSceneActive: @MainActor () -> Bool
     private let isAutomaticEnabled: @MainActor () -> Bool
@@ -20,6 +21,7 @@ final class AdaptivePlanReviewCoordinator: ObservableObject {
         anthropicClient: ClaudeServicing,
         openAIClient: ClaudeServicing,
         chatGPTClient: ClaudeServicing = ChatGPTResponsesClient(),
+        grokClient: ClaudeServicing = GrokResponsesClient(),
         now: @escaping () -> Date = Date.init,
         isSceneActive: @escaping @MainActor () -> Bool = { UIApplication.shared.applicationState == .active },
         isAutomaticEnabled: @escaping @MainActor () -> Bool = { UserDefaults.standard.bool(forKey: AdaptivePlanReviewSettings.automaticKey) }
@@ -27,6 +29,7 @@ final class AdaptivePlanReviewCoordinator: ObservableObject {
         self.anthropicClient = anthropicClient
         self.openAIClient = openAIClient
         self.chatGPTClient = chatGPTClient
+        self.grokClient = grokClient
         self.now = now
         self.isSceneActive = isSceneActive
         self.isAutomaticEnabled = isAutomaticEnabled
@@ -170,7 +173,8 @@ final class AdaptivePlanReviewCoordinator: ObservableObject {
                 for: selection.connection,
                 anthropicClient: anthropicClient,
                 openAIClient: openAIClient,
-                chatGPTClient: chatGPTClient
+                chatGPTClient: chatGPTClient,
+                grokClient: grokClient
             )
             let response = try await ChatGPTDiagnostics.$label.withValue("weekly review") {
                 try await client.send(request, credential: credential)

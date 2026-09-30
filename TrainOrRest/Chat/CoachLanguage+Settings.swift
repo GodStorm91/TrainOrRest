@@ -717,9 +717,9 @@ struct SettingsCopy {
 
     var connectCoachPrompt: String {
         switch language {
-        case .en: "Use your ChatGPT plan, or add a Claude key."
-        case .ja: "ChatGPT プランを使うか、Claude のキーを追加してください。"
-        case .vi: "Dùng gói ChatGPT của bạn, hoặc thêm khóa Claude."
+        case .en: "Use your ChatGPT plan, sign in with Grok, or add a Claude key."
+        case .ja: "ChatGPT プラン、Grok、または Claude のキーを使えます。"
+        case .vi: "Dùng gói ChatGPT, đăng nhập Grok, hoặc thêm khóa Claude."
         }
     }
 
@@ -729,6 +729,15 @@ struct SettingsCopy {
         case .en: lead = "Using your ChatGPT plan"
         case .ja: lead = "ChatGPT プランを使用中"
         case .vi: lead = "Đang dùng gói ChatGPT của bạn"
+        }
+        return ([lead] + [email, model].compactMap { $0?.isEmpty == false ? $0 : nil }).joined(separator: " · ")
+    }
+    func usingGrok(email: String?, model: String?) -> String {
+        let lead: String
+        switch language {
+        case .en: lead = "Using Grok"
+        case .ja: lead = "Grok を使用中"
+        case .vi: lead = "Đang dùng Grok"
         }
         return ([lead] + [email, model].compactMap { $0?.isEmpty == false ? $0 : nil }).joined(separator: " · ")
     }
@@ -874,6 +883,93 @@ struct SettingsCopy {
         case .en: "Continue with ChatGPT"
         case .ja: "ChatGPT で続ける"
         case .vi: "Tiếp tục với ChatGPT"
+        }
+    }
+    var signInWithGrok: String {
+        switch language {
+        case .en: "Sign in with Grok"
+        case .ja: "Grok でサインイン"
+        case .vi: "Đăng nhập bằng Grok"
+        }
+    }
+
+    var grokHeader: String {
+        switch language {
+        case .en: "Use Grok"
+        case .ja: "Grok を使う"
+        case .vi: "Dùng Grok"
+        }
+    }
+
+    var grokPrivacyFooter: String {
+        switch language {
+        case .en: "Signs in with the same device code as omp's Grok login. Tokens stay in this iPhone's Keychain. Health context goes from this iPhone directly to xAI."
+        case .ja: "omp の Grok ログインと同じデバイスコードでサインインします。トークンはこの iPhone のキーチェーンに保存されます。健康データはこの iPhone から xAI に直接送られます。"
+        case .vi: "Đăng nhập bằng mã thiết bị giống đăng nhập Grok của omp. Token nằm trong Keychain của iPhone này. Dữ liệu sức khỏe đi thẳng từ iPhone này đến xAI."
+        }
+    }
+
+    var grokEnterCode: String {
+        switch language {
+        case .en: "Enter this code at xAI, then return here."
+        case .ja: "このコードを xAI で入力して、ここに戻ってください。"
+        case .vi: "Nhập mã này trên xAI, rồi quay lại đây."
+        }
+    }
+
+    var copyCode: String {
+        switch language {
+        case .en: "Copy code"
+        case .ja: "コードをコピー"
+        case .vi: "Sao chép mã"
+        }
+    }
+
+    var openGrokVerification: String {
+        switch language {
+        case .en: "Open xAI sign-in"
+        case .ja: "xAI のサインインを開く"
+        case .vi: "Mở trang đăng nhập xAI"
+        }
+    }
+
+    var cancelGrokSignIn: String {
+        switch language {
+        case .en: "Cancel sign-in"
+        case .ja: "サインインを中止"
+        case .vi: "Hủy đăng nhập"
+        }
+    }
+
+    var disconnectGrok: String {
+        switch language {
+        case .en: "Disconnect Grok"
+        case .ja: "Grok の接続を解除"
+        case .vi: "Ngắt kết nối Grok"
+        }
+    }
+
+    var grokSignInFailed: String {
+        switch language {
+        case .en: "Grok sign-in failed"
+        case .ja: "Grok にサインインできませんでした"
+        case .vi: "Đăng nhập Grok thất bại"
+        }
+    }
+
+    var reconnectGrokTitle: String {
+        switch language {
+        case .en: "Reconnect Grok"
+        case .ja: "Grok に再接続"
+        case .vi: "Kết nối lại Grok"
+        }
+    }
+
+    var reconnectGrokMessage: String {
+        switch language {
+        case .en: "Your Grok session ended. Your chats are safe."
+        case .ja: "Grok のセッションが終了しました。チャットは安全です。"
+        case .vi: "Phiên Grok đã kết thúc. Các cuộc chat của bạn vẫn an toàn."
         }
     }
 
