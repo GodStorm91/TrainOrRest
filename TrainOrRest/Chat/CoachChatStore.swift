@@ -448,12 +448,25 @@ final class CoachChatStore: ObservableObject {
                   if case .plannedWorkout(let uuid) = attachment { return uuid }
                   return nil
               }).first,
-              let targetKm = Self.contextualDistanceTarget(from: text),
               let workout = try context.fetch(FetchDescriptor<PlannedWorkout>()).first(where: { $0.uuid == workoutID }),
               workout.kind != .race,
-              let kind = workout.kind,
-              let payload = Self.sameKindPayload(kind: kind, distanceKm: targetKm)
+              let currentKind = workout.kind
         else {
+            return false
+        }
+
+        let folded = text
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "vi_VN"))
+            .lowercased()
+        let requestedKind = Self.workoutKind(from: folded)
+        let targetKm = Self.contextualDistanceTarget(from: text)
+        let namedDifferentKind = requestedKind.map { $0 != currentKind && $0 != .race } ?? false
+        let wantsKindChange = namedDifferentKind && (targetKm != nil || Self.isAttachedTypeChange(folded, attachments: attachments))
+        let replacementKind = wantsKindChange ? requestedKind : currentKind
+        guard targetKm != nil || wantsKindChange, let replacementKind else {
+            return false
+        }
+        guard let payload = Self.sameKindPayload(kind: replacementKind, distanceKm: targetKm ?? workout.distanceKm) else {
             return false
         }
 
@@ -462,17 +475,20 @@ final class CoachChatStore: ObservableObject {
             action: .replace,
             workout: payload
         )])
+        let language = CoachLanguage(rawValue: snapshot.locale) ?? .current
         let candidate = try CoachPlanCandidateEngine.prepare(
             proposal: proposal,
             scope: .standard,
             in: context,
             today: snapshot.createdAt,
             calendar: calendar,
-            language: CoachLanguage(rawValue: snapshot.locale) ?? .current,
+            language: language,
             threadID: snapshot.threadID
         )
 
-        assistantTurn.text = (CoachLanguage(rawValue: snapshot.locale) ?? .current).contextualDistancePreparedThisWorkout
+        assistantTurn.text = wantsKindChange
+            ? language.preparedReplacementMessage
+            : language.contextualDistancePreparedThisWorkout
         assistantTurn.assistantStatus = .completed
         assistantTurn.isIncomplete = false
         assistantTurn.errorCategory = nil
