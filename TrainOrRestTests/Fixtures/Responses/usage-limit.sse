@@ -1,0 +1,5 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_limit"}}
+
+event: response.failed
+data: {"type":"response.failed","response":{"id":"resp_limit","status":"failed","error":{"code":"subscription_sharing_usage_limit_exceeded","message":"limit reached"}}}

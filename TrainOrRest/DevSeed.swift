@@ -33,6 +33,7 @@ enum DevSeed {
         case coach
         case shoes
         case workout
+        case chatGPTSpike
     }
 
     /// The requested launch screen, or `nil` for the normal tab shell.
@@ -118,6 +119,7 @@ enum DevSeed {
 
         OnboardingGate.markCompleted()
         preloadAPIKey()
+        applyRequestedChatGPTState()
         applyRequestedLanguage()
         seedPlanIfRequested(context)
         seedAdaptiveReviewIfRequested(context)
@@ -211,6 +213,25 @@ enum DevSeed {
         if let openAI = ProcessInfo.processInfo.environment["TOR_OPENAI_KEY"], !openAI.isEmpty {
             try? KeychainStore.save(openAI, account: KeychainStore.openAIAPIKeyAccount)
         }
+        UserDefaults.standard.set(CoachConnection.anthropicKey.rawValue, forKey: CoachConnection.storageKey)
+    }
+
+    /// `TOR_DEV_CHATGPT=signedOut|connected|planOff|limited|ineligible|reconnect` selects
+    /// the ChatGPT connection and shows that state so every coach status can be screenshotted
+    /// without a real sign-in. `connected` has no tokens, so sending still fails.
+    private static func applyRequestedChatGPTState() {
+        let state: ChatGPTConnectionState
+        switch ProcessInfo.processInfo.environment["TOR_DEV_CHATGPT"] {
+        case "signedOut": state = .signedOut
+        case "connected": state = .connected(email: "runner@example.com")
+        case "planOff": state = .planUsageDisabled
+        case "limited": state = .usageLimited(until: nil)
+        case "ineligible": state = .notEligible
+        case "reconnect": state = .needsReconnect
+        default: return
+        }
+        UserDefaults.standard.set(CoachConnection.chatGPT.rawValue, forKey: CoachConnection.storageKey)
+        ChatGPTTokenStore.shared.debugOverrideState(state)
     }
 
     /// `TOR_DEV_PLAN=1` seeds a half-marathon goal ten weeks out so the

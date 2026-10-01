@@ -37,6 +37,7 @@ struct TrainOrRestApp: App {
             fatalError("Failed to create SwiftData container: \(error)")
         }
         self.container = container
+        CoachCredentialResolver.migrateIfNeeded()
         let pushService = WorkoutPushService(modelContext: container.mainContext)
         let googleCalendarService = GoogleCalendarSyncService(modelContext: container.mainContext)
         let chatStore = CoachChatStore()
@@ -233,7 +234,9 @@ struct RootView: View {
             } else {
                 ContentUnavailableView("No workout to preview", systemImage: "figure.run")
             }
-    }
+        case .chatGPTSpike:
+            ChatGPTSpikeView()
+        }
     }
     private var todayWorkout: PlannedWorkout? {
         let workouts = (try? modelContext.fetch(
@@ -286,7 +289,6 @@ private struct DevCoachLiveView: View {
     @EnvironmentObject private var chatStore: CoachChatStore
     @EnvironmentObject private var chatSession: CoachChatSessionState
     @Environment(\.modelContext) private var modelContext
-    @AppStorage("coachModel") private var model = CoachChatConfig.defaultModel
     @State private var fired = false
 
     var body: some View {
@@ -296,6 +298,7 @@ private struct DevCoachLiveView: View {
                 guard DevSeed.isLiveRequested, !fired else { return }
                 fired = true
                 guard let threadID = chatSession.activeThreadID else { return }
+                let model = CoachCredentialResolver.current().model
                 var request = CoachTurnRequest(text: DevSeed.livePrompt, model: model, threadID: threadID)
                 if let workoutID {
                     request.attachments = [.plannedWorkout(workoutID)]

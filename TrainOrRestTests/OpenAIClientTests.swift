@@ -16,7 +16,7 @@ final class OpenAIClientTests: XCTestCase {
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Self.textResponse("OK"))
         }
 
-        _ = try await client.send(Self.request(model: "gpt-5-nano"), apiKey: "test-key")
+        _ = try await client.send(Self.request(model: "gpt-5-nano"), credential: .apiKey("test-key"))
 
         XCTAssertEqual(capturedBody["model"] as? String, "gpt-5-nano")
         XCTAssertEqual(capturedBody["reasoning_effort"] as? String, "minimal")
@@ -31,7 +31,7 @@ final class OpenAIClientTests: XCTestCase {
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Self.textResponse("OK"))
         }
 
-        _ = try await client.send(Self.request(model: "gpt-4o-mini"), apiKey: "test-key")
+        _ = try await client.send(Self.request(model: "gpt-4o-mini"), credential: .apiKey("test-key"))
 
         XCTAssertNil(capturedBody["reasoning_effort"])
     }
@@ -47,7 +47,7 @@ final class OpenAIClientTests: XCTestCase {
         var request = Self.request(model: "gpt-5-nano")
         request.tools = [CoachToolCatalog.coachResponse]
         request.toolChoice = .tool(name: CoachToolCatalog.coachResponseName)
-        _ = try await client.send(request, apiKey: "test-key")
+        _ = try await client.send(request, credential: .apiKey("test-key"))
 
         let toolChoice = try XCTUnwrap(capturedBody["tool_choice"] as? [String: Any])
         XCTAssertEqual(toolChoice["type"] as? String, "function")
@@ -61,7 +61,7 @@ final class OpenAIClientTests: XCTestCase {
         }
 
         do {
-            _ = try await client.send(Self.request(model: "gpt-5-nano"), apiKey: "test-key")
+            _ = try await client.send(Self.request(model: "gpt-5-nano"), credential: .apiKey("test-key"))
             XCTFail("Empty OpenAI choices must not become a fake assistant response")
         } catch let error as ClaudeClientError {
             XCTAssertEqual(error, .invalidResponse)
@@ -75,7 +75,7 @@ final class OpenAIClientTests: XCTestCase {
         }
 
         do {
-            _ = try await client.send(Self.request(model: "gpt-5-nano"), apiKey: "test-key")
+            _ = try await client.send(Self.request(model: "gpt-5-nano"), credential: .apiKey("test-key"))
             XCTFail("Empty OpenAI content must not become a fake assistant response")
         } catch let error as ClaudeClientError {
             XCTAssertEqual(error, .invalidResponse)
@@ -102,26 +102,6 @@ final class OpenAIClientTests: XCTestCase {
 
     private static func textResponse(_ text: String) -> Data {
         #"{"choices":[{"message":{"content":"\#(text)"},"finish_reason":"stop"}]}"#.data(using: .utf8)!
-    }
-}
-
-private extension URLRequest {
-    var bodyDataForTest: Data? {
-        if let httpBody { return httpBody }
-        guard let stream = httpBodyStream else { return nil }
-        stream.open()
-        defer { stream.close() }
-        var data = Data()
-        let bufferSize = 4_096
-        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
-        defer { buffer.deallocate() }
-        while stream.hasBytesAvailable {
-            let count = stream.read(buffer, maxLength: bufferSize)
-            if count < 0 { return nil }
-            if count == 0 { break }
-            data.append(buffer, count: count)
-        }
-        return data
     }
 }
 

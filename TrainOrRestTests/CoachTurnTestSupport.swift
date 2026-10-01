@@ -56,7 +56,7 @@ extension CoachChatStore {
                 contextSnapshotID: contextSnapshotId,
                 contextItems: contextItems
             ),
-            apiKey: apiKey,
+            access: CoachAccess(connection: .anthropicKey, credential: .apiKey(apiKey)),
             in: context
         )
     }

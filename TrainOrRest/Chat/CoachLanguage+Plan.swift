@@ -75,10 +75,10 @@ struct PlanCopy {
     var nextWeekReviewReverted: String { text(en: "Reverted.", ja: "元に戻しました。", vi: "Đã hoàn tác.") }
     var nextWeekReviewSuperseded: String { text(en: "A newer review replaced this one.", ja: "より新しいレビューに置き換えられました。", vi: "Một đánh giá mới hơn đã thay thế đánh giá này.") }
     var retryManually: String { text(en: "Retry manually", ja: "手動で再試行", vi: "Thử lại thủ công") }
-    var addCoachProviderKey: String { text(en: "Add a Coach provider key", ja: "Coachプロバイダーキーを追加", vi: "Thêm khóa nhà cung cấp Coach") }
+    var connectCoach: String { text(en: "Connect your coach", ja: "Coach に接続", vi: "Kết nối Coach") }
     var nextWeekReviewSettingsTitle: String { text(en: "Next-week review", ja: "次週レビュー", vi: "Đánh giá tuần tới") }
     func automaticNextWeekReview(provider: String) -> String { text(en: "Automatically review next week with \(provider)", ja: "\(provider)で次週を自動レビュー", vi: "Tự động đánh giá tuần tới với \(provider)") }
-    var addKeyForSelectedProvider: String { text(en: "Add a key for the selected provider below.", ja: "選択したプロバイダーのキーを以下に追加してください。", vi: "Thêm khóa cho nhà cung cấp đã chọn ở bên dưới.") }
+    var connectCoachFirst: String { text(en: "Connect a coach above to turn this on.", ja: "オンにするには、上で Coach に接続してください。", vi: "Kết nối Coach ở trên để bật mục này.") }
     func nextWeekReviewDisclosure(provider: String) -> String {
         text(
             en: "When enabled, \(provider) receives distance, duration, pace, and average and maximum heart rate for the finished run and up to 7 runs from the last 7 days, plus your current readiness and the next 7 planned days.",

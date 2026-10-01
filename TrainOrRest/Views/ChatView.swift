@@ -13,7 +13,7 @@ struct ChatView: View {
     private let onOpenCalendar: (Date?) -> Void
     private let onReviewRequestConsumed: (CalendarReviewChatRequest) -> Void
 
-    @AppStorage("coachModel") private var model = CoachChatConfig.defaultModel
+    @AppStorage(CoachConnection.storageKey) private var connectionRaw = CoachConnection.chatGPT.rawValue
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \ChatMessage.date) private var allMessages: [ChatMessage]
@@ -24,9 +24,16 @@ struct ChatView: View {
     @EnvironmentObject private var chatStore: CoachChatStore
     @EnvironmentObject private var chatSession: CoachChatSessionState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openURL) private var openURL
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var draft = ""
-    @State private var hasAPIKey = false
+    @State private var isCoachConnected = false
+    @State private var chatGPTState = ChatGPTTokenStore.shared.state
+    @State private var grokState = GrokTokenStore.shared.state
+    @State private var isSigningInWithChatGPT = false
+    @State private var isSigningInWithGrok = false
+    @State private var grokSignInError: String?
+    @State private var showsChatGPTPlanNotice = false
     @State private var evidence = EvidenceSelection()
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var selectedImageAttachment: CoachImageAttachment?
@@ -127,7 +134,7 @@ struct ChatView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                if !hasAPIKey {
+                if !isCoachConnected && !connectionStatus.isChatGPTAttention {
                     missingKeyView
                         .padding(.top, messageTopInset)
                 } else if messages.isEmpty {
@@ -137,8 +144,10 @@ struct ChatView: View {
                     messageFeed
                         .padding(.top, messageTopInset)
                 }
-                if hasAPIKey {
+                if isCoachConnected {
                     chatFooter
+                } else if connectionStatus.isChatGPTAttention {
+                    chatGPTAttentionBanner
                 }
             }
             .torReadableColumn()
@@ -167,6 +176,19 @@ struct ChatView: View {
                 NotificationCenter.default.post(name: .torSetBottomDockHidden, object: false)
             }
         }
+        .onReceive(ChatGPTTokenStore.shared.statePublisher.receive(on: DispatchQueue.main)) { state in
+            chatGPTState = state
+            refreshConnectionState()
+        }
+        .onReceive(GrokTokenStore.shared.statePublisher.receive(on: DispatchQueue.main)) { state in
+            grokState = state
+            refreshConnectionState()
+        }
+        .onChange(of: connectionRaw) { _, _ in refreshConnectionState() }
+        .onChange(of: isProviderSettingsPresented) { _, presented in
+            if !presented { refreshConnectionState() }
+        }
+        .chatGPTPlanNotice(isPresented: $showsChatGPTPlanNotice, copy: language.settings)
         .onChange(of: allMessages.count) {
             attachUnthreadedMessagesToActiveThread()
         }
@@ -231,7 +253,7 @@ struct ChatView: View {
     }
 
     private func runAppearSetup() {
-        refreshKeyState()
+        refreshConnectionState()
         chatStore.resetError()
         migrateLegacyMessagesIfNeeded()
         removePersistedTransientErrorMessages()
@@ -710,6 +732,10 @@ struct ChatView: View {
                             isGroupedWithPrevious: isGroupedWithPreviousMessage(at: index),
                             language: language,
                             onRetry: { failedTurn in
+                                guard connectionStatus.kind != .usageLimited else {
+                                    isProviderSettingsPresented = true
+                                    return
+                                }
                                 Task {
                                     await chatStore.retryFailedResponse(
                                         failedTurn.turnID,
@@ -912,18 +938,151 @@ struct ChatView: View {
         }
     }
 
+    private var connectionStatus: CoachConnectionStatus {
+        CoachConnectionStatus(
+            selected: connection,
+            chatGPT: chatGPTState,
+            hasAnthropicKey: isCoachConnected,
+            hasOpenAIKey: isCoachConnected,
+            grok: grokState
+        )
+    }
+
     private var missingKeyView: some View {
         ContentUnavailableView {
-            Label(language.apiKeyNeededTitle, systemImage: "key")
+            Label(language.connectCoachTitle, systemImage: "bubble.left.and.text.bubble.right")
         } description: {
-            Text(language.apiKeyNeededMessage(provider: CoachModelProvider.displayName(for: model)))
+            Text(language.connectCoachMessage)
         } actions: {
-            NavigationLink(language.addApiKeyLabel) {
-                CoachProviderSettingsView()
+            VStack(spacing: 12) {
+                ContinueWithChatGPTButton(
+                    title: language.settings.continueWithChatGPT,
+                    isWorking: isSigningInWithChatGPT
+                ) {
+                    signInWithChatGPT(requestConsent: false)
+                }
+                grokSignInControl
+                Button(language.settings.otherCoachOptions) { isProviderSettingsPresented = true }
             }
-            .buttonStyle(.borderedProminent)
+            .frame(maxWidth: 320)
         }
     }
+
+    /// Keeps chat history visible while ChatGPT needs the user's attention; actions match the Settings status card.
+    private var chatGPTAttentionBanner: some View {
+        let status = connectionStatus
+        let copy = language.settings
+        return VStack(alignment: .leading, spacing: 10) {
+            Label(status.title(copy), systemImage: status.symbol)
+                .font(.headline)
+            Text(status.message(copy, model: nil))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ChatGPTStatusActions(status: status, copy: copy, isWorking: isSigningInWithChatGPT) { consent in
+                signInWithChatGPT(requestConsent: consent)
+            }
+            Button(copy.otherCoachOptions) { isProviderSettingsPresented = true }
+                .font(.subheadline)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.regularMaterial))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+    }
+
+    private func signInWithChatGPT(requestConsent: Bool) {
+        isSigningInWithChatGPT = true
+        Task {
+            let outcome = await ChatGPTSignInAction.run(requestConsent: requestConsent)
+            isSigningInWithChatGPT = false
+            chatGPTState = ChatGPTTokenStore.shared.state
+            refreshConnectionState()
+            switch outcome {
+            case .connected:
+                if case .connected = chatGPTState, ChatGPTSignInAction.shouldShowPlanNotice() {
+                    showsChatGPTPlanNotice = true
+                }
+            case .cancelled:
+                break
+            case .failed:
+                isProviderSettingsPresented = true
+            }
+        }
+    }
+    @ViewBuilder
+    private var grokSignInControl: some View {
+        switch grokState {
+        case .authorizing(let userCode, let url):
+            VStack(spacing: 8) {
+                Text(language.settings.grokEnterCode)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Text(userCode)
+                    .font(.title2.monospaced())
+                    .textSelection(.enabled)
+                Button {
+                    UIPasteboard.general.string = userCode
+                } label: {
+                    Label(language.settings.copyCode, systemImage: "doc.on.doc")
+                }
+                Link(language.settings.openGrokVerification, destination: url)
+                Button(language.settings.cancelGrokSignIn, role: .cancel) {
+                    Task {
+                        await GrokTokenStore.shared.cancelSignIn()
+                        grokState = GrokTokenStore.shared.state
+                        isSigningInWithGrok = false
+                    }
+                }
+            }
+        case .connected:
+            EmptyView()
+        case .signedOut, .needsReconnect:
+            Button {
+                startGrokSignIn()
+            } label: {
+                if isSigningInWithGrok {
+                    ProgressView()
+                } else {
+                    Label(language.settings.signInWithGrok, systemImage: "person.crop.circle.badge.plus")
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(isSigningInWithGrok)
+            if let grokSignInError {
+                Text(grokSignInError)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.bad)
+            }
+        }
+    }
+
+    private func startGrokSignIn() {
+        isSigningInWithGrok = true
+        grokSignInError = nil
+        Task {
+            defer { isSigningInWithGrok = false }
+            do {
+                try await GrokTokenStore.shared.signIn { authorization in
+                    Task { @MainActor in
+                        openURL(authorization.verificationURL)
+                    }
+                }
+                connectionRaw = CoachConnection.grok.rawValue
+                grokState = GrokTokenStore.shared.state
+                refreshConnectionState()
+            } catch is CancellationError {
+                return
+            } catch let error as GrokOAuthError where error == .cancelled {
+                return
+            } catch {
+                grokSignInError = error.localizedDescription
+                grokState = GrokTokenStore.shared.state
+            }
+        }
+    }
+
 
     private var chatFooter: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1786,8 +1945,17 @@ struct ChatView: View {
         try? modelContext.save()
     }
 
-    private func refreshKeyState() {
-        hasAPIKey = !((try? KeychainStore.load(account: CoachModelProvider.apiKeyAccount(for: model))) ?? "").isEmpty
+    private var connection: CoachConnection {
+        CoachConnection(rawValue: connectionRaw) ?? .chatGPT
+    }
+
+    /// The model selected for the active connection; empty for ChatGPT until the catalog resolves it.
+    private var model: String {
+        CoachCredentialResolver.model(for: connection)
+    }
+
+    private func refreshConnectionState() {
+        isCoachConnected = CoachCredentialResolver.isConnected(connection)
     }
 
     private var currentWorkoutCoachContext: WorkoutCoachContext? {

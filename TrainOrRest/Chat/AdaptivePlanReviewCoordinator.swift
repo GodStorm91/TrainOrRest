@@ -6,6 +6,8 @@ import UIKit
 final class AdaptivePlanReviewCoordinator: ObservableObject {
     private let anthropicClient: ClaudeServicing
     private let openAIClient: ClaudeServicing
+    private let chatGPTClient: ClaudeServicing
+    private let grokClient: ClaudeServicing
     private let now: () -> Date
     private let isSceneActive: @MainActor () -> Bool
     private let isAutomaticEnabled: @MainActor () -> Bool
@@ -18,12 +20,16 @@ final class AdaptivePlanReviewCoordinator: ObservableObject {
     init(
         anthropicClient: ClaudeServicing,
         openAIClient: ClaudeServicing,
+        chatGPTClient: ClaudeServicing = ChatGPTResponsesClient(),
+        grokClient: ClaudeServicing = GrokResponsesClient(),
         now: @escaping () -> Date = Date.init,
         isSceneActive: @escaping @MainActor () -> Bool = { UIApplication.shared.applicationState == .active },
         isAutomaticEnabled: @escaping @MainActor () -> Bool = { UserDefaults.standard.bool(forKey: AdaptivePlanReviewSettings.automaticKey) }
     ) {
         self.anthropicClient = anthropicClient
         self.openAIClient = openAIClient
+        self.chatGPTClient = chatGPTClient
+        self.grokClient = grokClient
         self.now = now
         self.isSceneActive = isSceneActive
         self.isAutomaticEnabled = isAutomaticEnabled
@@ -114,18 +120,15 @@ final class AdaptivePlanReviewCoordinator: ObservableObject {
         return candidates[reviewID]
     }
 
-    func selectedProviderHasKey() -> Bool {
+    func selectedCoachIsConnected() -> Bool {
         #if DEBUG
         if ProcessInfo.processInfo.environment["TOR_DEV_ADAPTIVE"] == "needs-key" {
             return false
         }
         #endif
-        let model = UserDefaults.standard.string(forKey: "coachModel") ?? CoachChatConfig.defaultModel
-        let account = CoachModelProvider.apiKeyAccount(for: model)
-        return ((try? KeychainStore.load(account: account)) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .isEmpty == false
+        return CoachCredentialResolver.isConnected(CoachCredentialResolver.current().connection)
     }
+
     private func attempt(
         reviewID: UUID,
         kind: AdaptivePlanReviewAttemptKind,
@@ -136,10 +139,9 @@ final class AdaptivePlanReviewCoordinator: ObservableObject {
               review.phase == .queued || review.phase == .needsKey || review.phase == .failed
         else { return }
 
-        let model = UserDefaults.standard.string(forKey: "coachModel") ?? CoachChatConfig.defaultModel
-        let account = CoachModelProvider.apiKeyAccount(for: model)
-        guard let apiKey = try? KeychainStore.load(account: account),
-              !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let selection = CoachCredentialResolver.current()
+        let model = selection.model
+        guard let credential = CoachCredentialResolver.credential(for: selection.connection) else {
             review.activeAttemptToken = nil
             review.transition(to: .needsKey, at: now())
             try? context.save()
@@ -167,12 +169,16 @@ final class AdaptivePlanReviewCoordinator: ObservableObject {
 
         do {
             let request = try request(for: review, model: model, in: context)
-            let client = CoachModelProvider.client(
-                for: model,
+            let client = CoachClientRouter.client(
+                for: selection.connection,
                 anthropicClient: anthropicClient,
-                openAIClient: openAIClient
+                openAIClient: openAIClient,
+                chatGPTClient: chatGPTClient,
+                grokClient: grokClient
             )
-            let response = try await client.send(request, apiKey: apiKey)
+            let response = try await ChatGPTDiagnostics.$label.withValue("weekly review") {
+                try await client.send(request, credential: credential)
+            }
             guard let current = self.review(id: reviewID, in: context),
                   current.phase == .preparing,
                   current.activeAttemptToken == token else {

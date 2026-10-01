@@ -171,12 +171,14 @@ final class AdaptivePlanReviewCoordinatorTests: XCTestCase {
         XCTAssertTrue(reviews(in: context).isEmpty)
     }
 
-    func testSelectedOpenAIModelUsesOpenAIClient() async throws {
+    func testSelectedOpenAIKeyConnectionUsesOpenAIClient() async throws {
         let (context, today) = try contextWithPlan()
-        UserDefaults.standard.set("gpt-5-nano", forKey: "coachModel")
+        UserDefaults.standard.set(CoachConnection.openAIKey.rawValue, forKey: CoachConnection.storageKey)
+        UserDefaults.standard.set("gpt-5-nano", forKey: CoachConnection.openAIKey.modelStorageKey)
         try KeychainStore.save("test-key", account: KeychainStore.openAIAPIKeyAccount)
         defer {
-            UserDefaults.standard.removeObject(forKey: "coachModel")
+            UserDefaults.standard.removeObject(forKey: CoachConnection.storageKey)
+            UserDefaults.standard.removeObject(forKey: CoachConnection.openAIKey.modelStorageKey)
             try? KeychainStore.delete(account: KeychainStore.openAIAPIKeyAccount)
         }
         let anthropic = AdaptiveReviewClient()
@@ -367,11 +369,12 @@ final class AdaptivePlanReviewCoordinatorTests: XCTestCase {
     }
 
     private func saveTestKey() throws {
-        UserDefaults.standard.removeObject(forKey: "coachModel")
+        UserDefaults.standard.set(CoachConnection.anthropicKey.rawValue, forKey: CoachConnection.storageKey)
         try KeychainStore.save("test-key")
     }
 
     private func deleteTestKey() {
+        UserDefaults.standard.removeObject(forKey: CoachConnection.storageKey)
         try? KeychainStore.delete()
     }
 }
@@ -386,14 +389,14 @@ private final class AdaptiveReviewClient: ClaudeServicing {
         self.responses = responses
     }
 
-    func send(_ request: ClaudeRequest, apiKey: String) async throws -> ClaudeResponse {
+    func send(_ request: ClaudeRequest, credential: CoachCredential) async throws -> ClaudeResponse {
         requests.append(request)
         sendCount += 1
         guard !responses.isEmpty else { throw TestError.failed }
         return try responses.removeFirst().get()
     }
 
-    func stream(_ request: ClaudeRequest, apiKey: String) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error> {
+    func stream(_ request: ClaudeRequest, credential: CoachCredential) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error> {
         AsyncThrowingStream { continuation in continuation.finish() }
     }
 }
@@ -410,7 +413,7 @@ private final class ControlledAdaptiveReviewClient: ClaudeServicing {
     private var pendingResponses: [CheckedContinuation<ClaudeResponse, Error>] = []
     private var requestWaiters: [CheckedContinuation<ClaudeRequest, Never>] = []
 
-    func send(_ request: ClaudeRequest, apiKey: String) async throws -> ClaudeResponse {
+    func send(_ request: ClaudeRequest, credential: CoachCredential) async throws -> ClaudeResponse {
         requests.append(request)
         sendCount += 1
         if !requestWaiters.isEmpty {
@@ -419,7 +422,7 @@ private final class ControlledAdaptiveReviewClient: ClaudeServicing {
         return try await withCheckedThrowingContinuation { pendingResponses.append($0) }
     }
 
-    func stream(_ request: ClaudeRequest, apiKey: String) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error> {
+    func stream(_ request: ClaudeRequest, credential: CoachCredential) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error> {
         AsyncThrowingStream { $0.finish() }
     }
 

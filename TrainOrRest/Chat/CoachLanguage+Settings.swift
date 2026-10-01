@@ -699,14 +699,6 @@ struct SettingsCopy {
         }
     }
 
-    var coachKeySaved: String {
-        switch language {
-        case .en: "Coach key saved"
-        case .ja: "Coach のキーを保存しました"
-        case .vi: "Đã lưu khóa Coach"
-        }
-    }
-
     func modelSelected(_ model: String) -> String {
         switch language {
         case .en: "\(model) is selected. Connect to confirm it works."
@@ -715,19 +707,455 @@ struct SettingsCopy {
         }
     }
 
-    var addCoachKey: String {
+    var connectCoachTitle: String {
         switch language {
-        case .en: "Add your coach key"
-        case .ja: "Coach のキーを追加"
-        case .vi: "Thêm khóa Coach"
+        case .en: "Connect your coach"
+        case .ja: "Coach に接続"
+        case .vi: "Kết nối Coach"
         }
     }
 
-    var coachKeyRecommendation: String {
+    var connectCoachPrompt: String {
         switch language {
-        case .en: "TrainOrRest recommends Claude. Paste your Anthropic key below to start coaching."
-        case .ja: "TrainOrRest は Claude を推奨します。コーチングを始めるには、下に Anthropic のキーを貼り付けてください。"
-        case .vi: "TrainOrRest khuyên dùng Claude. Dán khóa Anthropic bên dưới để bắt đầu coaching."
+        case .en: "Use your ChatGPT plan, sign in with Grok, or add a Claude key."
+        case .ja: "ChatGPT プラン、Grok、または Claude のキーを使えます。"
+        case .vi: "Dùng gói ChatGPT, đăng nhập Grok, hoặc thêm khóa Claude."
+        }
+    }
+
+    func usingChatGPTPlan(email: String?, model: String?) -> String {
+        let lead: String
+        switch language {
+        case .en: lead = "Using your ChatGPT plan"
+        case .ja: lead = "ChatGPT プランを使用中"
+        case .vi: lead = "Đang dùng gói ChatGPT của bạn"
+        }
+        return ([lead] + [email, model].compactMap { $0?.isEmpty == false ? $0 : nil }).joined(separator: " · ")
+    }
+    func usingGrok(email: String?, model: String?) -> String {
+        let lead: String
+        switch language {
+        case .en: lead = "Using Grok"
+        case .ja: lead = "Grok を使用中"
+        case .vi: lead = "Đang dùng Grok"
+        }
+        return ([lead] + [email, model].compactMap { $0?.isEmpty == false ? $0 : nil }).joined(separator: " · ")
+    }
+
+    var chatGPTPlanUseOffTitle: String {
+        switch language {
+        case .en: "ChatGPT plan use is off"
+        case .ja: "ChatGPT プランの利用がオフです"
+        case .vi: "Chưa bật dùng gói ChatGPT"
+        }
+    }
+
+    var chatGPTPlanUseOffMessage: String {
+        switch language {
+        case .en: "TrainOrRest needs permission to use your plan."
+        case .ja: "TrainOrRest がプランを使うには許可が必要です。"
+        case .vi: "TrainOrRest cần được cho phép dùng gói của bạn."
+        }
+    }
+
+    var allowPlanUse: String {
+        switch language {
+        case .en: "Allow plan use"
+        case .ja: "プランの利用を許可"
+        case .vi: "Cho phép dùng gói"
+        }
+    }
+
+    var chatGPTLimitTitle: String {
+        switch language {
+        case .en: "ChatGPT usage limit reached"
+        case .ja: "ChatGPT の利用上限に達しました"
+        case .vi: "Đã chạm giới hạn dùng ChatGPT"
+        }
+    }
+
+    var chatGPTLimitMessage: String {
+        switch language {
+        case .en: "The limit may be on your ChatGPT plan or on TrainOrRest's own limit. Check usage, or use a Claude key."
+        case .ja: "上限はプラン全体、または TrainOrRest 個別の場合があります。利用状況を確認するか、Claude のキーを使ってください。"
+        case .vi: "Giới hạn có thể thuộc gói ChatGPT của bạn hoặc riêng TrainOrRest. Kiểm tra mức dùng hoặc dùng khóa Claude."
+        }
+    }
+
+    var manageUsage: String {
+        switch language {
+        case .en: "Manage usage"
+        case .ja: "利用状況を管理"
+        case .vi: "Quản lý mức dùng"
+        }
+    }
+
+    var chatGPTDiagnosticsHeader: String {
+        switch language {
+        case .en: "ChatGPT diagnostics"
+        case .ja: "ChatGPT 診断"
+        case .vi: "Chẩn đoán ChatGPT"
+        }
+    }
+
+    var runChatGPTDiagnostics: String {
+        switch language {
+        case .en: "Run ChatGPT check"
+        case .ja: "ChatGPT をチェック"
+        case .vi: "Kiểm tra ChatGPT"
+        }
+    }
+
+    var copyDiagnosticsReport: String {
+        switch language {
+        case .en: "Copy report"
+        case .ja: "レポートをコピー"
+        case .vi: "Sao chép báo cáo"
+        }
+    }
+
+    var clearDiagnosticsLog: String {
+        switch language {
+        case .en: "Clear log"
+        case .ja: "ログを消去"
+        case .vi: "Xóa nhật ký"
+        }
+    }
+
+    var chatGPTDiagnosticsFooter: String {
+        switch language {
+        case .en: "TestFlight only. Lists recent ChatGPT request statuses, error codes, and request IDs. No sign-in tokens, messages, or health data. The check sends a few tiny requests."
+        case .ja: "TestFlight 版のみ。最近の ChatGPT リクエストの状態、エラーコード、リクエスト ID を表示します。サインイントークン、メッセージ、ヘルスデータは含みません。チェックでは小さなリクエストをいくつか送信します。"
+        case .vi: "Chỉ có trong bản TestFlight. Liệt kê trạng thái, mã lỗi và request ID của các yêu cầu ChatGPT gần đây. Không chứa token đăng nhập, tin nhắn hay dữ liệu sức khỏe. Lần kiểm tra sẽ gửi vài yêu cầu rất nhỏ."
+        }
+    }
+
+    var tryAgain: String {
+        switch language {
+        case .en: "Try again"
+        case .ja: "もう一度試す"
+        case .vi: "Thử lại"
+        }
+    }
+
+    var chatGPTNotEligibleTitle: String {
+        switch language {
+        case .en: "ChatGPT plan not available"
+        case .ja: "ChatGPT プランを利用できません"
+        case .vi: "Không dùng được gói ChatGPT"
+        }
+    }
+
+    var chatGPTNotEligibleMessage: String {
+        switch language {
+        case .en: "Plan use needs ChatGPT Plus or Pro. Add a Claude or OpenAI key instead."
+        case .ja: "プランの利用には ChatGPT Plus または Pro が必要です。代わりに Claude か OpenAI のキーを追加してください。"
+        case .vi: "Cần ChatGPT Plus hoặc Pro để dùng gói. Hãy thêm khóa Claude hoặc OpenAI."
+        }
+    }
+
+    var reconnectChatGPTTitle: String {
+        switch language {
+        case .en: "Reconnect ChatGPT"
+        case .ja: "ChatGPT に再接続"
+        case .vi: "Kết nối lại ChatGPT"
+        }
+    }
+
+    var reconnectChatGPTMessage: String {
+        switch language {
+        case .en: "Your ChatGPT session ended. Your chats are safe."
+        case .ja: "ChatGPT のセッションが終了しました。チャットは安全です。"
+        case .vi: "Phiên ChatGPT đã kết thúc. Các cuộc chat của bạn vẫn an toàn."
+        }
+    }
+
+    var reconnect: String {
+        switch language {
+        case .en: "Reconnect"
+        case .ja: "再接続"
+        case .vi: "Kết nối lại"
+        }
+    }
+
+    var continueWithChatGPT: String {
+        switch language {
+        case .en: "Continue with ChatGPT"
+        case .ja: "ChatGPT で続ける"
+        case .vi: "Tiếp tục với ChatGPT"
+        }
+    }
+    var signInWithGrok: String {
+        switch language {
+        case .en: "Sign in with Grok"
+        case .ja: "Grok でサインイン"
+        case .vi: "Đăng nhập bằng Grok"
+        }
+    }
+
+    var grokHeader: String {
+        switch language {
+        case .en: "Use Grok"
+        case .ja: "Grok を使う"
+        case .vi: "Dùng Grok"
+        }
+    }
+
+    var grokPrivacyFooter: String {
+        switch language {
+        case .en: "Signs in with the same device code as omp's Grok login. Tokens stay in this iPhone's Keychain. Health context goes from this iPhone directly to xAI."
+        case .ja: "omp の Grok ログインと同じデバイスコードでサインインします。トークンはこの iPhone のキーチェーンに保存されます。健康データはこの iPhone から xAI に直接送られます。"
+        case .vi: "Đăng nhập bằng mã thiết bị giống đăng nhập Grok của omp. Token nằm trong Keychain của iPhone này. Dữ liệu sức khỏe đi thẳng từ iPhone này đến xAI."
+        }
+    }
+
+    var grokEnterCode: String {
+        switch language {
+        case .en: "Enter this code at xAI, then return here."
+        case .ja: "このコードを xAI で入力して、ここに戻ってください。"
+        case .vi: "Nhập mã này trên xAI, rồi quay lại đây."
+        }
+    }
+
+    var copyCode: String {
+        switch language {
+        case .en: "Copy code"
+        case .ja: "コードをコピー"
+        case .vi: "Sao chép mã"
+        }
+    }
+
+    var openGrokVerification: String {
+        switch language {
+        case .en: "Open xAI sign-in"
+        case .ja: "xAI のサインインを開く"
+        case .vi: "Mở trang đăng nhập xAI"
+        }
+    }
+
+    var cancelGrokSignIn: String {
+        switch language {
+        case .en: "Cancel sign-in"
+        case .ja: "サインインを中止"
+        case .vi: "Hủy đăng nhập"
+        }
+    }
+
+    var disconnectGrok: String {
+        switch language {
+        case .en: "Disconnect Grok"
+        case .ja: "Grok の接続を解除"
+        case .vi: "Ngắt kết nối Grok"
+        }
+    }
+
+    var grokSignInFailed: String {
+        switch language {
+        case .en: "Grok sign-in failed"
+        case .ja: "Grok にサインインできませんでした"
+        case .vi: "Đăng nhập Grok thất bại"
+        }
+    }
+
+    var reconnectGrokTitle: String {
+        switch language {
+        case .en: "Reconnect Grok"
+        case .ja: "Grok に再接続"
+        case .vi: "Kết nối lại Grok"
+        }
+    }
+
+    var reconnectGrokMessage: String {
+        switch language {
+        case .en: "Your Grok session ended. Your chats are safe."
+        case .ja: "Grok のセッションが終了しました。チャットは安全です。"
+        case .vi: "Phiên Grok đã kết thúc. Các cuộc chat của bạn vẫn an toàn."
+        }
+    }
+
+    var useChatGPTPlanHeader: String {
+        switch language {
+        case .en: "Use your ChatGPT plan"
+        case .ja: "ChatGPT プランを使う"
+        case .vi: "Dùng gói ChatGPT của bạn"
+        }
+    }
+
+    var chatGPTPrivacyFooter: String {
+        switch language {
+        case .en: "Uses your ChatGPT Plus or Pro plan, separate from any TrainOrRest charges. Health context goes from this iPhone directly to OpenAI."
+        case .ja: "ChatGPT Plus または Pro プランを使います（TrainOrRest の料金とは別です）。健康データはこの iPhone から OpenAI に直接送られます。"
+        case .vi: "Dùng gói ChatGPT Plus hoặc Pro của bạn, tách biệt với mọi khoản phí của TrainOrRest. Dữ liệu sức khỏe đi thẳng từ iPhone này đến OpenAI."
+        }
+    }
+
+    var disconnectChatGPT: String {
+        switch language {
+        case .en: "Disconnect ChatGPT"
+        case .ja: "ChatGPT の接続を解除"
+        case .vi: "Ngắt kết nối ChatGPT"
+        }
+    }
+
+    var chatGPTSignInFailed: String {
+        switch language {
+        case .en: "ChatGPT sign-in failed"
+        case .ja: "ChatGPT にサインインできませんでした"
+        case .vi: "Đăng nhập ChatGPT thất bại"
+        }
+    }
+
+    var chatGPTPlanNoticeTitle: String {
+        switch language {
+        case .en: "You're using your ChatGPT plan"
+        case .ja: "ChatGPT プランを使用しています"
+        case .vi: "Bạn đang dùng gói ChatGPT"
+        }
+    }
+
+    var chatGPTPlanNoticeBody: String {
+        switch language {
+        case .en: "Coach replies in TrainOrRest use your ChatGPT plan's limits. On Plus, those limits are shared with your other ChatGPT use. You can manage usage in ChatGPT settings."
+        case .ja: "TrainOrRest の Coach の返信は ChatGPT プランの上限を使います。Plus では、ほかの ChatGPT の利用と上限を共有します。利用状況は ChatGPT の設定で管理できます。"
+        case .vi: "Câu trả lời của Coach trong TrainOrRest dùng giới hạn của gói ChatGPT. Với Plus, giới hạn này được chia sẻ với các lần dùng ChatGPT khác. Bạn có thể quản lý mức dùng trong cài đặt ChatGPT."
+        }
+    }
+
+    var gotIt: String {
+        switch language {
+        case .en: "Got it"
+        case .ja: "OK"
+        case .vi: "Đã hiểu"
+        }
+    }
+
+    var otherCoachOptions: String {
+        switch language {
+        case .en: "Other options"
+        case .ja: "ほかの方法"
+        case .vi: "Tùy chọn khác"
+        }
+    }
+
+    var coachConnectionPicker: String {
+        switch language {
+        case .en: "Coach uses"
+        case .ja: "使用する Coach"
+        case .vi: "Coach dùng"
+        }
+    }
+
+    var openAIKeyConnection: String {
+        switch language {
+        case .en: "OpenAI key"
+        case .ja: "OpenAI キー"
+        case .vi: "Khóa OpenAI"
+        }
+    }
+
+    var claudeModel: String {
+        switch language {
+        case .en: "Claude model"
+        case .ja: "Claude のモデル"
+        case .vi: "Mô hình Claude"
+        }
+    }
+
+    var openAIModel: String {
+        switch language {
+        case .en: "OpenAI model"
+        case .ja: "OpenAI のモデル"
+        case .vi: "Mô hình OpenAI"
+        }
+    }
+
+    // MARK: - Claude key onboarding
+
+    var useClaudeKeyHeader: String {
+        switch language {
+        case .en: "Use a Claude API key"
+        case .ja: "Claude API キーを使う"
+        case .vi: "Dùng khóa API Claude"
+        }
+    }
+
+    var getClaudeKey: String {
+        switch language {
+        case .en: "Get a key"
+        case .ja: "キーを取得"
+        case .vi: "Lấy khóa"
+        }
+    }
+
+    var getClaudeKeySteps: String {
+        switch language {
+        case .en: "Sign in, tap Create Key, copy it, and come back."
+        case .ja: "サインインして Create Key をタップし、キーをコピーして戻ってきてください。"
+        case .vi: "Đăng nhập, chạm Create Key, sao chép khóa rồi quay lại."
+        }
+    }
+
+    var pasteKey: String {
+        switch language {
+        case .en: "Paste key"
+        case .ja: "キーを貼り付け"
+        case .vi: "Dán khóa"
+        }
+    }
+
+    var notAClaudeKey: String {
+        switch language {
+        case .en: "That doesn't look like a Claude key (it should start with sk-ant-)."
+        case .ja: "Claude のキーではないようです（sk-ant- で始まります）。"
+        case .vi: "Đây không giống khóa Claude (khóa bắt đầu bằng sk-ant-)."
+        }
+    }
+
+    var claudeKeyRejected: String {
+        switch language {
+        case .en: "Claude rejected this key. Create a new one."
+        case .ja: "Claude がこのキーを拒否しました。新しいキーを作成してください。"
+        case .vi: "Claude đã từ chối khóa này. Hãy tạo khóa mới."
+        }
+    }
+
+    var claudeNeedsCredits: String {
+        switch language {
+        case .en: "Add credits to your Claude account first."
+        case .ja: "先に Claude アカウントにクレジットを追加してください。"
+        case .vi: "Hãy nạp credit vào tài khoản Claude trước."
+        }
+    }
+
+    var addCredits: String {
+        switch language {
+        case .en: "Add credits"
+        case .ja: "クレジットを追加"
+        case .vi: "Nạp credit"
+        }
+    }
+
+    var claudeBillingFooter: String {
+        switch language {
+        case .en: "Claude keys are billed per use by Anthropic. Prepaid credits are required. Your key stays in this device's keychain."
+        case .ja: "Claude のキーは Anthropic によって従量課金されます。前払いのクレジットが必要です。キーはこのデバイスのキーチェーンに保管されます。"
+        case .vi: "Khóa Claude được Anthropic tính phí theo mức dùng. Cần nạp credit trả trước. Khóa của bạn được giữ trong chuỗi khóa của thiết bị này."
+        }
+    }
+
+    var coachRateLimited: String {
+        switch language {
+        case .en: "Too many requests right now. Wait a moment, then connect again."
+        case .ja: "現在リクエストが多すぎます。少し待ってから再接続してください。"
+        case .vi: "Hiện có quá nhiều yêu cầu. Chờ một chút rồi kết nối lại."
+        }
+    }
+
+    var coachOffline: String {
+        switch language {
+        case .en: "You're offline. Connect to the internet, then try again."
+        case .ja: "オフラインです。インターネットに接続してから、もう一度お試しください。"
+        case .vi: "Bạn đang ngoại tuyến. Hãy kết nối internet rồi thử lại."
         }
     }
 
@@ -747,19 +1175,11 @@ struct SettingsCopy {
         }
     }
 
-    var recommendedCoach: String {
+    var advancedOpenAIFooter: String {
         switch language {
-        case .en: "Recommended coach"
-        case .ja: "推奨の Coach"
-        case .vi: "Coach được đề xuất"
-        }
-    }
-
-    var recommendedCoachFooter: String {
-        switch language {
-        case .en: "TrainOrRest picks and tunes the coach model for you. Your key stays in this device's keychain."
-        case .ja: "TrainOrRest が Coach モデルを選び、調整します。キーはこのデバイスのキーチェーンに保管されます。"
-        case .vi: "TrainOrRest chọn và tinh chỉnh mô hình Coach cho bạn. Khóa của bạn được giữ trong chuỗi khóa của thiết bị này."
+        case .en: "Use your own OpenAI API key, billed per use by OpenAI, or pick a specific model. Most runners never need this."
+        case .ja: "自分の OpenAI API キー（OpenAI による従量課金）を使うか、特定のモデルを選びます。ほとんどのランナーには不要です。"
+        case .vi: "Dùng khóa API OpenAI của riêng bạn (OpenAI tính phí theo mức dùng) hoặc chọn mô hình cụ thể. Hầu hết người chạy không cần mục này."
         }
     }
 
@@ -795,14 +1215,6 @@ struct SettingsCopy {
         case .en: "Save OpenAI and test"
         case .ja: "OpenAI を保存してテスト"
         case .vi: "Lưu OpenAI và kiểm tra"
-        }
-    }
-
-    var advancedProviderFooter: String {
-        switch language {
-        case .en: "Switch vendor or pick a specific model. Most runners never need this."
-        case .ja: "ベンダーを切り替えるか、特定のモデルを選びます。ほとんどのランナーには不要です。"
-        case .vi: "Đổi nhà cung cấp hoặc chọn mô hình cụ thể. Hầu hết người chạy không cần mục này."
         }
     }
 

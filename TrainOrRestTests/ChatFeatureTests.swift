@@ -715,6 +715,63 @@ final class ChatFeatureTests: XCTestCase {
         }
     }
 
+    func testAttachedTempoRequestStagesTempoNotTheExistingEasyKind() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let selected = try XCTUnwrap(try context.fetch(FetchDescriptor<PlannedWorkout>()).first {
+            $0.kind == .easy && $0.status == .planned && $0.date > today
+        })
+        let client = MockClaudeClient(responses: [])
+        let contextualToday = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: selected.date)))
+        let store = CoachChatStore(client: client, calendar: calendar, now: { contextualToday })
+
+        await store.submitTestTurn(
+            text: "đổi thành tempo 10km",
+            model: "claude-test",
+            attachments: [.plannedWorkout(selected.uuid)],
+            apiKey: "test-key",
+            in: context
+        )
+
+        XCTAssertTrue(client.requests.isEmpty, "a named kind plus distance is a local edit, not a model call")
+        let replacement = try replacementDetails(try XCTUnwrap(store.pendingPlanCandidate))
+        XCTAssertEqual(replacement.workoutID, selected.uuid)
+        XCTAssertEqual(replacement.existing.kind, .easy)
+        XCTAssertEqual(replacement.proposed.kind, .tempo)
+        XCTAssertEqual(replacement.proposed.distanceKm, 10, accuracy: 0.001)
+        let transcript = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
+            .map(\.text)
+            .joined(separator: "\n")
+        XCTAssertFalse(transcript.contains("đổi cự li"), "a type change must not be described as a distance-only edit")
+    }
+
+    func testAttachedTypeOnlyRequestKeepsDistanceAndChangesKind() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedTrainingData(in: context)
+        let selected = try XCTUnwrap(try context.fetch(FetchDescriptor<PlannedWorkout>()).first {
+            $0.kind == .easy && $0.status == .planned && $0.date > today
+        })
+        let client = MockClaudeClient(responses: [])
+        let contextualToday = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: selected.date)))
+        let store = CoachChatStore(client: client, calendar: calendar, now: { contextualToday })
+
+        await store.submitTestTurn(
+            text: "đổi thành tempo",
+            model: "claude-test",
+            attachments: [.plannedWorkout(selected.uuid)],
+            apiKey: "test-key",
+            in: context
+        )
+
+        XCTAssertTrue(client.requests.isEmpty)
+        let replacement = try replacementDetails(try XCTUnwrap(store.pendingPlanCandidate))
+        XCTAssertEqual(replacement.existing.kind, .easy)
+        XCTAssertEqual(replacement.proposed.kind, .tempo)
+        XCTAssertEqual(replacement.proposed.distanceKm, selected.distanceKm, accuracy: 0.05)
+    }
+
     func testContextualReplaceStagesCandidateForManuallyEditedWorkoutAfterPlanReanchors() async throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -2723,18 +2780,7 @@ final class ChatFeatureTests: XCTestCase {
         try seedTrainingData(in: context)
         let friday = PlanEngineTestSupport.date(2026, 1, 9)
         let selected = try XCTUnwrap(try plannedWorkouts(on: friday, in: context).first)
-        let client = MockClaudeClient(responses: [
-            ClaudeResponse(content: [
-                .toolUse(id: "toolu_1", name: CoachTools.toolName, input: .object([
-                    "changes": .array([
-                        .object([
-                            "date": .string(CoachContextBuilder.day(qualityDay, calendar: calendar)),
-                            "action": .string("downgrade")
-                        ])
-                    ])
-                ]))
-            ], stopReason: "tool_use")
-        ])
+        let client = MockClaudeClient(responses: [])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
         await store.submitTestTurn(text: "Đổi buổi này sang tempo",
@@ -2745,8 +2791,7 @@ final class ChatFeatureTests: XCTestCase {
 
         let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
         XCTAssertEqual(snapshot.actionType, .planMutation)
-        let request = try XCTUnwrap(client.requests.first)
-        XCTAssertEqual(request.tools.map(\.name), [CoachTools.toolName], "a type change offers only the plan tool, so the model cannot answer with options")
+        XCTAssertTrue(client.requests.isEmpty, "an attached type change is staged locally, so it never reaches the model")
     }
 
     func testTypeQuestionWithPlannedWorkoutAttachmentStaysUnspecified() async throws {
@@ -3114,7 +3159,7 @@ final class ChatFeatureTests: XCTestCase {
         let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertEqual(failed.assistantStatus, .failed)
 
-        await store.retryFailedResponse(failed.turnID, model: "claude-test", apiKey: "test-key", in: context)
+        await store.retryFailedResponse(failed.turnID, model: "claude-test", access: CoachAccess(connection: .anthropicKey, credential: .apiKey("test-key")), in: context)
 
         XCTAssertNil(store.lastError)
         XCTAssertEqual(client.requests.count, 2)
@@ -3141,7 +3186,7 @@ final class ChatFeatureTests: XCTestCase {
         let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertEqual(failed.assistantStatus, .failed)
 
-        await store.retryFailedResponse(failed.turnID, model: "claude-test", apiKey: "test-key", in: context)
+        await store.retryFailedResponse(failed.turnID, model: "claude-test", access: CoachAccess(connection: .anthropicKey, credential: .apiKey("test-key")), in: context)
 
         XCTAssertEqual(client.requests.count, 2)
         XCTAssertEqual(failed.text, "Retry recovered.")
@@ -3163,7 +3208,7 @@ final class ChatFeatureTests: XCTestCase {
         let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertEqual(failed.assistantStatus, .failed)
 
-        await store.retryFailedResponse(failed.turnID, model: "claude-test", apiKey: "test-key", in: context)
+        await store.retryFailedResponse(failed.turnID, model: "claude-test", access: CoachAccess(connection: .anthropicKey, credential: .apiKey("test-key")), in: context)
 
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertEqual(messages.map(\.role), [.user, .assistant])
@@ -3190,7 +3235,7 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertTrue(failed.isIncomplete)
         XCTAssertEqual(failed.text, "Dựa trên tải tập tuần này, cơ thể anh đang")
 
-        await store.retryFailedResponse(failed.turnID, model: "claude-test", apiKey: "test-key", in: context)
+        await store.retryFailedResponse(failed.turnID, model: "claude-test", access: CoachAccess(connection: .anthropicKey, credential: .apiKey("test-key")), in: context)
 
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertEqual(messages.map(\.role), [.user, .assistant])
@@ -3219,7 +3264,7 @@ final class ChatFeatureTests: XCTestCase {
         in: context)
         let failed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
 
-        await store.retryFailedResponse(failed.turnID, model: "claude-test", apiKey: "test-key", in: context)
+        await store.retryFailedResponse(failed.turnID, model: "claude-test", access: CoachAccess(connection: .anthropicKey, credential: .apiKey("test-key")), in: context)
 
         let retryRequest = try XCTUnwrap(client.requests.last)
         XCTAssertTrue(retryRequest.messages.last?.content.textContent.contains("Selected completed run context") == true)
@@ -3248,7 +3293,7 @@ final class ChatFeatureTests: XCTestCase {
         context.delete(activity)
         try context.save()
 
-        await store.retryFailedResponse(failed.turnID, model: "claude-test", apiKey: "test-key", in: context)
+        await store.retryFailedResponse(failed.turnID, model: "claude-test", access: CoachAccess(connection: .anthropicKey, credential: .apiKey("test-key")), in: context)
 
         XCTAssertEqual(failed.assistantStatus, .failed)
         XCTAssertEqual(failed.errorCategory, .missingAttachment)
@@ -3271,7 +3316,7 @@ final class ChatFeatureTests: XCTestCase {
         let olderFailed = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         await store.submitTestTurn(text: "Second question?", model: "claude-test", apiKey: "test-key", in: context)
 
-        await store.retryFailedResponse(olderFailed.turnID, model: "claude-test", apiKey: "test-key", in: context)
+        await store.retryFailedResponse(olderFailed.turnID, model: "claude-test", access: CoachAccess(connection: .anthropicKey, credential: .apiKey("test-key")), in: context)
 
         let messages = try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)]))
         XCTAssertEqual(messages.map(\.role), [.user, .assistant, .user, .assistant])
@@ -3961,7 +4006,7 @@ private final class MockClaudeClient: ClaudeServicing {
         self.streamScripts = streamScripts
     }
 
-    func send(_ request: ClaudeRequest, apiKey: String) async throws -> ClaudeResponse {
+    func send(_ request: ClaudeRequest, credential: CoachCredential) async throws -> ClaudeResponse {
         requests.append(request)
         if !results.isEmpty {
             return try results.removeFirst().get()
@@ -3970,7 +4015,7 @@ private final class MockClaudeClient: ClaudeServicing {
         return responses.removeFirst()
     }
 
-    func stream(_ request: ClaudeRequest, apiKey: String) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error> {
+    func stream(_ request: ClaudeRequest, credential: CoachCredential) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error> {
         requests.append(request)
         if !streamScripts.isEmpty {
             let script = streamScripts.removeFirst()

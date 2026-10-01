@@ -96,7 +96,11 @@ final class AdaptivePlanReviewReceiptTests: XCTestCase {
     func testNeedsKeyReviewStartsManuallyAfterKeyIsAdded() async throws {
         let (context, today) = try contextWithPlan()
         try? KeychainStore.delete()
-        defer { try? KeychainStore.delete() }
+        UserDefaults.standard.set(CoachConnection.anthropicKey.rawValue, forKey: CoachConnection.storageKey)
+        defer {
+            try? KeychainStore.delete()
+            UserDefaults.standard.removeObject(forKey: CoachConnection.storageKey)
+        }
         let client = ReceiptClient(response: noChangeResponse())
         let coordinator = AdaptivePlanReviewCoordinator(anthropicClient: client, openAIClient: client, now: { today }, isSceneActive: { true }, isAutomaticEnabled: { true })
 
@@ -124,12 +128,16 @@ final class AdaptivePlanReviewReceiptTests: XCTestCase {
 
         XCTAssertEqual(review.phase, .reverted)
         XCTAssertEqual(
-            AdaptivePlanReviewSlot.actions(for: review, selectedProviderHasKey: true),
+            AdaptivePlanReviewSlot.actions(for: review, selectedCoachIsConnected: true),
             [.manualReview]
         )
 
         try? KeychainStore.delete()
-        defer { try? KeychainStore.delete() }
+        UserDefaults.standard.set(CoachConnection.anthropicKey.rawValue, forKey: CoachConnection.storageKey)
+        defer {
+            try? KeychainStore.delete()
+            UserDefaults.standard.removeObject(forKey: CoachConnection.storageKey)
+        }
         try KeychainStore.save("test-key")
         let client = ReceiptClient(response: noChangeResponse())
         let coordinator = AdaptivePlanReviewCoordinator(
@@ -317,13 +325,13 @@ private final class ReceiptClient: ClaudeServicing {
 
     init(response: ClaudeResponse? = nil) { self.response = response }
 
-    func send(_ request: ClaudeRequest, apiKey: String) async throws -> ClaudeResponse {
+    func send(_ request: ClaudeRequest, credential: CoachCredential) async throws -> ClaudeResponse {
         sendCount += 1
         guard let response else { throw ReceiptError.rollback }
         return response
     }
 
-    func stream(_ request: ClaudeRequest, apiKey: String) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error> {
+    func stream(_ request: ClaudeRequest, credential: CoachCredential) async throws -> AsyncThrowingStream<AnthropicStreamEvent, Error> {
         AsyncThrowingStream { $0.finish() }
     }
 }

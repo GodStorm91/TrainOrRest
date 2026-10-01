@@ -7,7 +7,8 @@ final class OpenAIClient: ClaudeServicing {
         self.session = session
     }
 
-    func send(_ request: ClaudeRequest, apiKey: String) async throws -> ClaudeResponse {
+    func send(_ request: ClaudeRequest, credential: CoachCredential) async throws -> ClaudeResponse {
+        let apiKey = try credential.requireAPIKey()
         var urlRequest = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")

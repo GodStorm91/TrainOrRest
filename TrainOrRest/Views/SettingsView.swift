@@ -753,14 +753,41 @@ struct CoachMemorySettingsView: View {
 }
 
 struct CoachProviderSettingsView: View {
+    private enum KeyCheck: Equatable {
+        case testing(CoachConnection)
+        case finished(CoachConnection, ClaudeKeyTestOutcome)
+    }
+
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
-    @AppStorage("coachModel") private var model = CoachChatConfig.defaultModel
+    @AppStorage(CoachConnection.storageKey) private var connectionRaw = CoachConnection.chatGPT.rawValue
+    @AppStorage(CoachConnection.chatGPT.modelStorageKey) private var chatGPTModel = ""
+    @AppStorage(CoachConnection.anthropicKey.modelStorageKey) private var claudeModel = CoachChatConfig.defaultModel
+    @AppStorage(CoachConnection.openAIKey.modelStorageKey) private var openAIModel = CoachChatConfig.defaultOpenAIModel
+    @AppStorage(CoachConnection.grok.modelStorageKey) private var grokModel = GrokAuthConfiguration.defaultModel
     @AppStorage(AdaptivePlanReviewSettings.automaticKey) private var automaticNextWeekReview = false
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     @StateObject private var chatStore = CoachChatStore()
     @State private var anthropicAPIKey = ""
     @State private var openAIAPIKey = ""
-    @State private var status: String?
-    @State private var isTesting = false
+    @State private var hasAnthropicKey = false
+    @State private var hasOpenAIKey = false
+    @State private var chatGPTState = ChatGPTTokenStore.shared.state
+    @State private var grokState = GrokTokenStore.shared.state
+    @State private var isSigningInWithGrok = false
+    @State private var grokSignInError: String?
+    @State private var chatGPTModels: [ChatGPTModel] = []
+    @State private var keyCheck: KeyCheck?
+    @State private var isSigningIn = false
+    @State private var signInError: String?
+    @State private var showsNotAClaudeKey = false
+    @State private var awaitingKeyReturn = false
+    @State private var highlightsPaste = false
+    @State private var showsPlanNotice = false
+    @State private var showsChatGPTDiagnostics = false
+    @State private var isRunningChatGPTProbe = false
+    @State private var chatGPTProbeSummary: [String] = []
+    @State private var chatGPTDiagnosticsReport = ""
 
     private let anthropicModels = [
         CoachChatConfig.defaultModel,
@@ -774,31 +801,73 @@ struct CoachProviderSettingsView: View {
     ]
 
     private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
-    private var isOpenAI: Bool { CoachModelProvider.isOpenAIModel(model) }
-
-    private var activeKeyPresent: Bool {
-        let key = isOpenAI ? openAIAPIKey : anthropicAPIKey
-        return !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    private var copy: SettingsCopy { language.settings }
+    private var connection: CoachConnection { CoachConnection(rawValue: connectionRaw) ?? .chatGPT }
+    private var isTesting: Bool {
+        if case .testing = keyCheck { return true }
+        return false
     }
 
-    private var receipt: (symbol: String, tint: Color, title: String, message: String?, footnote: String?) {
-        if isTesting {
-            return ("arrow.triangle.2.circlepath", Theme.accent, language.settings.testingConnection, nil, nil)
+    private var status: CoachConnectionStatus {
+        CoachConnectionStatus(
+            selected: connection,
+            chatGPT: chatGPTState,
+            hasAnthropicKey: hasAnthropicKey,
+            hasOpenAIKey: hasOpenAIKey,
+            grok: grokState
+        )
+    }
+
+    private var chatGPTStatus: CoachConnectionStatus {
+        CoachConnectionStatus(selected: .chatGPT, chatGPT: chatGPTState, hasAnthropicKey: false, hasOpenAIKey: false)
+    }
+
+    private var usableConnections: [CoachConnection] {
+        var connections: [CoachConnection] = []
+        if chatGPTStatus.isConnected { connections.append(.chatGPT) }
+        if hasAnthropicKey { connections.append(.anthropicKey) }
+        if hasOpenAIKey { connections.append(.openAIKey) }
+        if case .connected = grokState { connections.append(.grok) }
+        return connections
+    }
+
+    private var statusModelName: String? {
+        switch connection {
+        case .chatGPT:
+            guard !chatGPTModel.isEmpty else { return nil }
+            return chatGPTModels.first { $0.id == chatGPTModel }?.displayName ?? chatGPTModel
+        case .anthropicKey: return claudeModel
+        case .openAIKey: return openAIModel
+        case .grok: return grokModel
         }
-        if let status {
-            if status == "Connection OK" {
-                return ("checkmark.circle.fill", Theme.good, language.settings.coachConnected,
-                        language.settings.modelReady(language.settings.modelLabel(model)), nil)
-            }
-            return ("exclamationmark.triangle.fill", Theme.bad, language.settings.connectionFailed,
-                    status, language.settings.checkKeyAndConnectAgain)
+    }
+
+    private var receipt: SettingsStatus {
+        switch keyCheck {
+        case .testing:
+            return SettingsStatus(symbol: "arrow.triangle.2.circlepath", tint: Theme.accent, title: copy.testingConnection)
+        case .finished(let checked, .connected):
+            let model = checked == .openAIKey ? openAIModel : claudeModel
+            return SettingsStatus(symbol: "checkmark.circle.fill", tint: Theme.good, title: copy.coachConnected,
+                                  message: copy.modelReady(copy.modelLabel(model)))
+        case .finished(let checked, let outcome):
+            return SettingsStatus(symbol: "exclamationmark.triangle.fill", tint: Theme.bad, title: copy.connectionFailed,
+                                  message: failureMessage(outcome, connection: checked))
+        case nil:
+            break
         }
-        if activeKeyPresent {
-            return ("key.fill", Theme.accent, language.settings.coachKeySaved,
-                    language.settings.modelSelected(language.settings.modelLabel(model)), nil)
+        if let grokSignInError {
+            return SettingsStatus(symbol: "exclamationmark.triangle.fill", tint: Theme.bad,
+                                  title: copy.grokSignInFailed, message: grokSignInError)
         }
-        return ("sparkles", Theme.warn, language.settings.addCoachKey,
-                language.settings.coachKeyRecommendation, nil)
+        if let signInError {
+            return SettingsStatus(symbol: "exclamationmark.triangle.fill", tint: Theme.bad,
+                                  title: copy.chatGPTSignInFailed, message: signInError)
+        }
+        let status = status
+        let tint: Color = status.isConnected ? Theme.good : (status.kind == .notConnected ? Theme.warn : Theme.bad)
+        return SettingsStatus(symbol: status.symbol, tint: tint, title: status.title(copy),
+                              message: status.message(copy, model: statusModelName))
     }
 
     var body: some View {
@@ -811,109 +880,426 @@ struct CoachProviderSettingsView: View {
                     message: receipt.message,
                     footnote: receipt.footnote
                 )
+                if usableConnections.count > 1 {
+                    Picker(copy.coachConnectionPicker, selection: $connectionRaw) {
+                        ForEach(usableConnections, id: \.self) { option in
+                            Text(pickerLabel(option)).tag(option.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
             }
 
             Section {
                 Toggle(
-                    language.plan.automaticNextWeekReview(provider: CoachModelProvider.displayName(for: model)),
+                    language.plan.automaticNextWeekReview(provider: connection.displayName),
                     isOn: $automaticNextWeekReview
                 )
-                if !activeKeyPresent {
-                    Label(language.plan.addKeyForSelectedProvider, systemImage: "key")
+                if !status.isConnected {
+                    Label(language.plan.connectCoachFirst, systemImage: "bubble.left.and.text.bubble.right")
                         .foregroundStyle(Theme.dim)
                 }
             } header: {
                 Text(language.plan.nextWeekReviewSettingsTitle)
             } footer: {
-                Text(language.plan.nextWeekReviewDisclosure(provider: CoachModelProvider.displayName(for: model)))
+                Text(language.plan.nextWeekReviewDisclosure(provider: connection.displayName))
             }
 
-            Section {
-                SecureField(language.settings.anthropicAPIKey, text: $anthropicAPIKey)
-                    .textContentType(.password)
-                    .autocorrectionDisabled()
-                Button {
-                    saveAndTestAnthropic()
-                } label: {
-                    if isTesting {
-                        ProgressView()
-                    } else {
-                        Label(language.settings.connectCoach, systemImage: "checkmark.shield")
-                    }
-                }
-                .disabled(anthropicAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isTesting)
-            } header: {
-                Text(language.settings.recommendedCoach)
-            } footer: {
-                Text(language.settings.recommendedCoachFooter)
+            chatGPTSection
+            if showsChatGPTDiagnostics, chatGPTState != .signedOut {
+                chatGPTDiagnosticsSection
             }
+            grokSection
+            claudeSection
 
             Section {
-                DisclosureGroup(language.settings.advancedProviderSetup) {
-                    Picker(language.settings.model, selection: $model) {
-                        Section(language.settings.claude) {
-                            ForEach(anthropicModels, id: \.self) { Text(language.settings.modelLabel($0)).tag($0) }
-                        }
-                        Section(language.settings.openAI) {
-                            ForEach(openAIModels, id: \.self) { Text(language.settings.modelLabel($0)).tag($0) }
-                        }
+                DisclosureGroup(copy.advancedProviderSetup) {
+                    Picker(copy.claudeModel, selection: $claudeModel) {
+                        ForEach(anthropicModels, id: \.self) { Text(copy.modelLabel($0)).tag($0) }
                     }
-                    SecureField(language.settings.openAIAPIKey, text: $openAIAPIKey)
+                    Picker(copy.openAIModel, selection: $openAIModel) {
+                        ForEach(openAIModels, id: \.self) { Text(copy.modelLabel($0)).tag($0) }
+                    }
+                    SecureField(copy.openAIAPIKey, text: $openAIAPIKey)
                         .textContentType(.password)
                         .autocorrectionDisabled()
                     Button {
-                        saveAndTestOpenAI()
+                        saveAndTest(.openAIKey)
                     } label: {
                         if isTesting {
                             ProgressView()
                         } else {
-                            Label(language.settings.saveOpenAIAndTest, systemImage: "checkmark.shield")
+                            Label(copy.saveOpenAIAndTest, systemImage: "checkmark.shield")
                         }
                     }
                     .disabled(openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isTesting)
                 }
             } footer: {
-                Text(language.settings.advancedProviderFooter)
+                Text(copy.advancedOpenAIFooter)
             }
         }
-        .navigationTitle(language.settings.coachProviderNavigationTitle)
+        .navigationTitle(copy.coachProviderNavigationTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .chatGPTPlanNotice(isPresented: $showsPlanNotice, copy: copy)
         .task {
             anthropicAPIKey = (try? KeychainStore.load()) ?? ""
             openAIAPIKey = (try? KeychainStore.load(account: KeychainStore.openAIAPIKeyAccount)) ?? ""
+            refreshStoredKeys()
+            showsChatGPTDiagnostics = await ChatGPTDiagnostics.isAvailableInThisBuild()
+            refreshChatGPTDiagnosticsReport()
         }
-        .onChange(of: model) { _, _ in status = nil }
-        .onChange(of: anthropicAPIKey) { _, _ in status = nil }
-        .onChange(of: openAIAPIKey) { _, _ in status = nil }
-    }
-
-    private func saveAndTestOpenAI() {
-        isTesting = true
-        let trimmed = openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !CoachModelProvider.isOpenAIModel(model) { model = CoachChatConfig.defaultOpenAIModel }
-        Task {
-            do {
-                try KeychainStore.save(trimmed, account: KeychainStore.openAIAPIKeyAccount)
-                status = await chatStore.testConnection(apiKey: trimmed, model: model)
-            } catch {
-                status = language.settings.couldNotSaveOpenAIAPIKey
-            }
-            isTesting = false
+        .task(id: chatGPTState) { await loadChatGPTModels() }
+        .onReceive(ChatGPTTokenStore.shared.statePublisher.receive(on: DispatchQueue.main)) { chatGPTState = $0 }
+        .onReceive(GrokTokenStore.shared.statePublisher.receive(on: DispatchQueue.main)) { grokState = $0 }
+        .onChange(of: claudeModel) { _, _ in clearFinishedKeyCheck() }
+        .onChange(of: openAIModel) { _, _ in clearFinishedKeyCheck() }
+        .onChange(of: anthropicAPIKey) { _, _ in clearFinishedKeyCheck() }
+        .onChange(of: openAIAPIKey) { _, _ in clearFinishedKeyCheck() }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active, awaitingKeyReturn else { return }
+            awaitingKeyReturn = false
+            highlightsPaste = UIPasteboard.general.hasStrings
         }
     }
 
-    private func saveAndTestAnthropic() {
-        isTesting = true
-        let trimmed = anthropicAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if CoachModelProvider.isOpenAIModel(model) { model = CoachChatConfig.defaultModel }
+    /// Editing a key or model invalidates the last result, but never an in-flight test (a paste starts one).
+    private func clearFinishedKeyCheck() {
+        if !isTesting { keyCheck = nil }
+    }
+
+    private var chatGPTSection: some View {
+        Section {
+            switch chatGPTState {
+            case .signedOut, .notEligible:
+                ContinueWithChatGPTButton(title: copy.continueWithChatGPT, isWorking: isSigningIn) {
+                    signIn(requestConsent: false)
+                }
+            case .connected:
+                if !chatGPTModels.isEmpty {
+                    Picker(copy.model, selection: $chatGPTModel) {
+                        ForEach(chatGPTModels) { Text($0.displayName).tag($0.id) }
+                    }
+                }
+                Link(copy.manageUsage, destination: CoachConnectionStatus.usageURL)
+            case .planUsageDisabled, .needsReconnect, .usageLimited:
+                ChatGPTStatusActions(status: chatGPTStatus, copy: copy, isWorking: isSigningIn) { consent in
+                    signIn(requestConsent: consent)
+                }
+            }
+            if chatGPTState != .signedOut {
+                Button(copy.disconnectChatGPT, role: .destructive) { disconnectChatGPT() }
+            }
+        } header: {
+            Text(copy.useChatGPTPlanHeader)
+        } footer: {
+            Text(copy.chatGPTPrivacyFooter)
+        }
+    }
+    private var grokSection: some View {
+        Section {
+            switch grokState {
+            case .signedOut:
+                Button {
+                    startGrokSignIn()
+                } label: {
+                    if isSigningInWithGrok {
+                        ProgressView()
+                    } else {
+                        Label(copy.signInWithGrok, systemImage: "person.crop.circle.badge.plus")
+                    }
+                }
+                .disabled(isSigningInWithGrok)
+            case .authorizing(let userCode, let url):
+                Text(copy.grokEnterCode)
+                Text(userCode)
+                    .font(.title2.monospaced())
+                    .textSelection(.enabled)
+                Button {
+                    UIPasteboard.general.string = userCode
+                } label: {
+                    Label(copy.copyCode, systemImage: "doc.on.doc")
+                }
+                Link(copy.openGrokVerification, destination: url)
+                Button(copy.cancelGrokSignIn, role: .cancel) {
+                    cancelGrokSignIn()
+                }
+            case .connected:
+                Picker(copy.model, selection: $grokModel) {
+                    ForEach(GrokAuthConfiguration.models, id: \.self) { Text($0).tag($0) }
+                }
+                Button(copy.disconnectGrok, role: .destructive) { disconnectGrok() }
+            case .needsReconnect:
+                Button(copy.reconnect) { startGrokSignIn() }
+                    .disabled(isSigningInWithGrok)
+                Button(copy.disconnectGrok, role: .destructive) { disconnectGrok() }
+            }
+            if let grokSignInError {
+                Text(grokSignInError)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.bad)
+            }
+        } header: {
+            Text(copy.grokHeader)
+        } footer: {
+            Text(copy.grokPrivacyFooter)
+        }
+    }
+
+
+    private var chatGPTDiagnosticsSection: some View {
+        Section {
+            Button {
+                runChatGPTProbe()
+            } label: {
+                if isRunningChatGPTProbe {
+                    ProgressView()
+                } else {
+                    Label(copy.runChatGPTDiagnostics, systemImage: "stethoscope")
+                }
+            }
+            .disabled(isRunningChatGPTProbe)
+            if !chatGPTDiagnosticsReport.isEmpty {
+                Button {
+                    UIPasteboard.general.string = chatGPTDiagnosticsReport
+                } label: {
+                    Label(copy.copyDiagnosticsReport, systemImage: "doc.on.doc")
+                }
+                ShareLink(item: chatGPTDiagnosticsReport)
+                DebugReportView(text: String(chatGPTDiagnosticsReport.prefix(6_000)))
+                Button(copy.clearDiagnosticsLog, role: .destructive) {
+                    ChatGPTDiagnostics.shared.clear()
+                    chatGPTProbeSummary = []
+                    refreshChatGPTDiagnosticsReport()
+                }
+            }
+        } header: {
+            Text(copy.chatGPTDiagnosticsHeader)
+        } footer: {
+            Text(copy.chatGPTDiagnosticsFooter)
+        }
+    }
+
+    private func runChatGPTProbe() {
+        isRunningChatGPTProbe = true
+        Task {
+            chatGPTProbeSummary = await ChatGPTDiagnosticsProbe.run(selectedModel: chatGPTModel)
+            isRunningChatGPTProbe = false
+            chatGPTState = ChatGPTTokenStore.shared.state
+            refreshChatGPTDiagnosticsReport()
+        }
+    }
+
+    private func refreshChatGPTDiagnosticsReport() {
+        let diagnostics = ChatGPTDiagnostics.shared
+        guard !diagnostics.entries.isEmpty || !chatGPTProbeSummary.isEmpty else {
+            chatGPTDiagnosticsReport = ""
+            return
+        }
+        let info = Bundle.main.infoDictionary
+        let summary = chatGPTProbeSummary.isEmpty
+            ? ["TrainOrRest \(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))",
+               "automatic weekly review: \(automaticNextWeekReview)"]
+            : chatGPTProbeSummary + ["automatic weekly review: \(automaticNextWeekReview)"]
+        chatGPTDiagnosticsReport = diagnostics.report(summary: summary)
+    }
+
+    private var claudeSection: some View {
+        Section {
+            HStack {
+                SecureField(copy.anthropicAPIKey, text: $anthropicAPIKey)
+                    .textContentType(.password)
+                    .autocorrectionDisabled()
+                PasteButton(payloadType: String.self) { strings in
+                    let pasted = strings.first ?? ""
+                    Task { @MainActor in handlePastedClaudeKey(pasted) }
+                }
+                .labelStyle(.iconOnly)
+                .buttonBorderShape(.capsule)
+                .tint(highlightsPaste ? Theme.accent : .gray)
+                .accessibilityLabel(copy.pasteKey)
+            }
+            if showsNotAClaudeKey {
+                Text(copy.notAClaudeKey)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.warn)
+            }
+            Button {
+                saveAndTest(.anthropicKey)
+            } label: {
+                if isTesting {
+                    ProgressView()
+                } else {
+                    Label(copy.connectCoach, systemImage: "checkmark.shield")
+                }
+            }
+            .disabled(anthropicAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isTesting)
+            if case .finished(.anthropicKey, .needsCredits) = keyCheck {
+                Link(copy.addCredits, destination: ClaudeKeyTestOutcome.billingURL)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Button(copy.getClaudeKey) {
+                    awaitingKeyReturn = true
+                    openURL(ClaudeKeyTestOutcome.keysURL)
+                }
+                Text(copy.getClaudeKeySteps)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text(copy.useClaudeKeyHeader)
+        } footer: {
+            Text(copy.claudeBillingFooter)
+        }
+    }
+
+    private func pickerLabel(_ option: CoachConnection) -> String {
+        option == .openAIKey ? copy.openAIKeyConnection : option.displayName
+    }
+
+    private func failureMessage(_ outcome: ClaudeKeyTestOutcome, connection: CoachConnection) -> String {
+        switch outcome {
+        case .connected: copy.coachConnected
+        case .rejected: connection == .anthropicKey ? copy.claudeKeyRejected : copy.checkKeyAndConnectAgain
+        case .needsCredits: copy.claudeNeedsCredits
+        case .rateLimited: copy.coachRateLimited
+        case .offline: copy.coachOffline
+        case .failed(let message): message
+        }
+    }
+
+    private func refreshStoredKeys() {
+        hasAnthropicKey = CoachCredentialResolver.isConnected(.anthropicKey)
+        hasOpenAIKey = CoachCredentialResolver.isConnected(.openAIKey)
+    }
+
+    private func loadChatGPTModels() async {
+        guard case .connected = chatGPTState else {
+            chatGPTModels = []
+            return
+        }
+        chatGPTModels = (try? await ChatGPTModelCatalog.shared.models(tokenProvider: ChatGPTTokenStore.shared)) ?? []
+        _ = try? await ChatGPTModelCatalog.shared.resolveSelectedModel(tokenProvider: ChatGPTTokenStore.shared)
+    }
+
+    private func handlePastedClaudeKey(_ pasted: String) {
+        highlightsPaste = false
+        guard let key = ClaudeKeyTestOutcome.claudeKey(fromPasted: pasted) else {
+            anthropicAPIKey = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
+            showsNotAClaudeKey = true
+            return
+        }
+        showsNotAClaudeKey = false
+        anthropicAPIKey = key
+        saveAndTest(.anthropicKey)
+    }
+
+    private func signIn(requestConsent: Bool) {
+        isSigningIn = true
+        signInError = nil
+        keyCheck = nil
+        Task {
+            let outcome = await ChatGPTSignInAction.run(requestConsent: requestConsent)
+            isSigningIn = false
+            chatGPTState = ChatGPTTokenStore.shared.state
+            switch outcome {
+            case .connected:
+                if case .connected = chatGPTState, ChatGPTSignInAction.shouldShowPlanNotice() {
+                    showsPlanNotice = true
+                }
+            case .cancelled:
+                break
+            case .failed(let message):
+                signInError = message
+            }
+        }
+    }
+
+    private func disconnectChatGPT() {
+        signInError = nil
+        Task {
+            await ChatGPTTokenStore.shared.signOut()
+            await ChatGPTModelCatalog.shared.invalidate()
+            chatGPTState = ChatGPTTokenStore.shared.state
+            guard connection == .chatGPT else { return }
+            if hasAnthropicKey {
+                connectionRaw = CoachConnection.anthropicKey.rawValue
+            } else if hasOpenAIKey {
+                connectionRaw = CoachConnection.openAIKey.rawValue
+            }
+        }
+    }
+    private func startGrokSignIn() {
+        isSigningInWithGrok = true
+        grokSignInError = nil
+        Task {
+            defer { isSigningInWithGrok = false }
+            do {
+                try await GrokTokenStore.shared.signIn { authorization in
+                    Task { @MainActor in
+                        openURL(authorization.verificationURL)
+                    }
+                }
+                connectionRaw = CoachConnection.grok.rawValue
+                grokState = GrokTokenStore.shared.state
+            } catch is CancellationError {
+                return
+            } catch let error as GrokOAuthError where error == .cancelled {
+                return
+            } catch {
+                grokSignInError = error.localizedDescription
+                grokState = GrokTokenStore.shared.state
+            }
+        }
+    }
+
+    private func cancelGrokSignIn() {
+        Task {
+            await GrokTokenStore.shared.cancelSignIn()
+            grokState = GrokTokenStore.shared.state
+            isSigningInWithGrok = false
+        }
+    }
+
+    private func disconnectGrok() {
+        grokSignInError = nil
+        Task {
+            await GrokTokenStore.shared.signOut()
+            grokState = GrokTokenStore.shared.state
+            guard connection == .grok else { return }
+            if case .connected = chatGPTState {
+                connectionRaw = CoachConnection.chatGPT.rawValue
+            } else if hasAnthropicKey {
+                connectionRaw = CoachConnection.anthropicKey.rawValue
+            } else if hasOpenAIKey {
+                connectionRaw = CoachConnection.openAIKey.rawValue
+            }
+        }
+    }
+
+
+    private func saveAndTest(_ keyConnection: CoachConnection) {
+        guard let account = keyConnection.apiKeyAccount else { return }
+        let field = keyConnection == .openAIKey ? openAIAPIKey : anthropicAPIKey
+        let trimmed = field.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = keyConnection == .openAIKey ? openAIModel : claudeModel
+        signInError = nil
+        keyCheck = .testing(keyConnection)
         Task {
             do {
-                try KeychainStore.save(trimmed)
-                status = await chatStore.testConnection(apiKey: trimmed, model: model)
+                try KeychainStore.save(trimmed, account: account)
             } catch {
-                status = language.settings.couldNotSaveAnthropicAPIKey
+                keyCheck = .finished(keyConnection, .failed(
+                    keyConnection == .openAIKey ? copy.couldNotSaveOpenAIAPIKey : copy.couldNotSaveAnthropicAPIKey
+                ))
+                return
             }
-            isTesting = false
+            refreshStoredKeys()
+            connectionRaw = keyConnection.rawValue
+            let error = await chatStore.testConnection(
+                CoachAccess(connection: keyConnection, credential: .apiKey(trimmed)),
+                model: model
+            )
+            keyCheck = .finished(keyConnection, ClaudeKeyTestOutcome(error: error))
         }
     }
 }

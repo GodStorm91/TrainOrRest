@@ -230,7 +230,7 @@ private final class MockClaudeClient: ClaudeServicing {
         self.responses = responses
     }
 
-    func send(_ request: ClaudeRequest, apiKey: String) async throws -> ClaudeResponse {
+    func send(_ request: ClaudeRequest, credential: CoachCredential) async throws -> ClaudeResponse {
         responses.removeFirst()
     }
 }
