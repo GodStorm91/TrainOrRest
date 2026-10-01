@@ -2780,18 +2780,7 @@ final class ChatFeatureTests: XCTestCase {
         try seedTrainingData(in: context)
         let friday = PlanEngineTestSupport.date(2026, 1, 9)
         let selected = try XCTUnwrap(try plannedWorkouts(on: friday, in: context).first)
-        let client = MockClaudeClient(responses: [
-            ClaudeResponse(content: [
-                .toolUse(id: "toolu_1", name: CoachTools.toolName, input: .object([
-                    "changes": .array([
-                        .object([
-                            "date": .string(CoachContextBuilder.day(qualityDay, calendar: calendar)),
-                            "action": .string("downgrade")
-                        ])
-                    ])
-                ]))
-            ], stopReason: "tool_use")
-        ])
+        let client = MockClaudeClient(responses: [])
         let store = CoachChatStore(client: client, calendar: calendar, now: { self.today })
 
         await store.submitTestTurn(text: "Đổi buổi này sang tempo",
@@ -2802,8 +2791,7 @@ final class ChatFeatureTests: XCTestCase {
 
         let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
         XCTAssertEqual(snapshot.actionType, .planMutation)
-        let request = try XCTUnwrap(client.requests.first)
-        XCTAssertEqual(request.tools.map(\.name), [CoachTools.toolName], "a type change offers only the plan tool, so the model cannot answer with options")
+        XCTAssertTrue(client.requests.isEmpty, "an attached type change is staged locally, so it never reaches the model")
     }
 
     func testTypeQuestionWithPlannedWorkoutAttachmentStaysUnspecified() async throws {
