@@ -4,6 +4,7 @@ import Foundation
 /// are treated as complete so the new tour does not appear mid-training.
 enum OnboardingGate {
     static let completedKey = "onboardingCompleted"
+    static let openCalendarAfterCompletionKey = "onboardingOpenCalendarAfterCompletion"
 
     static func isCompleted(_ defaults: UserDefaults = .standard) -> Bool {
         defaults.bool(forKey: completedKey)
@@ -11,6 +12,10 @@ enum OnboardingGate {
 
     static func markCompleted(_ defaults: UserDefaults = .standard) {
         defaults.set(true, forKey: completedKey)
+    }
+
+    static func openCalendarAfterCompletion(_ defaults: UserDefaults = .standard) {
+        defaults.set(true, forKey: openCalendarAfterCompletionKey)
     }
 
     static func adoptExistingInstallIfNeeded(

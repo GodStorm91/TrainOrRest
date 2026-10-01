@@ -19,9 +19,23 @@ protocol IntervalsICUServicing {
     func deleteEvent(id: Int, credentials: IntervalsICUCredentials) async throws
 }
 
+enum IntervalsAuthentication: Equatable {
+    case oauth(accessToken: String)
+    case apiKey(String)
+}
+
 struct IntervalsICUCredentials: Equatable {
     var athleteID: String
-    var apiKey: String
+    var authentication: IntervalsAuthentication
+
+    init(athleteID: String, authentication: IntervalsAuthentication) {
+        self.athleteID = athleteID
+        self.authentication = authentication
+    }
+
+    init(athleteID: String, apiKey: String) {
+        self.init(athleteID: athleteID, authentication: .apiKey(apiKey))
+    }
 }
 
 struct IntervalsWorkoutEvent: Encodable, Equatable {
@@ -148,7 +162,7 @@ enum IntervalsICUError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .unauthorized:
-            "Your intervals.icu API key was rejected. Check it in Settings."
+            "Your intervals.icu connection was rejected. Reconnect it in Settings."
         case .offline:
             "No network connection. Workout push will retry later."
         case .invalidResponse:
@@ -277,8 +291,13 @@ final class IntervalsICUClient: IntervalsICUServicing {
 
     private func authenticatedRequest(url: URL, credentials: IntervalsICUCredentials) -> URLRequest {
         var request = URLRequest(url: url)
-        let token = Data("API_KEY:\(credentials.apiKey)".utf8).base64EncodedString()
-        request.setValue("Basic \(token)", forHTTPHeaderField: "Authorization")
+        switch credentials.authentication {
+        case .oauth(let accessToken):
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        case .apiKey(let apiKey):
+            let token = Data("API_KEY:\(apiKey)".utf8).base64EncodedString()
+            request.setValue("Basic \(token)", forHTTPHeaderField: "Authorization")
+        }
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         return request
     }

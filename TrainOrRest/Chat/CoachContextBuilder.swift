@@ -73,16 +73,14 @@ enum CoachContextBuilder {
 
     private static func watchPushSection() -> [String] {
         let enabled = UserDefaults.standard.bool(forKey: WorkoutPushSettings.enabledKey)
-        let athleteID = UserDefaults.standard.string(forKey: WorkoutPushSettings.athleteIDKey)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let hasKey = ((try? KeychainStore.load(account: KeychainStore.intervalsICUAccount)) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .isEmpty == false
+        let connection = IntervalsConnectionResolver.state()
         let status: String
-        if enabled, !athleteID.isEmpty, hasKey {
+        if enabled, connection.isConnected {
             status = "configured. Confirmed calendar edits sync to intervals.icu automatically after the user taps Apply changes."
+        } else if enabled, case .needsReconnect = connection {
+            status = "enabled but needs reconnecting. Ask the user to reconnect intervals.icu in Profile before expecting delivery."
         } else if enabled {
-            status = "enabled but incomplete. Ask the user to finish Athlete ID/API key in Profile before expecting intervals.icu delivery."
+            status = "enabled but incomplete. Ask the user to finish intervals.icu connection setup in Profile before expecting delivery."
         } else {
             status = "disabled. Calendar edits stay local until Watch push is enabled in Profile or the user uses Sync intervals.icu manually after configuration."
         }

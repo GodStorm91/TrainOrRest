@@ -2,7 +2,10 @@ import XCTest
 @testable import TrainOrRest
 
 final class IntervalsICUClientTests: XCTestCase {
-    private let credentials = IntervalsICUCredentials(athleteID: "i636286", apiKey: "test-api-key")
+    private let credentials = IntervalsICUCredentials(
+        athleteID: "i636286",
+        authentication: .apiKey("test-api-key")
+    )
 
     func testBulkUpsertBuildsAuthenticatedRequestAndDecodesResponse() async throws {
         let session = MockIntervalsICUSession(body: """
@@ -37,6 +40,23 @@ final class IntervalsICUClientTests: XCTestCase {
         XCTAssertEqual(json.first?["type"] as? String, "Run")
         XCTAssertEqual(json.first?["moving_time"] as? Int, 300)
         XCTAssertEqual(json.first?["description"] as? String, "- 1km 4:45-4:30/km Pace")
+    }
+
+    func testEventsBuildsBearerAuthenticationForOAuth() async throws {
+        let session = MockIntervalsICUSession(body: "[]")
+        let client = IntervalsICUClient(session: session)
+
+        _ = try await client.events(
+            credentials: IntervalsICUCredentials(
+                athleteID: "i636286",
+                authentication: .oauth(accessToken: "access-token")
+            ),
+            oldest: "2026-07-10",
+            newest: "2026-07-11"
+        )
+
+        let request = try XCTUnwrap(session.requests.first)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
     }
 
     func testEventsBuildsWindowQueryAndDecodesExternalID() async throws {

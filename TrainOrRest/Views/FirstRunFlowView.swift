@@ -55,10 +55,22 @@ struct FirstRunFlowView: View {
     let health: HealthKitService
     let onFinished: () -> Void
 
+    @Environment(\.openURL) private var openURL
+    @EnvironmentObject private var intervalsConnection: IntervalsConnectionStore
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
     @State private var step: Step = .language
     @State private var healthAuthorization = FirstRunHealthAuthorizationFlow()
     @State private var showHealthSettingsGuidance = false
+    @State private var isSigningInWithChatGPT = false
+    @State private var chatGPTSignInError: String?
+    @State private var showsChatGPTPlanNotice = false
+    @State private var grokState = GrokTokenStore.shared.state
+    @State private var isSigningInWithGrok = false
+    @State private var grokSignInError: String?
+    @State private var oauthService = IntervalsOAuthService()
+    @State private var isConnectingIntervals = false
+    @State private var intervalsOAuthError: String?
+    @State private var isProviderSettingsPresented = false
     private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
 
     var body: some View {
@@ -68,6 +80,7 @@ struct FirstRunFlowView: View {
                     .padding(.top, 8)
                     .padding(.bottom, 12)
                 screen
+                    .animation(.easeInOut(duration: 0.2), value: step)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 28)
@@ -79,6 +92,11 @@ struct FirstRunFlowView: View {
         .tint(Theme.accent)
         .environment(\.locale, language.uiLocale)
         .interactiveDismissDisabled()
+        .chatGPTPlanNotice(isPresented: $showsChatGPTPlanNotice, copy: language.settings)
+        .onAppear { intervalsConnection.reload() }
+        .onReceive(GrokTokenStore.shared.statePublisher.receive(on: DispatchQueue.main)) {
+            grokState = $0
+        }
     }
 
     private var progress: some View {
@@ -123,22 +141,18 @@ struct FirstRunFlowView: View {
                 language: language,
                 showHealthSettingsGuidance: showHealthSettingsGuidance,
                 onCreated: { step = .hub },
-                onLater: finish
+                onLater: { step = .hub }
             )
         case .hub:
             hub
         case .intervals:
-            setupHost(title: "intervals.icu", back: .hub) {
-                IntervalsConnectionSettingsView()
-            }
+            intervalsStep
         case .calendar:
             setupHost(title: "Google Calendar", back: .hub) {
                 GoogleCalendarSettingsView()
             }
         case .coach:
-            setupHost(title: language.onboarding.coachSetupTitle, back: .hub) {
-                CoachProviderSettingsView()
-            }
+            coachStep
         }
     }
 
@@ -371,7 +385,8 @@ struct FirstRunFlowView: View {
                 setupCard(
                     title: language.onboarding.watchWorkoutsTitle,
                     subtitle: language.onboarding.watchWorkoutsSubtitle,
-                    symbol: "applewatch"
+                    symbol: "applewatch",
+                    connected: intervalsConnection.state.isConnected
                 ) { step = .intervals }
                 setupCard(
                     title: "Google Calendar",
@@ -381,7 +396,8 @@ struct FirstRunFlowView: View {
                 setupCard(
                     title: language.onboarding.coachSetupTitle,
                     subtitle: language.onboarding.coachSetupSubtitle,
-                    symbol: "sparkles"
+                    symbol: "sparkles",
+                    connected: isCoachConnected
                 ) { step = .coach }
             }
             Spacer()
@@ -403,7 +419,13 @@ struct FirstRunFlowView: View {
         .accessibilityLabel(title)
     }
 
-    private func setupCard(title: String, subtitle: String, symbol: String, action: @escaping () -> Void) -> some View {
+    private func setupCard(
+        title: String,
+        subtitle: String,
+        symbol: String,
+        connected: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             HStack(spacing: 12) {
                 Image(systemName: symbol)
@@ -421,6 +443,11 @@ struct FirstRunFlowView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 8)
+                if connected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.good)
+                }
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.faint)
@@ -436,6 +463,210 @@ struct FirstRunFlowView: View {
         .frame(minHeight: 44)
         .accessibilityLabel(title)
         .accessibilityHint(subtitle)
+    }
+
+    private var isCoachConnected: Bool {
+        CoachCredentialResolver.access(for: CoachCredentialResolver.current().connection) != nil
+    }
+
+    @ViewBuilder
+    private var intervalsStep: some View {
+        if IntervalsOAuthConfiguration.current == nil {
+            setupHost(title: "intervals.icu", back: .hub) {
+                IntervalsConnectionSettingsView()
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                backButton { step = .hub }
+                Text(language.onboarding.watchWorkoutsTitle)
+                    .font(.torHeading(28, .bold))
+                    .foregroundStyle(Theme.text)
+                    .padding(.bottom, 12)
+                if intervalsConnection.state.isConnected {
+                    Text(language.settings.oauthConnected)
+                        .font(.system(size: 16))
+                        .foregroundStyle(Theme.dim)
+                    Spacer()
+                    primaryButton(language.continueLabel) { step = .hub }
+                } else {
+                    Text(language.onboarding.watchWorkoutsSubtitle)
+                        .font(.system(size: 16))
+                        .foregroundStyle(Theme.dim)
+                        .padding(.bottom, 12)
+                    Text(language.settings.oauthPermissions)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.dim)
+                    if let intervalsOAuthError {
+                        Text(intervalsOAuthError)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.bad)
+                            .padding(.top, 12)
+                    }
+                    Spacer()
+                    primaryButton(
+                        isConnectingIntervals ? nil : language.settings.connectWithIntervals
+                    ) {
+                        connectIntervals()
+                    }
+                    textButton(language.onboarding.later) { step = .hub }
+                }
+            }
+        }
+    }
+
+    private var coachStep: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            backButton { step = .hub }
+            Text(language.onboarding.coachSetupTitle)
+                .font(.torHeading(28, .bold))
+                .foregroundStyle(Theme.text)
+                .padding(.bottom, 12)
+            Text(language.connectCoachMessage)
+                .font(.system(size: 16))
+                .foregroundStyle(Theme.dim)
+                .padding(.bottom, 20)
+            ContinueWithChatGPTButton(
+                title: language.settings.continueWithChatGPT,
+                isWorking: isSigningInWithChatGPT || isSigningInWithGrok
+            ) {
+                signInWithChatGPT()
+            }
+            .padding(.bottom, 12)
+            if let chatGPTSignInError {
+                Text(chatGPTSignInError)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.bad)
+                    .padding(.bottom, 12)
+            }
+            firstRunGrokSignInControl
+            if let grokSignInError {
+                Text(grokSignInError)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.bad)
+                    .padding(.top, 8)
+            }
+            Button(language.settings.otherCoachOptions) {
+                isProviderSettingsPresented = true
+            }
+            .font(.subheadline)
+            .padding(.top, 16)
+            Spacer()
+            textButton(language.onboarding.later) { step = .hub }
+        }
+        .sheet(isPresented: $isProviderSettingsPresented) {
+            NavigationStack {
+                CoachProviderSettingsView()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var firstRunGrokSignInControl: some View {
+        switch grokState {
+        case .authorizing(let userCode, let url):
+            VStack(spacing: 8) {
+                Text(language.settings.grokEnterCode)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Text(userCode)
+                    .font(.title2.monospaced())
+                    .textSelection(.enabled)
+                Button {
+                    UIPasteboard.general.string = userCode
+                } label: {
+                    Label(language.settings.copyCode, systemImage: "doc.on.doc")
+                }
+                Link(language.settings.openGrokVerification, destination: url)
+                Button(language.settings.cancelGrokSignIn, role: .cancel) {
+                    Task {
+                        await GrokTokenStore.shared.cancelSignIn()
+                        grokState = GrokTokenStore.shared.state
+                        isSigningInWithGrok = false
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        case .connected:
+            EmptyView()
+        case .signedOut, .needsReconnect:
+            Button {
+                startGrokSignIn()
+            } label: {
+                if isSigningInWithGrok {
+                    ProgressView()
+                } else {
+                    Label(language.settings.signInWithGrok, systemImage: "person.crop.circle.badge.plus")
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(isSigningInWithGrok || isSigningInWithChatGPT)
+        }
+    }
+
+    private func connectIntervals() {
+        isConnectingIntervals = true
+        intervalsOAuthError = nil
+        Task {
+            switch await IntervalsOAuthAction.connect(
+                store: intervalsConnection,
+                oauth: oauthService,
+                client: IntervalsICUClient()
+            ) {
+            case .connected:
+                UserDefaults.standard.set(true, forKey: WorkoutPushSettings.enabledKey)
+                step = .hub
+            case .cancelled:
+                break
+            case .failed(let message):
+                intervalsOAuthError = message
+            }
+            isConnectingIntervals = false
+        }
+    }
+
+    private func signInWithChatGPT() {
+        isSigningInWithChatGPT = true
+        chatGPTSignInError = nil
+        Task {
+            let outcome = await ChatGPTSignInAction.run()
+            isSigningInWithChatGPT = false
+            switch outcome {
+            case .connected:
+                step = .hub
+                if ChatGPTSignInAction.shouldShowPlanNotice() {
+                    showsChatGPTPlanNotice = true
+                }
+            case .cancelled:
+                break
+            case .failed(let message):
+                chatGPTSignInError = message
+            }
+        }
+    }
+
+    private func startGrokSignIn() {
+        isSigningInWithGrok = true
+        grokSignInError = nil
+        Task {
+            defer { isSigningInWithGrok = false }
+            do {
+                try await GrokTokenStore.shared.signIn { authorization in
+                    Task { @MainActor in
+                        openURL(authorization.verificationURL)
+                    }
+                }
+                UserDefaults.standard.set(CoachConnection.grok.rawValue, forKey: CoachConnection.storageKey)
+                grokState = GrokTokenStore.shared.state
+                step = .hub
+            } catch is CancellationError {
+                return
+            } catch let error as GrokOAuthError where error == .cancelled {
+                return
+            } catch {
+                grokSignInError = error.localizedDescription
+                grokState = GrokTokenStore.shared.state
+            }
+        }
     }
 
     private func permitRow(_ text: String, allowed: Bool) -> some View {
@@ -465,7 +696,7 @@ struct FirstRunFlowView: View {
                 if let title {
                     Text(title)
                 } else {
-                    ProgressView()
+                    ProgressView().tint(Theme.text)
                 }
             }
             .font(.system(size: 16, weight: .semibold))
@@ -504,6 +735,7 @@ struct FirstRunFlowView: View {
     }
 
     private func finish() {
+        OnboardingGate.openCalendarAfterCompletion()
         OnboardingGate.markCompleted()
         onFinished()
     }

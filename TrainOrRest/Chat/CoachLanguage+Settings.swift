@@ -400,6 +400,134 @@ struct SettingsCopy {
         }
     }
 
+    var advancedConnection: String {
+        switch language {
+        case .en: "Advanced: API key"
+        case .ja: "詳細: API キー"
+        case .vi: "Nâng cao: khóa API"
+        }
+    }
+
+    var apiKeyFallback: String {
+        switch language {
+        case .en: "Use an API key instead"
+        case .ja: "代わりに API キーを使用"
+        case .vi: "Dùng khóa API thay thế"
+        }
+    }
+
+    var connectWithIntervals: String {
+        switch language {
+        case .en: "Connect securely with intervals.icu"
+        case .ja: "intervals.icu で安全に接続"
+        case .vi: "Kết nối an toàn với intervals.icu"
+        }
+    }
+
+    var switchToSecureSignIn: String {
+        switch language {
+        case .en: "Use secure sign-in instead"
+        case .ja: "安全なサインインに切り替える"
+        case .vi: "Chuyển sang đăng nhập an toàn"
+        }
+    }
+
+    var oauthRecommended: String {
+        switch language {
+        case .en: "Recommended. Your API key stays on this device."
+        case .ja: "推奨。API キーはこのデバイスに残ります。"
+        case .vi: "Khuyên dùng. Khóa API của bạn vẫn nằm trên thiết bị này."
+        }
+    }
+
+    var oauthUnavailable: String {
+        switch language {
+        case .en: "Secure sign-in is not configured in this build. Use an API key."
+        case .ja: "このビルドでは安全なサインインが設定されていません。API キーを使用してください。"
+        case .vi: "Bản dựng này chưa cấu hình đăng nhập an toàn. Hãy dùng khóa API."
+        }
+    }
+
+    var oauthConnected: String {
+        switch language {
+        case .en: "Connected securely"
+        case .ja: "安全に接続済み"
+        case .vi: "Đã kết nối an toàn"
+        }
+    }
+
+    var apiKeyConnected: String {
+        switch language {
+        case .en: "Connected with API key"
+        case .ja: "API キーで接続済み"
+        case .vi: "Đã kết nối bằng khóa API"
+        }
+    }
+
+    var oauthPermissions: String {
+        switch language {
+        case .en: "Permissions: calendar write and activity read."
+        case .ja: "権限: カレンダーへの書き込みとアクティビティの読み取り。"
+        case .vi: "Quyền: ghi lịch và đọc hoạt động."
+        }
+    }
+
+    var oauthNeedsReconnect: String {
+        switch language {
+        case .en: "Secure connection needs reconnecting"
+        case .ja: "安全な接続を再接続してください"
+        case .vi: "Kết nối an toàn cần được kết nối lại"
+        }
+    }
+
+    var oauthNeedsReconnectDescription: String {
+        switch language {
+        case .en: "Sign in again before syncing workouts."
+        case .ja: "ワークアウトを同期する前に、もう一度サインインしてください。"
+        case .vi: "Đăng nhập lại trước khi đồng bộ buổi tập."
+        }
+    }
+
+    var reconnectIntervals: String {
+        switch language {
+        case .en: "Reconnect intervals.icu"
+        case .ja: "intervals.icu を再接続"
+        case .vi: "Kết nối lại intervals.icu"
+        }
+    }
+
+    var disconnect: String {
+        switch language {
+        case .en: "Disconnect"
+        case .ja: "接続を解除"
+        case .vi: "Ngắt kết nối"
+        }
+    }
+
+    var oauthConnectionFailed: String {
+        switch language {
+        case .en: "Could not connect intervals.icu"
+        case .ja: "intervals.icu に接続できませんでした"
+        case .vi: "Không thể kết nối intervals.icu"
+        }
+    }
+
+    var oauthValidationFailed: String {
+        switch language {
+        case .en: "The connection could not be verified. Try again."
+        case .ja: "接続を確認できませんでした。もう一度試してください。"
+        case .vi: "Không thể xác minh kết nối. Hãy thử lại."
+        }
+    }
+
+    var oauthCancelled: String {
+        switch language {
+        case .en: "Sign-in was cancelled."
+        case .ja: "サインインがキャンセルされました。"
+        case .vi: "Đăng nhập đã bị hủy."
+        }
+    }
+
     var connectIntervals: String {
         switch language {
         case .en: "Connect intervals.icu"

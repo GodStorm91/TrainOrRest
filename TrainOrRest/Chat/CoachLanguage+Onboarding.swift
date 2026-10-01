@@ -211,9 +211,9 @@ struct OnboardingCopy {
 
     var hubTitle: String {
         switch language {
-        case .en: "Today already has a session"
-        case .ja: "今日のセッションは準備済み"
-        case .vi: "Buổi tập hôm nay đã sẵn sàng"
+        case .en: "Connect what you use"
+        case .ja: "使うものを接続"
+        case .vi: "Kết nối những gì bạn dùng"
         }
     }
 

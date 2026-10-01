@@ -202,7 +202,7 @@ actor GrokTokenStore: GrokTokenProviding {
             return true
         case .http(_, let code):
             return ["invalid_grant", "invalid_refresh_token", "token_expired", "refresh_token_expired"].contains(code)
-        case .cancelled, .invalidResponse, .endpointRejected:
+        case .cancelled, .invalidResponse, .endpointRejected, .transport:
             return false
         }
     }

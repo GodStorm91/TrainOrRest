@@ -60,4 +60,19 @@ final class OnboardingGateTests: XCTestCase {
         OnboardingGate.adoptExistingInstallIfNeeded(healthAlreadyRequested: false, defaults: defaults)
         XCTAssertTrue(OnboardingGate.isCompleted(defaults))
     }
+
+    func testInitialTabPrecedence() {
+        OnboardingGate.openCalendarAfterCompletion(defaults)
+
+        XCTAssertEqual(
+            RootTabLaunchSelection.consume(defaults: defaults, debugRequestedTab: "profile"),
+            .profile
+        )
+        XCTAssertTrue(defaults.bool(forKey: OnboardingGate.openCalendarAfterCompletionKey))
+
+        XCTAssertEqual(RootTabLaunchSelection.consume(defaults: defaults), .calendar)
+        XCTAssertFalse(defaults.bool(forKey: OnboardingGate.openCalendarAfterCompletionKey))
+
+        XCTAssertEqual(RootTabLaunchSelection.consume(defaults: defaults), .chat)
+    }
 }

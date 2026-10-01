@@ -26,7 +26,7 @@ final class WorkoutPushService: ObservableObject {
     private let client: IntervalsICUServicing
     private let calendar: Calendar
     private let userDefaults: UserDefaults
-    private let keychainLoad: (String) throws -> String?
+    private let connectionStore: IntervalsConnectionStore
     private let debounceNanoseconds: UInt64
     private let now: () -> Date
     private let logger = Logger(subsystem: "com.khanhnguyen.TrainOrRest", category: "workout-push")
@@ -39,6 +39,7 @@ final class WorkoutPushService: ObservableObject {
         client: IntervalsICUServicing = IntervalsICUClient(),
         calendar: Calendar = .current,
         userDefaults: UserDefaults = .standard,
+        connectionStore: IntervalsConnectionStore? = nil,
         debounceNanoseconds: UInt64 = 1_000_000_000,
         now: @escaping () -> Date = Date.init,
         keychainLoad: @escaping (String) throws -> String? = { try KeychainStore.load(account: $0) }
@@ -47,9 +48,12 @@ final class WorkoutPushService: ObservableObject {
         self.client = client
         self.calendar = calendar
         self.userDefaults = userDefaults
+        self.connectionStore = connectionStore ?? IntervalsConnectionStore(
+            userDefaults: userDefaults,
+            loadSecret: keychainLoad
+        )
         self.debounceNanoseconds = debounceNanoseconds
         self.now = now
-        self.keychainLoad = keychainLoad
         lastPushAt = userDefaults.object(forKey: WorkoutPushSettings.lastPushAtKey) as? Date
         lastPushError = userDefaults.string(forKey: WorkoutPushSettings.lastPushErrorKey)
         lastDebugReport = userDefaults.string(forKey: WorkoutPushSettings.lastDebugReportKey)
@@ -105,32 +109,38 @@ final class WorkoutPushService: ObservableObject {
             )
             return
         }
-        let athleteID = userDefaults.string(forKey: WorkoutPushSettings.athleteIDKey)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !athleteID.isEmpty else {
+        connectionStore.reload()
+        let athleteID: String
+        let credentials: IntervalsICUCredentials
+        switch connectionStore.state {
+        case .connected(let connection):
+            athleteID = connection.athlete.id
+            credentials = connection.credentials
+        case .needsReconnect:
             recordSkip(
-                "Add intervals.icu Athlete ID in Profile first.",
+                "Reconnect intervals.icu in Profile first.",
                 debugReport: Self.debugReport(
                     title: "intervals.icu sync skipped",
                     lines: [
-                        "Reason: Missing Athlete ID.",
+                        "Reason: Connection needs reconnect.",
                         "Mode: \(forceRecreate ? "delete + recreate" : "upsert")",
                         "Window: \(dateQuery(start)) -> \(dateQuery(end))"
                     ]
                 )
             )
             return
-        }
-        guard let apiKey = try? keychainLoad(KeychainStore.intervalsICUAccount)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !apiKey.isEmpty else {
+        case .disconnected:
+            let athleteID = userDefaults.string(forKey: WorkoutPushSettings.athleteIDKey)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let reason = athleteID.isEmpty
+                ? "Add intervals.icu Athlete ID in Profile first."
+                : "Save intervals.icu API key in Profile first."
             recordSkip(
-                "Save intervals.icu API key in Profile first.",
+                reason,
                 debugReport: Self.debugReport(
                     title: "intervals.icu sync skipped",
                     lines: [
-                        "Reason: Missing API key.",
-                        "Athlete ID: \(maskedAthleteID(athleteID))",
+                        "Reason: \(reason)",
                         "Mode: \(forceRecreate ? "delete + recreate" : "upsert")",
                         "Window: \(dateQuery(start)) -> \(dateQuery(end))"
                     ]
@@ -141,7 +151,6 @@ final class WorkoutPushService: ObservableObject {
 
         do {
             let localEvents = try desiredEvents(today: today)
-            let credentials = IntervalsICUCredentials(athleteID: athleteID, apiKey: apiKey)
             let remoteEvents = try await client.events(
                 credentials: credentials,
                 oldest: dateQuery(start),
@@ -169,6 +178,9 @@ final class WorkoutPushService: ObservableObject {
             ))
             logger.info("Workout push reconciled: upsert \(plan.toUpsert.count), delete \(plan.toDelete.count)")
         } catch {
+            if error as? IntervalsICUError == .unauthorized {
+                connectionStore.markNeedsReconnectIfOAuth()
+            }
             let message = recordFailure(
                 error,
                 debugReport: Self.debugReport(

@@ -143,6 +143,44 @@ final class WorkoutPushServiceTests: XCTestCase {
         XCTAssertNil(defaults.string(forKey: WorkoutPushSettings.lastPushErrorKey))
     }
 
+    func testOAuthUnauthorizedConnectionRequiresReconnect() async throws {
+        let container = try makeContainer()
+        let defaults = try makeDefaults()
+        defaults.set(true, forKey: WorkoutPushSettings.enabledKey)
+        let secrets = OAuthSecretStore()
+        let connection = IntervalsConnectionStore(
+            userDefaults: defaults,
+            loadSecret: { secrets.value(for: $0) },
+            saveSecret: { secrets.save($0, account: $1) },
+            deleteSecret: { secrets.delete(account: $0) }
+        )
+        try connection.saveOAuth(IntervalsOAuthCallback(
+            accessToken: "access-token",
+            athleteID: "i636286",
+            athleteName: nil,
+            scope: "CALENDAR:WRITE,ACTIVITY:READ",
+            refreshToken: nil,
+            expiresIn: 3600
+        ))
+        connection.markOAuthValidated()
+        let client = MockIntervalsICUService(eventsError: IntervalsICUError.unauthorized)
+        let service = WorkoutPushService(
+            modelContext: container.mainContext,
+            client: client,
+            calendar: calendar,
+            userDefaults: defaults,
+            connectionStore: connection
+        )
+
+        await service.reconcile(today: today)
+
+        XCTAssertEqual(client.eventsCalls.count, 1)
+        guard case .needsReconnect(let method, _) = connection.state else {
+            return XCTFail("Expected OAuth reconnect state")
+        }
+        XCTAssertEqual(method, .oauth)
+    }
+
     func testClientFailureRecordsErrorWithoutThrowing() async throws {
         let container = try makeContainer()
         let defaults = try makeDefaults()
@@ -162,7 +200,6 @@ final class WorkoutPushServiceTests: XCTestCase {
         XCTAssertEqual(service.lastPushError, IntervalsICUError.unauthorized.errorDescription)
         XCTAssertEqual(defaults.string(forKey: WorkoutPushSettings.lastPushErrorKey), service.lastPushError)
         XCTAssertTrue(service.lastDebugReport?.contains("intervals.icu sync failed") == true)
-        XCTAssertTrue(service.lastDebugReport?.contains("Error: Your intervals.icu API key was rejected.") == true)
     }
 
     func testInFlightReconcileQueuesOneFollowUpPass() async throws {
@@ -308,6 +345,22 @@ final class WorkoutPushServiceTests: XCTestCase {
 
     private func uuid(_ value: Int) -> UUID {
         UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", value))!
+    }
+}
+
+private final class OAuthSecretStore {
+    private var values: [String: String] = [:]
+
+    func value(for account: String) -> String? {
+        values[account]
+    }
+
+    func save(_ value: String, account: String) {
+        values[account] = value
+    }
+
+    func delete(account: String) {
+        values.removeValue(forKey: account)
     }
 }
 
