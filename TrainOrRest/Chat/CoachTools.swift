@@ -21,7 +21,7 @@ struct PlanAdjustmentProposal: Codable, Equatable {
         init(date: String, action: Action, detail: String? = nil, workout: CreateWorkout? = nil) {
             self.date = date
             self.action = action
-            self.detail = detail
+            self.detail = (action == .move || action == .swap) ? detail : nil
             self.workout = workout
         }
 
@@ -30,6 +30,10 @@ struct PlanAdjustmentProposal: Codable, Equatable {
             date = try container.decode(String.self, forKey: .date)
             action = try container.decode(Action.self, forKey: .action)
             detail = try container.decodeIfPresent(String.self, forKey: .detail)
+            // Only move and swap read detail; every other action takes its day
+            // from date. Models routinely echo the workout day into detail, so
+            // ignore it there instead of failing a well formed edit.
+            if action != .move, action != .swap { detail = nil }
             var workoutDecodeError: Error?
             do {
                 workout = try container.decodeIfPresent(CreateWorkout.self, forKey: .workout)
@@ -146,7 +150,7 @@ enum PlanProposalSchema {
                 ]),
                 "detail": .object([
                     "type": .string("string"),
-                    "description": .string("Target date as YYYY-MM-DD; required for swap and move, forbidden otherwise. For move, this is the destination day, not another existing workout, and it may be a rest/unavailable day.")
+                    "description": .string("Target date as YYYY-MM-DD; required for swap and move, ignored for every other action. For move, this is the destination day, not another existing workout, and it may be a rest/unavailable day.")
                 ]),
                 "workout": workoutSchema
             ]),

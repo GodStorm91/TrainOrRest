@@ -111,6 +111,30 @@ final class CoachToolContractTests: XCTestCase {
         XCTAssertEqual(workout.blocks[0].steps[1].paceZone, "threshold")
     }
 
+    /// Models routinely echo the workout day into `detail` on create and
+    /// replace. Only move and swap read that field, so it is dropped rather
+    /// than failing the edit.
+    func testStrayDetailIsDroppedExceptForMoveAndSwap() throws {
+        func change(_ action: String) throws -> PlanAdjustmentProposal.Change {
+            let json = """
+            {"changes":[{"date":"2026-07-11","action":"\(action)","detail":"2026-07-11","workout":{"kind":"easy","blocks":[{"repeat_count":1,"steps":[{"role":"work","target_type":"distance_km","target_value":5,"pace_zone":"easy"}]}]}}]}
+            """.data(using: .utf8)!
+            return try XCTUnwrap(JSONDecoder().decode(PlanAdjustmentProposal.self, from: json).changes.first)
+        }
+
+        for action in ["create", "replace"] {
+            let decoded = try change(action)
+            XCTAssertNil(decoded.detail, "\(action) must ignore a stray detail date")
+            XCTAssertNotNil(decoded.workout, "\(action) must keep its workout payload")
+        }
+
+        let moveJSON = """
+        {"changes":[{"date":"2026-07-11","action":"move","detail":"2026-07-12"}]}
+        """.data(using: .utf8)!
+        let move = try XCTUnwrap(JSONDecoder().decode(PlanAdjustmentProposal.self, from: moveJSON).changes.first)
+        XCTAssertEqual(move.detail, "2026-07-12", "move still carries its target day")
+    }
+
 
     func testFlattenedCreatePayloadDecodesFromWorkoutStringAndBlocks() throws {
         let json = """

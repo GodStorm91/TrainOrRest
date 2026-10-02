@@ -157,6 +157,25 @@ final class CoachCreateWorkoutTests: XCTestCase {
         }
     }
 
+    /// Models echo the workout day into both date and detail when the user
+    /// asks for a session on a named day. The workout must land on date
+    /// instead of the whole edit being rejected.
+    func testCreateAppliesWhenTheModelEchoesTheDayIntoDetail() throws {
+        let container = try seededContainer()
+        let context = container.mainContext
+        let day = CoachContextBuilder.day(freeDay, calendar: calendar)
+        let json = """
+        {"changes":[{"date":"\(day)","action":"create","detail":"\(day)","workout":{"kind":"easy","blocks":[{"repeat_count":1,"steps":[{"role":"work","target_type":"distance_km","target_value":5,"pace_zone":"easy"}]}]}}]}
+        """.data(using: .utf8)!
+        let proposal = try JSONDecoder().decode(PlanAdjustmentProposal.self, from: json)
+
+        _ = try CoachTools.apply(proposal: proposal, in: context, today: today, calendar: calendar)
+
+        let created = try XCTUnwrap(workout(on: freeDay, in: context))
+        XCTAssertEqual(created.kind, .easy)
+        XCTAssertEqual(created.distanceKm, 5, accuracy: 0.001)
+    }
+
     // MARK: - Rejection matrix (nothing is ever written)
 
     func testRejectionsWriteNothing() throws {
@@ -172,8 +191,12 @@ final class CoachCreateWorkoutTests: XCTestCase {
             ("race kind", [change(.raw(kind: "race"), on: freeDay)]),
             ("both targets on one step", [change(.malformedStep, on: freeDay)]),
             ("unknown pace zone", [change(.raw(kind: "easy", zone: "sprint"), on: freeDay)]),
-            ("create carries a detail date", [.init(date: "2026-01-09", action: .create, detail: "2026-01-10", workout: CreatePayload.easy(km: 5).workout)]),
             ("create without a workout", [.init(date: "2026-01-09", action: .create, detail: nil, workout: nil)]),
+            ("downgrade carrying a workout", [.init(
+                date: CoachContextBuilder.day(occupiedDay, calendar: calendar),
+                action: .downgrade,
+                workout: CreatePayload.easy(km: 5).workout
+            )]),
             ("excessive distance", [change(.easy(km: 500), on: freeDay)]),
             ("weekly volume over cap", [change(.easy(km: 12), on: freeDay)])
         ]
