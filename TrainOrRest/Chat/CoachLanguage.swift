@@ -346,7 +346,23 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         }
     }
 
-    func processingLabel(for stage: CoachProcessingStage?) -> String {
+    /// `round` is the provider round behind the current stage. Rounds after the first
+    /// are invisible retries today, so the label says which attempt the user is waiting on.
+    func processingLabel(for stage: CoachProcessingStage?, round: Int = 1) -> String {
+        let base = processingStageLabel(for: stage)
+        guard round > 1 else { return base }
+        return "\(base) \(retryRoundSuffix(round: round))"
+    }
+
+    func retryRoundSuffix(round: Int) -> String {
+        switch self {
+        case .en: return "(attempt \(round) of \(CoachChatConfig.maxToolRounds))"
+        case .ja: return "(\(round)/\(CoachChatConfig.maxToolRounds) 回目)"
+        case .vi: return "(lượt \(round)/\(CoachChatConfig.maxToolRounds))"
+        }
+    }
+
+    private func processingStageLabel(for stage: CoachProcessingStage?) -> String {
         guard let stage else { return genericProcessingLabel }
         switch (self, stage) {
         case (.en, .preparingContext): return "Preparing data..."

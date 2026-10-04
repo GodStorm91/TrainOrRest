@@ -23,7 +23,9 @@ enum CoachProcessingStage: String, Codable, Equatable {
 enum CoachGenerationState: Equatable {
     case idle
     case sending(messageId: UUID)
-    case processing(messageId: UUID, stage: CoachProcessingStage?)
+    /// `round` is the provider round this stage belongs to, 1 based. A turn can
+    /// burn up to `CoachChatConfig.maxToolRounds` rounds behind one visible answer.
+    case processing(messageId: UUID, stage: CoachProcessingStage?, round: Int)
     case streaming(messageId: UUID)
     case awaitingChoice(messageId: UUID, interactionId: String)
     case completed(messageId: UUID)
@@ -34,7 +36,7 @@ enum CoachGenerationState: Equatable {
         switch self {
         case .idle:
             return nil
-        case .sending(let id), .processing(let id, _), .streaming(let id), .awaitingChoice(let id, _), .completed(let id), .failed(let id, _), .cancelled(let id):
+        case .sending(let id), .processing(let id, _, _), .streaming(let id), .awaitingChoice(let id, _), .completed(let id), .failed(let id, _), .cancelled(let id):
             return id
         }
     }
@@ -225,6 +227,7 @@ final class CoachRequestSnapshot {
     var displayText: String?
     var contextSnapshotId: String?
     var contextItemsJSON: String?
+    var requiresStructuredCardStorage: Bool?
 
     init(
         id: UUID = UUID(),
@@ -246,7 +249,8 @@ final class CoachRequestSnapshot {
         expectedResponseInteraction: CoachResponseInteraction? = nil,
         displayText: String? = nil,
         contextSnapshotId: String? = nil,
-        contextItems: [CoachContextItem] = []
+        contextItems: [CoachContextItem] = [],
+        requiresStructuredCard: Bool = false
     ) {
         self.id = id
         self.userTurnID = userTurnID
@@ -269,6 +273,7 @@ final class CoachRequestSnapshot {
         self.displayText = displayText
         self.contextSnapshotId = contextSnapshotId
         self.contextItemsJSON = Self.encode(contextItems)
+        self.requiresStructuredCardStorage = requiresStructuredCard
     }
 
     var actionType: CoachRequestActionType {
@@ -286,6 +291,15 @@ final class CoachRequestSnapshot {
     var isCustomInteractionResponse: Bool {
         get { isCustomInteractionResponseStorage ?? false }
         set { isCustomInteractionResponseStorage = newValue }
+    }
+
+    /// True when the surface that opened this turn needs a titled, scannable card rather
+    /// than a conversational reply. Composer questions do not; the calendar run review and
+    /// the goal assessment sheet do. Rows written before this property existed fall back to
+    /// the key the gate used then, which was the action type itself.
+    var requiresStructuredCard: Bool {
+        get { requiresStructuredCardStorage ?? (actionType == .readOnly) }
+        set { requiresStructuredCardStorage = newValue }
     }
 
     var expectedResponseInteraction: CoachResponseInteraction? {

@@ -2794,7 +2794,7 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertTrue(client.requests.isEmpty, "an attached type change is staged locally, so it never reaches the model")
     }
 
-    func testTypeQuestionWithPlannedWorkoutAttachmentStaysUnspecified() async throws {
+    func testTypeQuestionWithPlannedWorkoutAttachmentClassifiesAsReadOnly() async throws {
         let container = try makeContainer()
         let context = container.mainContext
         try seedTrainingData(in: context)
@@ -2812,10 +2812,10 @@ final class ChatFeatureTests: XCTestCase {
         in: context)
 
         let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
-        XCTAssertEqual(snapshot.actionType, .unspecified)
+        XCTAssertEqual(snapshot.actionType, .readOnly, "a question about an attached workout answers, it does not edit the plan")
     }
 
-    func testAdviceQuestionClassifiesAsUnspecified() async throws {
+    func testAdviceQuestionClassifiesAsReadOnly() async throws {
         let container = try makeContainer()
         let context = container.mainContext
         try seedTrainingData(in: context)
@@ -2830,7 +2830,7 @@ final class ChatFeatureTests: XCTestCase {
         in: context)
 
         let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
-        XCTAssertEqual(snapshot.actionType, .unspecified)
+        XCTAssertEqual(snapshot.actionType, .readOnly)
     }
 
     func testJapaneseCreateRequestClassifiesAsUnspecified() async throws {
@@ -2879,7 +2879,7 @@ final class ChatFeatureTests: XCTestCase {
         in: context)
 
         let snapshot = try XCTUnwrap(try context.fetch(FetchDescriptor<CoachRequestSnapshot>()).first)
-        XCTAssertEqual(snapshot.actionType, .unspecified)
+        XCTAssertEqual(snapshot.actionType, .readOnly)
 
         let assistant = try XCTUnwrap(try context.fetch(FetchDescriptor<ChatMessage>(sortBy: [SortDescriptor(\.date)])).last)
         XCTAssertNotEqual(assistant.assistantStatus, .failed)

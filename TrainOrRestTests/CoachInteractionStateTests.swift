@@ -100,7 +100,7 @@ final class CoachInteractionStateTests: XCTestCase {
         XCTAssertEqual(assistant.interaction?.options.map(\.id), ["keep_plan", "adjust_plan"])
     }
 
-    func testAmbiguousCoachRequestExposesBothToolsWithAnyChoice() async throws {
+    func testReviewRequestShipsOnlyTheAnswerTool() async throws {
         let container = try makeContainer()
         let context = container.mainContext
         try seedMinimalTrainingData(in: context)
@@ -110,8 +110,8 @@ final class CoachInteractionStateTests: XCTestCase {
         await store.submitTestTurn(text: "Review this run.", model: "claude-test", apiKey: "test-key", threadID: conversationID, in: context)
 
         let request = try XCTUnwrap(client.requests.last)
-        XCTAssertEqual(request.tools.map(\.name), [CoachToolCatalog.coachResponseName, CoachToolCatalog.planEditDraftName])
-        XCTAssertEqual(request.toolChoice, .any)
+        XCTAssertEqual(request.tools.map(\.name), [CoachToolCatalog.coachResponseName])
+        XCTAssertEqual(request.toolChoice, .tool(name: CoachToolCatalog.coachResponseName))
     }
 
     func testActionTypeOverridePreventsRecommendationPromptFromBecomingPlanMutation() async throws {
@@ -386,7 +386,7 @@ final class CoachInteractionStateTests: XCTestCase {
     func testCoachPetStateFollowsGenerationState() {
         let messageId = UUID()
 
-        XCTAssertEqual(CoachPetBehavior.state(for: .processing(messageId: messageId, stage: .buildingRecommendation)), .buildingRecommendation)
+        XCTAssertEqual(CoachPetBehavior.state(for: .processing(messageId: messageId, stage: .buildingRecommendation, round: 1)), .buildingRecommendation)
         XCTAssertEqual(CoachPetBehavior.state(for: .streaming(messageId: messageId)), .streaming)
         XCTAssertEqual(CoachPetBehavior.state(for: .completed(messageId: messageId)), .success)
         XCTAssertEqual(CoachPetBehavior.state(for: .failed(messageId: messageId, error: .offline)), .error)
