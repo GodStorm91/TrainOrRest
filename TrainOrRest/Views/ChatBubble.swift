@@ -19,6 +19,18 @@ struct CoachAvatar: View {
     }
 }
 
+/// Keeps the coach avatar level with the bubble it belongs to, so metadata rows
+/// added underneath the bubble do not drag the avatar down with them.
+private enum BubbleBottomAlignment: AlignmentID {
+    static func defaultValue(in context: ViewDimensions) -> CGFloat {
+        context[.bottom]
+    }
+}
+
+extension VerticalAlignment {
+    static let bubbleBottom = VerticalAlignment(BubbleBottomAlignment.self)
+}
+
 struct ChatBubble: View {
     let message: ChatMessage
     var hidesSources: Bool = false
@@ -54,11 +66,12 @@ struct ChatBubble: View {
     }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 9) {
+        HStack(alignment: .bubbleBottom, spacing: 9) {
             if isUser {
                 Spacer(minLength: 40)
             } else if showsAvatar && !showsProcessingState {
                 CoachAvatar(size: 26)
+                    .alignmentGuide(.bubbleBottom) { $0[.bottom] }
                     .accessibilityHidden(true)
             } else {
                 Color.clear.frame(width: 26, height: 26)
@@ -89,6 +102,7 @@ struct ChatBubble: View {
                     .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in
                         min(width * 0.8, 560)
                     }
+                    .alignmentGuide(.bubbleBottom) { $0[.bottom] }
                 } else if isUser || hasVisibleAssistantText {
                     messageBody
                         .padding(.horizontal, 14)
@@ -99,6 +113,7 @@ struct ChatBubble: View {
                         .containerRelativeFrame(.horizontal, alignment: isUser ? .trailing : .leading) { width, _ in
                             min(width * 0.8, 560)
                         }
+                        .alignmentGuide(.bubbleBottom) { $0[.bottom] }
                 }
 
                 if isUser, !message.contextItems.isEmpty {
@@ -158,6 +173,15 @@ struct ChatBubble: View {
                 if showsSource, !hidesSources, !isUser, message.assistantStatus == .completed, let footnote = message.groundingFootnote, let summary = message.groundingSummary {
                     groundingFootnote(footnote, summary: summary)
                         .padding(.top, 2)
+                }
+
+                if let timing = Self.responseTimingText(for: message, language: language) {
+                    Text(timing.label)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(Theme.faint)
+                        .monospacedDigit()
+                        .padding(.top, 2)
+                        .accessibilityLabel(timing.accessibilityLabel)
                 }
             }
 
@@ -245,6 +269,26 @@ struct ChatBubble: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(language.viewSourcesLabel)
+    }
+
+    struct ResponseTiming {
+        let label: String
+        let accessibilityLabel: String
+    }
+
+    /// Clock time the reply landed plus how long the user waited for it.
+    /// Assistant turns only, and only once the turn has actually finished.
+    static func responseTimingText(for message: ChatMessage, language: CoachLanguage) -> ResponseTiming? {
+        guard message.role == .assistant,
+              message.assistantStatus == .completed,
+              let completedAt = message.completedAt,
+              let duration = message.generationDuration else { return nil }
+        let time = completedAt.formatted(.dateTime.hour().minute().locale(language.uiLocale))
+        let elapsed = language.coachResponseDurationLabel(seconds: duration)
+        return ResponseTiming(
+            label: "\(time) · \(elapsed)",
+            accessibilityLabel: language.coachResponseTimingAccessibilityLabel(time: time, duration: elapsed)
+        )
     }
 
     private func sourceLine(for footnote: String?) -> String {
