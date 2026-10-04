@@ -86,6 +86,8 @@ final class ChatMessage {
     var interactionJSON: String?
     var contextItemsJSON: String?
     var structuredResponseJSON: String? = nil
+    var completedAt: Date? = nil
+    var generationStartedAt: Date? = nil
 
     init(
         uuid: UUID = UUID(),
@@ -165,6 +167,25 @@ final class ChatMessage {
     var isIncomplete: Bool {
         get { isIncompleteStorage ?? false }
         set { isIncompleteStorage = newValue }
+    }
+
+    /// Seconds the user waited for this reply. Measured from the start of the
+    /// attempt that produced it, so a retry reports its own wait rather than
+    /// the idle gap since the original send. Nil for turns saved before the
+    /// field existed, and for turns that never finished.
+    var generationDuration: TimeInterval? {
+        guard let completedAt else { return nil }
+        let elapsed = completedAt.timeIntervalSince(generationStartedAt ?? date)
+        return elapsed >= 0 ? elapsed : nil
+    }
+
+    func markCompleted(at completionDate: Date) {
+        assistantStatus = .completed
+        isIncomplete = false
+        errorCategory = nil
+        errorMessage = nil
+        activeAttemptID = nil
+        completedAt = completionDate
     }
 
     var followUpsConsumed: Bool {

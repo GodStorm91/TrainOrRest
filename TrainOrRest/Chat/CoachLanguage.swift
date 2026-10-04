@@ -1199,6 +1199,17 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
     func coachUpdatedAtLabel(_ time: String) -> String {
         self == .vi ? "Cập nhật \(time)" : self == .ja ? "\(time) 更新" : "Updated \(time)"
     }
+    func coachResponseDurationLabel(seconds: TimeInterval) -> String {
+        let clamped = max(0.1, seconds)
+        let digits = clamped < 60 ? 1 : 0
+        let amount = clamped.formatted(.number.precision(.fractionLength(digits)).locale(uiLocale))
+        return self == .vi ? "\(amount) giây" : self == .ja ? "\(amount)秒" : "\(amount)s"
+    }
+    func coachResponseTimingAccessibilityLabel(time: String, duration: String) -> String {
+        self == .vi
+            ? "Trả lời lúc \(time), mất \(duration)"
+            : self == .ja ? "\(time) に回答、所要 \(duration)" : "Answered at \(time), took \(duration)"
+    }
     var coachViewSourcesHint: String {
         self == .vi ? "Xem chi tiết nguồn dữ liệu" : self == .ja ? "データソースの詳細を見る" : "View data source details"
     }

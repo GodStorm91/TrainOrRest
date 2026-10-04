@@ -363,11 +363,7 @@ final class CoachChatStore: ObservableObject {
             } else {
                 assistantTurn.text = Self.userFacingPlanToolRejection(technicalErrorMessage(error), language: CoachLanguage(rawValue: snapshot.locale) ?? .current)
             }
-            assistantTurn.assistantStatus = .completed
-            assistantTurn.isIncomplete = false
-            assistantTurn.errorCategory = nil
-            assistantTurn.errorMessage = nil
-            assistantTurn.activeAttemptID = nil
+            assistantTurn.markCompleted(at: Date())
             try? context.save()
             isSending = false
             return true
@@ -431,11 +427,7 @@ final class CoachChatStore: ObservableObject {
         )
         assistantTurn.text = response.summary
         assistantTurn.structuredResponse = response
-        assistantTurn.assistantStatus = .completed
-        assistantTurn.isIncomplete = false
-        assistantTurn.errorCategory = nil
-        assistantTurn.errorMessage = nil
-        assistantTurn.activeAttemptID = nil
+        assistantTurn.markCompleted(at: Date())
         generationState = .completed(messageId: assistantTurn.turnID)
         try? context.save()
         return true
@@ -493,11 +485,7 @@ final class CoachChatStore: ObservableObject {
         assistantTurn.text = wantsKindChange
             ? language.preparedReplacementMessage
             : language.contextualDistancePreparedThisWorkout
-        assistantTurn.assistantStatus = .completed
-        assistantTurn.isIncomplete = false
-        assistantTurn.errorCategory = nil
-        assistantTurn.errorMessage = nil
-        assistantTurn.activeAttemptID = nil
+        assistantTurn.markCompleted(at: Date())
         stagePlanCandidate(candidate)
         try context.save()
         return true
@@ -546,11 +534,7 @@ final class CoachChatStore: ObservableObject {
         )
 
         assistantTurn.text = (CoachLanguage(rawValue: snapshot.locale) ?? .current).contextualDistancePrepared(dayLabel: Self.dayLabel(for: day, relativeTo: snapshot.createdAt, calendar: calendar))
-        assistantTurn.assistantStatus = .completed
-        assistantTurn.isIncomplete = false
-        assistantTurn.errorCategory = nil
-        assistantTurn.errorMessage = nil
-        assistantTurn.activeAttemptID = nil
+        assistantTurn.markCompleted(at: Date())
         stagePlanCandidate(candidate)
         try context.save()
         return true
@@ -572,6 +556,7 @@ final class CoachChatStore: ObservableObject {
 
         isRetrying = true
         isSending = true
+        assistantTurn.generationStartedAt = Date()
         await executeAttempt(
             assistantTurn,
             snapshot: snapshot,
@@ -744,11 +729,7 @@ final class CoachChatStore: ObservableObject {
                 )
             }
             guard assistantTurn.activeAttemptID == attemptID else { return }
-            assistantTurn.assistantStatus = .completed
-            assistantTurn.isIncomplete = false
-            assistantTurn.errorCategory = nil
-            assistantTurn.errorMessage = nil
-            assistantTurn.activeAttemptID = nil
+            assistantTurn.markCompleted(at: Date())
             lastError = nil
             try context.save()
         } catch {
