@@ -46,9 +46,9 @@
     }
   ],
   "expect": {
-    "actionType": "unspecified",
-    "toolNames": ["coach_response", "propose_plan_adjustment"],
-    "toolChoice": { "type": "any" },
+    "actionType": "readOnly",
+    "toolNames": ["coach_response"],
+    "toolChoice": { "type": "tool", "name": "coach_response" },
     "replyAnchors": ["Train tomorrow", "Readiness is train"],
     "forbiddenRestatePhrases": [
       "I don't have your plan",

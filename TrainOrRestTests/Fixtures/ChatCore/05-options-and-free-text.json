@@ -59,9 +59,9 @@
     }
   ],
   "expect": {
-    "actionType": "unspecified",
-    "toolNames": ["coach_response", "propose_plan_adjustment"],
-    "toolChoice": { "type": "any" },
+    "actionType": "readOnly",
+    "toolNames": ["coach_response"],
+    "toolChoice": { "type": "tool", "name": "coach_response" },
     "interactionID": "missed_run_recovery",
     "optionIDs": ["easy_tomorrow", "rest_today", "shift_long_run"],
     "allowOther": true,

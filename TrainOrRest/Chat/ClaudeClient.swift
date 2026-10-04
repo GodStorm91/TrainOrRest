@@ -48,6 +48,21 @@ enum CoachChatConfig {
     /// Too low and the model stops mid-`tool_use`, truncating the reply and
     /// surfacing a spurious failure on plan-adjustment turns.
     static let maxOutputTokens = 16_384
+    /// A question answer is one `coach_response` card, measured under 1,000 tokens even in
+    /// Vietnamese. The plan-edit headroom above costs minutes of worst case generation that
+    /// this path can never use. Hitting the ceiling throws `CoachResponseError.truncated`
+    /// and fails the turn, so this leaves roughly eight times the measured card rather than
+    /// trimming to the tightest number a card has needed.
+    static let readOnlyMaxOutputTokens = 8_192
+
+    static func maxOutputTokens(for actionType: CoachRequestActionType) -> Int {
+        switch actionType {
+        case .readOnly:
+            return readOnlyMaxOutputTokens
+        case .planMutation, .unspecified:
+            return maxOutputTokens
+        }
+    }
 }
 
 enum ClaudeClientError: LocalizedError, Equatable {

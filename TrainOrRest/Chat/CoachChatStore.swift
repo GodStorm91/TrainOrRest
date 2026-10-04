@@ -313,7 +313,8 @@ final class CoachChatStore: ObservableObject {
             expectedResponseInteraction: expectedResponseInteraction,
             displayText: visibleText.isEmpty ? trimmed : visibleText,
             contextSnapshotId: contextSnapshotId,
-            contextItems: contextItems
+            contextItems: contextItems,
+            requiresStructuredCard: actionTypeOverride == .readOnly
         )
         context.insert(snapshot)
         let assistantTurn = ChatMessage(
@@ -728,18 +729,20 @@ final class CoachChatStore: ObservableObject {
         assistantTurn.errorMessage = nil
         assistantTurn.errorDetail = nil
         assistantTurn.interaction = nil
-        generationState = .processing(messageId: assistantTurn.turnID, stage: .preparingContext)
+        generationState = .processing(messageId: assistantTurn.turnID, stage: .preparingContext, round: 1)
         try? context.save()
 
         do {
-            try await runLoop(
-                access: access,
-                model: model,
-                snapshot: snapshot,
-                assistantTurn: assistantTurn,
-                attemptID: attemptID,
-                in: context
-            )
+            try await CoachSignpost.measure(CoachSignpost.Name.turn, "intent=\(snapshot.actionType.rawValue)") {
+                try await runLoop(
+                    access: access,
+                    model: model,
+                    snapshot: snapshot,
+                    assistantTurn: assistantTurn,
+                    attemptID: attemptID,
+                    in: context
+                )
+            }
             guard assistantTurn.activeAttemptID == attemptID else { return }
             assistantTurn.assistantStatus = .completed
             assistantTurn.isIncomplete = false
@@ -764,8 +767,10 @@ final class CoachChatStore: ObservableObject {
     ) async throws {
         let today = snapshot.createdAt
         let language = CoachLanguage(rawValue: snapshot.locale) ?? .current
-        generationState = .processing(messageId: assistantTurn.turnID, stage: .preparingContext)
-        var system = try CoachContextBuilder.build(in: context, today: today, calendar: calendar)
+        generationState = .processing(messageId: assistantTurn.turnID, stage: .preparingContext, round: 1)
+        var system = try CoachSignpost.measureSync(CoachSignpost.Name.contextBuild) {
+            try CoachContextBuilder.build(in: context, today: today, calendar: calendar)
+        }
         let directive = language.systemPromptDirective
         if !directive.isEmpty {
             system += "\n\n\(directive)"
@@ -776,13 +781,19 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
 """
         let attachments = try attachments(from: snapshot, in: context)
         if !attachments.isEmpty {
-            generationState = .processing(messageId: assistantTurn.turnID, stage: progressStage(for: attachments, snapshot: snapshot))
+            generationState = .processing(
+                messageId: assistantTurn.turnID,
+                stage: progressStage(for: attachments, snapshot: snapshot),
+                round: 1
+            )
         }
-        var conversation = try messageHistory(
-            threadID: snapshot.threadID,
-            boundaryMessageID: snapshot.contextBoundaryMessageID,
-            in: context
-        )
+        var conversation = try CoachSignpost.measureSync(CoachSignpost.Name.historyFetch) {
+            try messageHistory(
+                threadID: snapshot.threadID,
+                boundaryMessageID: snapshot.contextBoundaryMessageID,
+                in: context
+            )
+        }
         if !attachments.isEmpty, var last = conversation.last, last.role == "user" {
             last.content = CoachAttachmentContextBuilder.content(
                 text: snapshot.messageText,
@@ -805,9 +816,17 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         let shouldPublishStreamingText = snapshot.actionType != .planMutation
 
         for round in 0..<CoachChatConfig.maxToolRounds {
+            let roundStarted = DispatchTime.now().uptimeNanoseconds
+            let roundState = CoachSignpost.signposter.beginInterval(
+                CoachSignpost.Name.round,
+                id: CoachSignpost.signposter.makeSignpostID()
+            )
+            defer { CoachSignpost.signposter.endInterval(CoachSignpost.Name.round, roundState) }
             let tools = tools(for: snapshot.actionType)
+            let maxTokens = CoachChatConfig.maxOutputTokens(for: snapshot.actionType)
             let request = ClaudeRequest(
                 model: model,
+                maxTokens: maxTokens,
                 system: system,
                 tools: tools,
                 toolChoice: toolChoice(for: snapshot.actionType),
@@ -815,7 +834,11 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             )
             let client = client(for: access.connection)
             if assistantTurn.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                generationState = .processing(messageId: assistantTurn.turnID, stage: .buildingRecommendation)
+                generationState = .processing(
+                    messageId: assistantTurn.turnID,
+                    stage: .buildingRecommendation,
+                    round: round + 1
+                )
             }
             let events = try await ChatGPTDiagnostics.$label.withValue("chat round \(round + 1)") {
                 try await client.stream(request, credential: access.credential)
@@ -844,6 +867,15 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             )
             let assembled = try await assembler.assemble(events)
             let response = assembled.response
+
+            CoachSignpost.roundFinished(
+                index: round + 1,
+                actionType: snapshot.actionType,
+                tools: tools.map(\.name),
+                maxTokens: maxTokens,
+                stopReason: response.stopReason,
+                seconds: Double(DispatchTime.now().uptimeNanoseconds - roundStarted) / 1_000_000_000
+            )
             if assembled.truncated || response.stopReason == "max_tokens" {
                 throw CoachResponseError.truncated
             }
@@ -905,7 +937,9 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
                 }
                 var payload = try toolUses[0].2.decoded(CoachStructuredResponsePayload.self)
                 payload.normalizeModelText()
-                if snapshot.actionType == .readOnly,
+                // Only surfaces that asked for a review card pay for another round when the
+                // card has no title or summary. A conversational answer renders as written.
+                if snapshot.requiresStructuredCard,
                    payload.validatedStructuredResponse(additionalRecommendationsTitle: language.additionalRecommendationsTitle) == nil {
                     let reason = "coach_response requires non-empty title and summary."
                     lastToolRejection = reason
@@ -1172,8 +1206,47 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         if Self.isAttachedTypeChange(lower, attachments: attachments) {
             return .planMutation
         }
+        if Self.isReviewRequest(lower), !Self.mentionsPlanEdit(lower) {
+            return .readOnly
+        }
 
         return .unspecified
+    }
+
+    /// A question costs one `coach_response` card. Leaving it `.unspecified` ships the
+    /// plan-edit schema with `tool_choice = any`, so the model can pick the edit tool,
+    /// get rejected, and spend another full generation on the same answer.
+    private static func isReviewRequest(_ lower: String) -> Bool {
+        let reviewNeedles = [
+            "?", "how ", "what ", "why ", "should i", "is it", "can i", "do i need",
+            "review", "analyze", "analyse", "compare", "explain", "assess", "feedback",
+            "có nên", "tại sao", "vì sao", "thế nào", "như thế nào", "bao nhiêu",
+            "nhận xét", "đánh giá", "phân tích", "so sánh", "giải thích", "nên tập",
+            "có ổn", "có tốt", "ra sao", "hôm nay tập gì", "cảm thấy"
+        ]
+            .map {
+                $0.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "vi_VN"))
+                    .lowercased()
+            }
+        return reviewNeedles.contains(where: { lower.contains($0) })
+    }
+
+    /// "Can you move my long run to Sunday?" is an edit wearing a question mark. It misses
+    /// the mutation needles because it names no apply verb, so it would otherwise reach
+    /// `.readOnly`, where the plan tool is withheld and the edit silently becomes prose.
+    /// Leaving it `.unspecified` keeps both tools, which is what it got before.
+    private static func mentionsPlanEdit(_ lower: String) -> Bool {
+        let editNeedles = [
+            "move ", "swap ", "reschedule", "shorten", "lengthen", "replace ",
+            "push back", "push it", "make it ", "turn it into", "drop the", "skip ",
+            "đổi ", "chuyển ", "dịch ", "lùi ", "hoãn ", "bỏ buổi", "thêm buổi",
+            "rút ngắn", "kéo dài", "thay thế", "đổi thành", "đổi sang"
+        ]
+            .map {
+                $0.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "vi_VN"))
+                    .lowercased()
+            }
+        return editNeedles.contains(where: { lower.contains($0) })
     }
 
     /// "Đổi buổi này sang tempo" with the workout open is a plan edit, not a

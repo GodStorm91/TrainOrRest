@@ -757,6 +757,7 @@ struct ChatView: View {
                             actionableInteractionID: newestPendingInteractionID,
                             isSubmittingInteraction: submittingInteractionID == message.interaction?.id,
                             processingStage: processingStage(for: message),
+                            processingRound: processingRound(for: message),
                             onSelectInteractionOption: selectInteractionOption,
                             onSelectInteractionOther: selectInteractionOther,
                             onSelectFollowUp: selectFollowUp
@@ -1258,10 +1259,18 @@ struct ChatView: View {
 
     private func processingStage(for message: ChatMessage) -> CoachProcessingStage? {
         guard chatStore.generationState.messageId == message.turnID else { return nil }
-        if case .processing(_, let stage) = chatStore.generationState {
+        if case let .processing(_, stage, _) = chatStore.generationState {
             return stage
         }
         return nil
+    }
+
+    private func processingRound(for message: ChatMessage) -> Int {
+        guard chatStore.generationState.messageId == message.turnID else { return 1 }
+        if case let .processing(_, _, round) = chatStore.generationState {
+            return round
+        }
+        return 1
     }
 
     private var visibleContextualPromptSuggestions: [CoachPromptSuggestion] {

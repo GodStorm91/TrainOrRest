@@ -35,6 +35,7 @@ struct ChatBubble: View {
     var actionableInteractionID: String?
     var isSubmittingInteraction = false
     var processingStage: CoachProcessingStage?
+    var processingRound: Int = 1
     var onSelectInteractionOption: (ChatMessage, CoachChoiceOption) -> Void = { _, _ in }
     var onSelectInteractionOther: (ChatMessage, CoachResponseInteraction) -> Void = { _, _ in }
     var onSelectFollowUp: (ChatMessage, CoachChoiceOption) -> Void = { _, _ in }
@@ -107,7 +108,7 @@ struct ChatBubble: View {
 
                 if showsProcessingState {
                     CoachProcessingRow(
-                        label: language.processingLabel(for: processingStage),
+                        label: language.processingLabel(for: processingStage, round: processingRound),
                         petState: CoachPetBehavior.processingState(for: processingStage),
                         reduceMotion: UIAccessibility.isReduceMotionEnabled
                     )
@@ -611,7 +612,7 @@ enum CoachPetBehavior {
             return .hidden
         case .sending:
             return .preparing
-        case .processing(_, let stage):
+        case .processing(_, let stage, _):
             return processingState(for: stage)
         case .streaming:
             return .streaming
