@@ -22,6 +22,11 @@ final class CompletedActivity {
     /// Once set, Today stops auto-presenting the post-run review sheet for
     /// this activity. The detail screen can still show the review anytime.
     var postRunReviewDismissedAt: Date?
+    /// Per-kilometer splits reconstructed from HealthKit, JSON-encoded so the
+    /// store can lightweight-migrate. `nil` means not computed yet and the
+    /// sync backfill should try again; an empty array means it was computed
+    /// and the samples were too coarse to split, so it should not retry.
+    var splitsData: Data?
 
     init(
         hkUUID: UUID,
@@ -46,5 +51,6 @@ final class CompletedActivity {
         self.externalProviderShoeID = nil
         self.reviewNote = nil
         self.postRunReviewDismissedAt = nil
+        self.splitsData = nil
     }
 }
