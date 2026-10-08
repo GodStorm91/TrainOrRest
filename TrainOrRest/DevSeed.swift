@@ -34,6 +34,8 @@ enum DevSeed {
         case shoes
         case workout
         case chatGPTSpike
+        case calendar
+        case activity
     }
 
     /// The requested launch screen, or `nil` for the normal tab shell.
@@ -41,6 +43,14 @@ enum DevSeed {
         guard isRequested else { return nil }
         return ProcessInfo.processInfo.environment["TOR_DEV_SCREEN"]
             .flatMap(DevScreen.init(rawValue:))
+    }
+
+    /// `TOR_DEV_ANALYSIS_TAB=splits` opens the activity analysis already
+    /// expanded on that tab, since the disclosure toggle is not scriptable.
+    static var expandedAnalysisTab: ActivityAnalysisTab? {
+        guard isRequested else { return nil }
+        return ProcessInfo.processInfo.environment["TOR_DEV_ANALYSIS_TAB"]
+            .flatMap(ActivityAnalysisTab.init(rawValue:))
     }
 
     /// When set with `TOR_DEV_SEED=1` and `TOR_DEV_SCREEN=coach`, the coach
@@ -465,9 +475,9 @@ enum DevSeed {
             // Run on five of every seven days; long run every seventh.
             let weekday = offset % 7
             guard weekday != 1 && weekday != 4 else { continue }
-            let km = weekday == 0 ? 18.0 : 8.0 + Double(weekday)
+            let km = weekday == 0 ? 18.0 : 8.0 + Double(weekday) + (weekday == 2 ? 0.42 : 0)
             let pace = weekday == 0 ? 320.0 : 290.0 - wave * 10
-            context.insert(CompletedActivity(
+            let run = CompletedActivity(
                 hkUUID: UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", offset))!,
                 date: day.addingTimeInterval(7 * 3600),
                 distanceMeters: km * 1000,
@@ -476,7 +486,14 @@ enum DevSeed {
                 maxHeartRate: 172,
                 avgPaceSecondsPerKm: pace,
                 sourceName: "Garmin"
-            ))
+            )
+            run.splits = seededSplits(
+                distanceKm: km,
+                averagePace: pace,
+                averageHeartRate: 148 + wave * 4,
+                offset: offset
+            )
+            context.insert(run)
             let verdict: ReadinessVerdict = wave < -0.7 ? .rest : (wave < 0 ? .goEasy : .train)
             let snapshot = ReadinessAssessment.Snapshot(
                 hrvMean7: 48 + wave * 6, hrvMean28: 48, rhrMean7: 49 - wave * 2, rhrMean28: 49,
@@ -496,6 +513,40 @@ enum DevSeed {
             ))
         }
         try? context.save()
+    }
+
+    /// Deterministic per-kilometer variation so every splits state can be
+    /// screenshotted: measured, computed and refused, and not yet computed.
+    private static func seededSplits(
+        distanceKm: Double,
+        averagePace: Double,
+        averageHeartRate: Double,
+        offset: Int
+    ) -> [ActivitySplit]? {
+        if offset % 11 == 0 { return nil }
+        if offset % 7 == 3 { return [] }
+        let fullKilometers = Int(distanceKm)
+        guard fullKilometers >= 1 else { return [] }
+        var splits: [ActivitySplit] = []
+        for kilometer in 1...fullKilometers {
+            let drift = sin(Double(kilometer) * 0.9 + Double(offset)) * 14 + Double(kilometer) * 1.4
+            splits.append(ActivitySplit(
+                kilometer: kilometer,
+                distanceMeters: 1000,
+                durationSeconds: averagePace + drift,
+                averageHeartRate: averageHeartRate - drift * 0.2
+            ))
+        }
+        let remainder = distanceKm - Double(fullKilometers)
+        if remainder > 0.05 {
+            splits.append(ActivitySplit(
+                kilometer: fullKilometers + 1,
+                distanceMeters: remainder * 1000,
+                durationSeconds: remainder * (averagePace - 16),
+                averageHeartRate: averageHeartRate + 7
+            ))
+        }
+        return splits
     }
 
     /// Live-coach verification seam: an empty thread so one real read-only

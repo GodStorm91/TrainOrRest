@@ -140,12 +140,23 @@ struct HistoryCopy {
     var target: String { switch language { case .en: "Target"; case .ja: "目標"; case .vi: "Mục tiêu" } }
     var mainDeviation: String { switch language { case .en: "Main deviation · 18-24 min"; case .ja: "主な差異 · 18〜24分"; case .vi: "Sai lệch chính · 18–24 phút" } }
 
-    func splitAccessibility(kilometer: Int, pace: String, plannedPace: String) -> String {
+    func splitRowAccessibility(kilometer: Int, pace: String, isPartial: Bool, insideBand: Bool?) -> String {
+        var parts: [String] = []
         switch language {
-        case .en: "Kilometer \(kilometer), \(pace), planned \(plannedPace)"
-        case .ja: "\(kilometer)キロ、\(pace)、予定\(plannedPace)"
-        case .vi: "Kilômét \(kilometer), \(pace), dự kiến \(plannedPace)"
+        case .en:
+            parts.append("Kilometer \(kilometer), \(pace)")
+            if isPartial { parts.append("part kilometer") }
+            if let insideBand { parts.append(insideBand ? "inside target range" : "outside target range") }
+        case .ja:
+            parts.append("\(kilometer)キロ、\(pace)")
+            if isPartial { parts.append("端数のキロ") }
+            if let insideBand { parts.append(insideBand ? "目標範囲内" : "目標範囲外") }
+        case .vi:
+            parts.append("Kilômét \(kilometer), \(pace)")
+            if isPartial { parts.append("kilômét lẻ") }
+            if let insideBand { parts.append(insideBand ? "trong dải mục tiêu" : "ngoài dải mục tiêu") }
         }
+        return parts.joined(separator: ", ")
     }
 
     func analysisTabTitle(_ tab: ActivityAnalysisTab) -> String {
@@ -362,11 +373,67 @@ struct HistoryCopy {
         }
     }
 
-    func splitsSummary(fastCount: Int, total: Int) -> String {
+    func splitsInsideBand(inside: Int, total: Int) -> String {
         switch language {
-        case .en: "\(fastCount) of \(total) kilometres were faster than the planned Easy range."
-        case .ja: "\(total)キロ中\(fastCount)キロは、予定のイージー範囲より速めでした。"
-        case .vi: "\(fastCount) trong \(total) kilômét nhanh hơn phạm vi chạy nhẹ dự kiến."
+        case .en: "\(inside) of \(total) kilometers landed inside the target range."
+        case .ja: "\(total)キロ中\(inside)キロが目標範囲に収まりました。"
+        case .vi: "\(inside) trên \(total) kilômét nằm trong dải mục tiêu."
+        }
+    }
+
+    func splitsSpread(fastest: String, slowest: String) -> String {
+        switch language {
+        case .en: "Kilometers ranged from \(fastest) to \(slowest)."
+        case .ja: "各キロは\(fastest)から\(slowest)の範囲でした。"
+        case .vi: "Các kilômét dao động từ \(fastest) đến \(slowest)."
+        }
+    }
+
+    func partialSplitNote(_ distance: String) -> String {
+        switch language {
+        case .en: "The last \(distance) is a part kilometer and is drawn lighter."
+        case .ja: "最後の\(distance)は端数のキロで、薄く表示しています。"
+        case .vi: "\(distance) cuối là kilômét lẻ nên được vẽ nhạt hơn."
+        }
+    }
+
+    var splitsUnavailable: String {
+        switch language {
+        case .en: "No kilometer splits"
+        case .ja: "キロごとのラップなし"
+        case .vi: "Chưa có số liệu từng km"
+        }
+    }
+
+    var splitsTooCoarse: String {
+        switch language {
+        case .en: "This run synced without fine enough distance samples to rebuild kilometer splits. Connect intervals.icu in Settings to read them from the device file."
+        case .ja: "このランは距離サンプルが粗く、キロごとのラップを再構成できません。設定でintervals.icuを連携すると、デバイスのファイルから読み込めます。"
+        case .vi: "Buổi chạy này đồng bộ với mẫu quãng đường quá thưa nên không dựng lại được số liệu từng km. Kết nối intervals.icu trong Cài đặt để đọc trực tiếp từ tệp thiết bị."
+        }
+    }
+
+    var splitsPending: String {
+        switch language {
+        case .en: "Splits are rebuilt on the next Health sync."
+        case .ja: "ラップは次回のヘルス同期で再構成されます。"
+        case .vi: "Số liệu từng km sẽ được dựng lại ở lần đồng bộ Health kế tiếp."
+        }
+    }
+
+    var seriesUnavailable: String {
+        switch language {
+        case .en: "No recorded trace"
+        case .ja: "記録トレースなし"
+        case .vi: "Chưa có dữ liệu chi tiết"
+        }
+    }
+
+    var seriesUnavailableReason: String {
+        switch language {
+        case .en: "Apple Health stored this run as a summary. Connect intervals.icu in Settings to see the recorded trace."
+        case .ja: "Appleヘルスケアはこのランを要約として保存しています。設定でintervals.icuを連携すると記録トレースを表示できます。"
+        case .vi: "Apple Health chỉ lưu buổi chạy này dưới dạng tóm tắt. Kết nối intervals.icu trong Cài đặt để xem dữ liệu ghi chi tiết."
         }
     }
 

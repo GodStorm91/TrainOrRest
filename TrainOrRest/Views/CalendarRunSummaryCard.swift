@@ -15,12 +15,8 @@ struct CalendarRunSummaryCard: View {
         Int(TrainingLoad.sessionLoad(durationSeconds: activity.durationSeconds, avgPaceSecondsPerKm: activity.avgPaceSecondsPerKm, paces: nil).rounded())
     }
 
-    private var filledSegments: Int {
-        guard let plannedKm = plannedWorkout?.distanceKm, plannedKm > 0,
-              let actualKm = activity.distanceMeters.map({ $0 / 1000 }) else {
-            return min(5, max(1, Int((activity.durationSeconds / 1800).rounded())))
-        }
-        return min(5, max(1, Int((actualKm / plannedKm * 5).rounded())))
+    private var splits: [SplitDatum] {
+        (activity.splits ?? []).compactMap(SplitDatum.init)
     }
 
     var body: some View {
@@ -52,12 +48,16 @@ struct CalendarRunSummaryCard: View {
                 }
             }
 
-            HStack(spacing: 3) {
-                ForEach(0..<5, id: \.self) { index in
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(index < filledSegments ? Theme.data : Theme.line)
-                        .frame(height: compact ? 40 : 54)
-                }
+            if !splits.isEmpty {
+                SplitPaceColumns(
+                    splits: splits,
+                    band: plannedWorkout?.paceBand,
+                    height: compact ? 40 : 54
+                )
+            } else if activity.splits != nil {
+                Text(language.history.splitsUnavailable)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(Theme.faint)
             }
 
             metricSummary

@@ -243,6 +243,22 @@ struct RootView: View {
             }
         case .chatGPTSpike:
             ChatGPTSpikeView()
+        case .calendar:
+            ScrollView {
+                VStack(spacing: 14) {
+                    ForEach(seededRunStates) { run in
+                        CalendarRunSummaryCard(activity: run, plannedWorkout: nil)
+                    }
+                }
+                .padding(16)
+            }
+            .background(Theme.bg)
+        case .activity:
+            if let activity = seededActivity {
+                ActivityDetailView(activity: activity)
+            } else {
+                ContentUnavailableView("No activity to preview", systemImage: "figure.run")
+            }
         }
     }
     private var todayWorkout: PlannedWorkout? {
@@ -250,6 +266,28 @@ struct RootView: View {
             FetchDescriptor<PlannedWorkout>(sortBy: [SortDescriptor(\.date)])
         )) ?? []
         return workouts.first { Calendar.current.isDateInToday($0.date) }
+    }
+
+    /// The newest seeded run that carries measured splits, so the splits
+    /// chart renders without tapping through the calendar.
+    private var seededActivity: CompletedActivity? {
+        let runs = (try? modelContext.fetch(
+            FetchDescriptor<CompletedActivity>(sortBy: [SortDescriptor(\.date, order: .reverse)])
+        )) ?? []
+        return runs.first { ($0.splits?.count ?? 0) > 2 }
+    }
+
+    /// One seeded run per splits state so the calendar card can be
+    /// screenshotted measured, refused, and not yet computed.
+    private var seededRunStates: [CompletedActivity] {
+        let runs = (try? modelContext.fetch(
+            FetchDescriptor<CompletedActivity>(sortBy: [SortDescriptor(\.date, order: .reverse)])
+        )) ?? []
+        let long = runs.first { ($0.splits?.count ?? 0) > 14 }
+        let measured = runs.first { (2...14).contains($0.splits?.count ?? 0) }
+        let refused = runs.first { $0.splits?.isEmpty == true }
+        let pending = runs.first { $0.splits == nil }
+        return [long, measured, refused, pending].compactMap { $0 }
     }
     #endif
 

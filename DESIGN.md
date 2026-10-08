@@ -252,6 +252,27 @@ at 90% of expected lifespan; a replacement warning appears at 100%. The same
 threshold transition may issue one local notification per shoe and stage, with
 no repeated nagging until the stage changes.
 
+### 7.3 Kilometer splits
+
+Completed runs draw one column per kilometer, on the calendar card, in the run
+review card, and as a labelled list under Analysis → Splits.
+
+- **The pace axis is inverted. A taller column is a faster kilometer.** Pace is
+  seconds per kilometer, so a literal axis would draw the fastest kilometer
+  shortest and read backwards to every runner. Strava and Under Armour invert
+  the same axis for the same reason.
+- Every column sits inside a visible track. A pace chart cannot start at zero,
+  so the track states the domain and stops a column from implying magnitude.
+- The domain spans at least 40 s/km, so a steady run reads flat instead of
+  amplifying a five second spread into a skyline.
+- The slowest kilometer keeps a sixth of the track. A column that collapses to
+  nothing reads as missing data, not as a slow kilometer.
+- One cyan series, no judgment color. A partial final kilometer drops to 45%
+  opacity and the caption says why.
+- When the matched plan carries a pace band, it is shaded behind the columns so
+  a kilometer reads against the target rather than against the run's own
+  fastest kilometer.
+
 ---
 
 ## 8. Uncertainty & empty states
