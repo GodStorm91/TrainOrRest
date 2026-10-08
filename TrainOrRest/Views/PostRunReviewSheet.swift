@@ -24,7 +24,7 @@ struct PostRunReviewSheet: View {
                 VStack(spacing: 22) {
                     header
                     shoeRow
-                    progressBar
+                    paceColumns
                     actions
                     noteEditor
                     if showDetailedReview {
@@ -108,23 +108,16 @@ struct PostRunReviewSheet: View {
         "\(Formatters.duration(activity.durationSeconds)) @ \(Formatters.pace(activity.avgPaceSecondsPerKm).replacingOccurrences(of: " /km", with: "/km"))"
     }
 
-    private var progressBar: some View {
-        HStack(spacing: 3) {
-            ForEach(0..<5, id: \.self) { index in
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(index < filledSegments ? Theme.accent : Theme.line)
-                    .frame(height: 54)
-            }
-        }
-        .padding(.top, 8)
+    private var splits: [SplitDatum] {
+        (activity.splits ?? []).compactMap(SplitDatum.init)
     }
 
-    private var filledSegments: Int {
-        guard let planned = plannedWorkout?.distanceKm, planned > 0,
-              let actual = activity.distanceMeters.map({ $0 / 1000 }) else {
-            return min(5, max(1, Int((activity.durationSeconds / 1800).rounded())))
+    @ViewBuilder
+    private var paceColumns: some View {
+        if !splits.isEmpty {
+            SplitPaceColumns(splits: splits, band: plannedWorkout?.paceBand, height: 54)
+                .padding(.top, 8)
         }
-        return min(5, max(1, Int((actual / planned * 5).rounded())))
     }
 
     private var actions: some View {

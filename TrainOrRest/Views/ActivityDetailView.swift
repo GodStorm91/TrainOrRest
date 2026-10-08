@@ -12,8 +12,13 @@ struct ActivityDetailView: View {
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
 
     private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+    #if DEBUG
+    @State private var analysisExpanded = DevSeed.expandedAnalysisTab != nil
+    @State private var selectedAnalysisTab: ActivityAnalysisTab = DevSeed.expandedAnalysisTab ?? .pace
+    #else
     @State private var analysisExpanded = false
     @State private var selectedAnalysisTab: ActivityAnalysisTab = .pace
+    #endif
     @State private var expandedTechnicalSection: ActivityTechnicalSection?
     @State private var intervalsAnalysis: IntervalsActivityAnalysisData?
     @State private var intervalsLoadState: IntervalsActivityLoadState = .idle
@@ -361,7 +366,7 @@ struct RunReviewCard: View {
             } label: {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text(model.hasPlan ? language.history.paceVsPlan : language.history.pacePattern)
+                        Text(miniTitle)
                             .font(.torHeading(15, .bold))
                             .foregroundStyle(Theme.text)
                         Spacer()
@@ -372,13 +377,18 @@ struct RunReviewCard: View {
                         }
                     }
 
-                    PlanComparisonChart(model: model, language: language, style: .mini)
-                        .frame(height: 126)
-                        .allowsHitTesting(false)
+                    if model.pacePoints.isEmpty {
+                        SplitPaceColumns(splits: model.splits, band: model.paceBand, height: 110)
+                    } else {
+                        PlanComparisonChart(model: model, language: language, style: .mini)
+                            .frame(height: 126)
+                            .allowsHitTesting(false)
+                    }
 
-                    Text(language.history.miniChartInterpretation(hasPlan: model.hasPlan))
+                    Text(miniCaption)
                         .font(.system(size: 12.5, weight: .semibold))
                         .foregroundStyle(Theme.dim)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
@@ -404,6 +414,23 @@ struct RunReviewCard: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(Theme.border, lineWidth: 1)
         )
+    }
+
+    private var miniTitle: String {
+        if !model.pacePoints.isEmpty {
+            return model.hasPlan ? language.history.paceVsPlan : language.history.pacePattern
+        }
+        return language.history.splits
+    }
+
+    private var miniCaption: String {
+        if !model.pacePoints.isEmpty {
+            return language.history.miniChartInterpretation(hasPlan: model.hasPlan)
+        }
+        if model.splits.isEmpty {
+            return model.splitsWereComputed ? language.history.splitsTooCoarse : language.history.splitsPending
+        }
+        return model.splitsSummary(language)
     }
 }
 
@@ -555,13 +582,20 @@ private struct PaceAnalysisView: View {
 
             summaryMetrics
 
-            PlanComparisonChart(model: model, language: language, style: .expanded)
-                .frame(height: 230)
+            if model.pacePoints.isEmpty {
+                AnalysisEmptyState(
+                    title: language.history.seriesUnavailable,
+                    reason: language.history.seriesUnavailableReason
+                )
+            } else {
+                PlanComparisonChart(model: model, language: language, style: .expanded)
+                    .frame(height: 230)
 
-            Text(language.history.paceInsight(hasPlan: model.hasPlan, easyLabel: language.name(WorkoutKind.easy)))
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.dim)
-                .fixedSize(horizontal: false, vertical: true)
+                Text(language.history.paceInsight(hasPlan: model.hasPlan, easyLabel: language.name(WorkoutKind.easy)))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
     @ViewBuilder
@@ -614,13 +648,20 @@ private struct HeartRateAnalysisView: View {
 
             summaryMetrics
 
-            HeartRateTrendChart(model: model, language: language)
-                .frame(height: 210)
+            if model.heartRatePoints.isEmpty {
+                AnalysisEmptyState(
+                    title: language.history.seriesUnavailable,
+                    reason: language.history.seriesUnavailableReason
+                )
+            } else {
+                HeartRateTrendChart(model: model, language: language)
+                    .frame(height: 210)
 
-            Text(language.history.heartRateInsight)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.dim)
-                .fixedSize(horizontal: false, vertical: true)
+                Text(language.history.heartRateInsight)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
     @ViewBuilder
@@ -653,22 +694,74 @@ private struct SplitsAnalysisView: View {
     let model: ActivityDetailAnalysis
     let language: CoachLanguage
 
+    private var band: PaceBand? { model.paceBand }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(language.history.splits)
-                .font(.torHeading(18, .bold))
-                .foregroundStyle(Theme.text)
-
-            VStack(spacing: 7) {
-                ForEach(model.splits) { split in
-                    SplitComparisonRow(split: split, plannedAveragePace: model.plannedAveragePace, language: language)
+            if let scale = SplitPaceScale(splits: model.splits, band: band) {
+                VStack(spacing: 2) {
+                    unitLegend
+                    ForEach(model.splits) { split in
+                        SplitPaceRow(split: split, scale: scale, band: band, language: language)
+                    }
                 }
-            }
 
-            Text(language.history.splitsSummary(fastCount: model.splits.filter(\.isMeaningfullyFast).count, total: model.splits.count))
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.dim)
+                if model.paceBand != nil {
+                    Text(model.splitsSummary(language))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.dim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if let last = model.splits.last, last.isPartial {
+                    Text(language.history.partialSplitNote(Formatters.kilometers(last.distanceMeters)))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.faint)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                AnalysisEmptyState(
+                    title: language.history.splitsUnavailable,
+                    reason: model.splitsWereComputed ? language.history.splitsTooCoarse : language.history.splitsPending
+                )
+            }
         }
+    }
+
+    private var unitLegend: some View {
+        HStack(spacing: 10) {
+            Spacer().frame(width: 20)
+            Spacer(minLength: 0)
+            Text("min/km").frame(width: 44, alignment: .trailing)
+            Text("bpm").frame(width: 28, alignment: .trailing)
+        }
+        .font(.torLabel(9, .semibold))
+        .foregroundStyle(Theme.faint)
+        .padding(.bottom, 2)
+        .accessibilityHidden(true)
+    }
+
+}
+
+/// DESIGN.md requires a missing metric to name its cause and its fix rather
+/// than vanish or render as zero.
+private struct AnalysisEmptyState: View {
+    let title: String
+    let reason: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(Theme.text)
+            Text(reason)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.dim)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -1030,60 +1123,6 @@ private struct ChartTooltip: View {
     }
 }
 
-struct SplitComparisonRow: View {
-    let split: SplitComparison
-    let plannedAveragePace: Double
-    let language: CoachLanguage
-    var body: some View {
-        HStack(spacing: 10) {
-            Text("\(split.kilometer)")
-                .font(.torHeading(14, .bold))
-                .foregroundStyle(split.isMeaningfullyFast ? Theme.warn : Theme.dim)
-                .frame(width: 24)
-
-            GeometryReader { proxy in
-                let barWidth = proxy.size.width
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Theme.chip)
-                        .frame(height: 8)
-                    Capsule()
-                        .fill(split.isMeaningfullyFast ? Theme.warn.opacity(0.82) : Theme.accent.opacity(0.72))
-                        .frame(width: max(28, CGFloat(split.relativeWidth) * barWidth), height: 8)
-                    Rectangle()
-                        .fill(Theme.good)
-                        .frame(width: 2, height: 18)
-                        .offset(x: barWidth * 0.75)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 18)
-
-            Text(Formatters.pace(split.paceSecondsPerKm).replacingOccurrences(of: " /km", with: "/km"))
-                .font(.torMono(12, .semibold))
-                .foregroundStyle(Theme.text)
-                .frame(width: 62, alignment: .trailing)
-
-            if let avgHR = split.averageHeartRate {
-                Text("\(Int(avgHR.rounded()))")
-                    .font(.torMono(12, .semibold))
-                    .foregroundStyle(Theme.faint)
-                    .frame(width: 30, alignment: .trailing)
-            }
-        }
-        .padding(.horizontal, 10)
-        .frame(minHeight: 44)
-        .background(Theme.chip.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .accessibilityLabel(
-            language.history.splitAccessibility(
-                kilometer: split.kilometer,
-                pace: Formatters.pace(split.paceSecondsPerKm),
-                plannedPace: Formatters.pace(plannedAveragePace)
-            )
-        )
-    }
-}
 
 struct CollapsibleMetricSection<Content: View>: View {
     let section: ActivityTechnicalSection
@@ -1157,11 +1196,10 @@ private struct MetricRow: View {
     }
 }
 
-enum ActivityAnalysisTab: CaseIterable {
+enum ActivityAnalysisTab: String, CaseIterable {
     case pace
     case heartRate
     case splits
-
 }
 
 enum ActivityTechnicalSection: CaseIterable {
@@ -1193,14 +1231,6 @@ struct HeartRateChartPoint: Identifiable, Equatable {
     let bpm: Double
 }
 
-struct SplitComparison: Identifiable, Equatable {
-    let id = UUID()
-    let kilometer: Int
-    let paceSecondsPerKm: Double
-    let averageHeartRate: Double?
-    let isMeaningfullyFast: Bool
-    let relativeWidth: Double
-}
 
 enum IntervalsActivityLoadState: Equatable {
     case idle
@@ -1239,7 +1269,7 @@ struct IntervalsActivityAnalysisData: Equatable {
     var recordingStops: [Double]
     var pacePoints: [PaceChartPoint]
     var heartRatePoints: [HeartRateChartPoint]
-    var splits: [SplitComparison]
+    var splits: [SplitDatum]
 }
 
 struct IntervalsActivityAnalysisLoader {
@@ -1361,30 +1391,30 @@ struct IntervalsActivityAnalysisLoader {
         distance: [Double?],
         speed: [Double?],
         heartRate: [Double?]
-    ) -> [SplitComparison] {
+    ) -> [SplitDatum] {
         let intervalSplits = (detail.intervals ?? [])
             .filter { (($0.distance ?? 0) >= 850 && ($0.distance ?? 0) <= 1150) || (($0.elapsedTime ?? 0) > 60 && ($0.averageSpeed ?? 0) > 0) }
-        let rows = intervalSplits.enumerated().compactMap { index, interval -> SplitComparison? in
+        let rows = intervalSplits.enumerated().compactMap { index, interval -> SplitDatum? in
             guard let pace = paceFromSpeed(interval.averageSpeed) else { return nil }
-            return SplitComparison(
+            let meters = interval.distance ?? 1000
+            return SplitDatum(
                 kilometer: index + 1,
                 paceSecondsPerKm: pace,
                 averageHeartRate: interval.averageHeartRate,
-                isMeaningfullyFast: false,
-                relativeWidth: 1
+                distanceMeters: meters,
+                isPartial: meters < 999
             )
         }
-        if !rows.isEmpty { return normalizedSplits(rows) }
+        if !rows.isEmpty { return rows }
 
-        let streamRows = splitRowsFromStreams(time: time, distance: distance, speed: speed, heartRate: heartRate)
-        return normalizedSplits(streamRows)
+        return splitRowsFromStreams(time: time, distance: distance, speed: speed, heartRate: heartRate)
     }
 
-    private static func splitRowsFromStreams(time: [Double?], distance: [Double?], speed: [Double?], heartRate: [Double?]) -> [SplitComparison] {
+    private static func splitRowsFromStreams(time: [Double?], distance: [Double?], speed: [Double?], heartRate: [Double?]) -> [SplitDatum] {
         let count = min(time.count, distance.count, speed.count)
         guard count > 2 else { return [] }
 
-        var rows: [SplitComparison] = []
+        var rows: [SplitDatum] = []
         var splitStartIndex = 0
         var nextDistance = 1000.0
         for index in 1..<count {
@@ -1396,12 +1426,12 @@ struct IntervalsActivityAnalysisLoader {
             let splitDistance = max(meters - startDistance, 1)
             let pace = splitDuration / (splitDistance / 1000)
             let hrSamples = heartRate[splitStartIndex...index].compactMap { $0 }
-            rows.append(SplitComparison(
+            rows.append(SplitDatum(
                 kilometer: rows.count + 1,
                 paceSecondsPerKm: pace,
                 averageHeartRate: hrSamples.isEmpty ? nil : hrSamples.reduce(0, +) / Double(hrSamples.count),
-                isMeaningfullyFast: false,
-                relativeWidth: 1
+                distanceMeters: splitDistance,
+                isPartial: false
             ))
             splitStartIndex = index
             nextDistance += 1000
@@ -1409,23 +1439,6 @@ struct IntervalsActivityAnalysisLoader {
         return rows
     }
 
-    private static func normalizedSplits(_ rows: [SplitComparison]) -> [SplitComparison] {
-        guard !rows.isEmpty else { return [] }
-        let fastest = rows.map(\.paceSecondsPerKm).min() ?? 1
-        let slowest = rows.map(\.paceSecondsPerKm).max() ?? fastest
-        let average = rows.map(\.paceSecondsPerKm).reduce(0, +) / Double(rows.count)
-        let fastThreshold = average - 18
-        return rows.map { row in
-            let width = 1 - ((row.paceSecondsPerKm - fastest) / max(slowest - fastest, 1)) * 0.38
-            return SplitComparison(
-                kilometer: row.kilometer,
-                paceSecondsPerKm: row.paceSecondsPerKm,
-                averageHeartRate: row.averageHeartRate,
-                isMeaningfullyFast: row.paceSecondsPerKm < fastThreshold,
-                relativeWidth: width
-            )
-        }
-    }
 
     private static func downsample(_ points: [PaceChartPoint], maxCount: Int) -> [PaceChartPoint] {
         guard points.count > maxCount else { return points }
@@ -1530,7 +1543,7 @@ struct ActivityDetailAnalysis {
     }
 
     var availableTabs: [ActivityAnalysisTab] {
-        averageHeartRate == nil || heartRatePoints.isEmpty ? [.pace, .splits] : ActivityAnalysisTab.allCases
+        averageHeartRate == nil ? [.pace, .splits] : ActivityAnalysisTab.allCases
     }
 
     var distanceMeters: Double? { intervalsAnalysis?.distanceMeters ?? activity.distanceMeters }
@@ -1573,58 +1586,14 @@ struct ActivityDetailAnalysis {
 
 
     var pacePoints: [PaceChartPoint] {
-        if let points = intervalsAnalysis?.pacePoints, !points.isEmpty {
-            return points
-        }
-        let base = activity.avgPaceSecondsPerKm ?? 363
-        let duration = max(activity.durationSeconds, 1)
-        let steps = 32
-        return (0...steps).map { index in
-            let progress = Double(index) / Double(steps)
-            let time = progress * duration
-            if (0.31...0.35).contains(progress) || (0.80...0.83).contains(progress) {
-                return PaceChartPoint(time: time, actual: nil)
-            }
-            let pace: Double
-            switch progress {
-            case 0..<0.18:
-                pace = max(base + 8, plannedAveragePace - 18) + sin(progress * 24) * 4
-            case 0.18..<0.42:
-                pace = base - 21 + sin(progress * 22) * 5
-            case 0.42..<0.58:
-                pace = base - 13 + sin(progress * 20) * 4
-            case 0.58..<0.76:
-                pace = base + 16 + sin(progress * 18) * 5
-            default:
-                pace = min(plannedAveragePace - 2, base + 24) + sin(progress * 16) * 4
-            }
-            return PaceChartPoint(time: time, actual: pace)
-        }
+        intervalsAnalysis?.pacePoints ?? []
     }
 
     var heartRateLowerTarget: Double { 132 }
     var heartRateUpperTarget: Double { 154 }
 
     var heartRatePoints: [HeartRateChartPoint] {
-        if let points = intervalsAnalysis?.heartRatePoints, !points.isEmpty {
-            return points
-        }
-        let maxHR = maxHeartRate ?? 165
-        let avg = averageHeartRate ?? 150
-        let duration = max(activity.durationSeconds, 1)
-        let steps = 28
-        return (0...steps).map { index in
-            let progress = Double(index) / Double(steps)
-            let time = progress * duration
-            let earlyRamp = 118 + min(progress / 0.16, 1) * 26
-            let middleLift = (0.38...0.56).contains(progress) ? 7 : 0
-            let drift = progress * 15
-            let wave = sin(progress * 18) * 2.5
-            let rawBPM = earlyRamp + Double(middleLift) + drift + wave
-            let floorBPM = avg - 18
-            let bpm = min(maxHR, max(floorBPM, rawBPM))
-            return HeartRateChartPoint(time: time, bpm: bpm)
-        }
+        intervalsAnalysis?.heartRatePoints ?? []
     }
 
     var heartRateMin: Double {
@@ -1635,30 +1604,49 @@ struct ActivityDetailAnalysis {
         max(maxHeartRate ?? 165, heartRatePoints.map(\.bpm).max() ?? 165)
     }
 
-    var splits: [SplitComparison] {
-        if let splits = intervalsAnalysis?.splits, !splits.isEmpty {
-            return splitsWithPlannedThreshold(splits)
+    /// Measurements only. intervals.icu when the run matched an activity
+    /// there, otherwise the kilometers rebuilt from HealthKit distance
+    /// samples. An empty result means we could not measure, and the view
+    /// says so rather than drawing a shape.
+    var splits: [SplitDatum] {
+        if let imported = intervalsAnalysis?.splits, !imported.isEmpty {
+            return imported
         }
-        let distanceKm = max((distanceMeters ?? 7000) / 1000, 1)
-        let kilometers = max(1, Int(distanceKm.rounded(.down)))
-        let template: [Double] = [386, 378, 344, 342, 366, 379, 382, 388, 384, 381]
-        let threshold = plannedAveragePace - 35
-        let fastest = template.prefix(kilometers).min() ?? (activity.avgPaceSecondsPerKm ?? 363)
-        let slowest = template.prefix(kilometers).max() ?? plannedAveragePace
-        return (1...kilometers).map { kilometer in
-            let pace = template.indices.contains(kilometer - 1) ? template[kilometer - 1] : (actualPace ?? 363)
-            let hr = averageHeartRate.map { $0 + Double(kilometer - kilometers / 2) * 2.2 }
-            let relative = 1 - ((pace - fastest) / max(slowest - fastest, 1)) * 0.38
-            return SplitComparison(
-                kilometer: kilometer,
-                paceSecondsPerKm: pace,
-                averageHeartRate: hr,
-                isMeaningfullyFast: pace < threshold,
-                relativeWidth: relative
-            )
-        }
+        return (activity.splits ?? []).compactMap(SplitDatum.init)
     }
 
+    /// False while the reconstruction has not run yet, which separates
+    /// "not computed" from "computed and refused".
+    var splitsWereComputed: Bool {
+        activity.splits != nil
+    }
+
+    /// The pace window the plan prescribed, drawn behind the splits so a
+    /// kilometer reads against the target rather than against the run's own
+    /// fastest kilometer.
+    var paceBand: PaceBand? {
+        plannedWorkout?.paceBand
+    }
+
+    /// The band count excludes a partial final kilometer because "N of M
+    /// kilometers" implies whole ones. The range covers every split, so it
+    /// never contradicts the tallest column.
+    func splitsSummary(_ language: CoachLanguage) -> String {
+        if let band = paceBand {
+            let full = splits.filter { !$0.isPartial }
+            let rows = full.isEmpty ? splits : full
+            let inside = rows.filter {
+                $0.paceSecondsPerKm <= band.slowSecondsPerKm && $0.paceSecondsPerKm >= band.fastSecondsPerKm
+            }
+            return language.history.splitsInsideBand(inside: inside.count, total: rows.count)
+        }
+        let paces = splits.map(\.paceSecondsPerKm)
+        guard let fastest = paces.min(), let slowest = paces.max() else { return "" }
+        return language.history.splitsSpread(
+            fastest: Formatters.pace(fastest).replacingOccurrences(of: " /km", with: "/km"),
+            slowest: Formatters.pace(slowest).replacingOccurrences(of: " /km", with: "/km")
+        )
+    }
 
     func nearestPacePoint(to time: Double) -> PaceChartPoint {
         pacePoints.min { abs($0.time - time) < abs($1.time - time) } ?? PaceChartPoint(time: time, actual: actualPace)
@@ -1672,18 +1660,4 @@ struct ActivityDetailAnalysis {
         "\(Int(seconds.rounded()))"
     }
 
-    private func splitsWithPlannedThreshold(_ rows: [SplitComparison]) -> [SplitComparison] {
-        let threshold = hasPlan ? plannedAveragePace - 35 : (rows.map(\.paceSecondsPerKm).reduce(0, +) / Double(max(rows.count, 1))) - 18
-        let fastest = rows.map(\.paceSecondsPerKm).min() ?? 1
-        let slowest = rows.map(\.paceSecondsPerKm).max() ?? fastest
-        return rows.map { row in
-            SplitComparison(
-                kilometer: row.kilometer,
-                paceSecondsPerKm: row.paceSecondsPerKm,
-                averageHeartRate: row.averageHeartRate,
-                isMeaningfullyFast: row.paceSecondsPerKm < threshold,
-                relativeWidth: 1 - ((row.paceSecondsPerKm - fastest) / max(slowest - fastest, 1)) * 0.38
-            )
-        }
-    }
 }
