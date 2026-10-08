@@ -13,6 +13,9 @@ import SwiftData
 @MainActor
 final class SyncEngine: ObservableObject {
     static let wellnessWindowDays = 60
+    /// How far back split reconstruction reaches. Covers the ten runs the
+    /// coach context carries without re-querying a whole history each sync.
+    static let splitWindowDays = 45
 
     @Published private(set) var isSyncing = false
     @Published private(set) var lastError: String?
@@ -163,6 +166,7 @@ final class SyncEngine: ObservableObject {
         logger.info("Workouts sync: +\(delta.added.count) −\(delta.deletedUUIDs.count)")
 
         try await backfillMissingHeartRates()
+        await backfillMissingSplits()
         return newRuns
     }
 
@@ -188,6 +192,51 @@ final class SyncEngine: ObservableObject {
         }
         if filled > 0 {
             logger.info("Backfilled heart rate for \(filled) activities")
+        }
+    }
+
+    /// Reconstructs per-kilometer splits for recent runs that lack them.
+    /// A run with no distance series yet is left untouched so a later sync
+    /// retries once Garmin writes it; a run whose samples are too coarse to
+    /// split gets an empty marker so it is never queried again.
+    ///
+    /// Split failures must not read as sync failures, so this swallows errors
+    /// the way auto-match does. The window bounds the work so it covers the
+    /// runs the coach actually sees, not the whole history.
+    private func backfillMissingSplits() async {
+        let cutoff = calendar.date(byAdding: .day, value: -Self.splitWindowDays, to: .now) ?? .distantPast
+        let descriptor = FetchDescriptor<CompletedActivity>(
+            predicate: #Predicate { $0.splitsData == nil && $0.date >= cutoff },
+            sortBy: [SortDescriptor(\.date, order: .reverse)]
+        )
+        guard let missing = try? modelContext.fetch(descriptor), !missing.isEmpty else { return }
+
+        var filled = 0
+        for activity in missing {
+            if let meters = activity.distanceMeters, meters < SplitBuilder.minimumDistanceMeters {
+                activity.splits = []
+                continue
+            }
+            let end = activity.date.addingTimeInterval(activity.durationSeconds)
+            guard let result = try? await health.runningSplits(start: activity.date, end: end) else { continue }
+            if result.isRetryable { continue }
+            activity.splits = result.splits
+            if result.splits.isEmpty {
+                logger.info(
+                    """
+                    Splits unavailable for \(activity.hkUUID, privacy: .public): \
+                    \(result.rejection?.rawValue ?? "unknown", privacy: .public), \
+                    \(result.distanceSampleCount) sample(s), \
+                    \(String(format: "%.1f", result.samplesPerKilometer))/km, \
+                    median \(String(format: "%.1f", result.medianSampleSeconds ?? 0))s
+                    """
+                )
+            } else {
+                filled += 1
+            }
+        }
+        if filled > 0 {
+            logger.info("Reconstructed splits for \(filled) activities")
         }
     }
 

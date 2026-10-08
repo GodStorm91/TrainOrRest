@@ -268,16 +268,41 @@ enum CoachContextBuilder {
         return lines
     }
 
+    /// Splits are the only intra-run detail the model gets, so they go to the
+    /// most recent runs where pacing questions actually land. Older runs stay
+    /// as totals to keep the prompt small.
+    static let splitDetailRunCount = 3
+    /// A marathon would otherwise add 42 entries to the prompt.
+    static let splitDetailKilometerLimit = 25
+
     private static func activitySection(in context: ModelContext, calendar: Calendar) throws -> [String] {
         var descriptor = FetchDescriptor<CompletedActivity>(sortBy: [SortDescriptor(\.date, order: .reverse)])
         descriptor.fetchLimit = 10
         let activities = try context.fetch(descriptor)
         guard !activities.isEmpty else { return ["Recent runs: no synced runs."] }
         var lines = ["Last \(activities.count) run(s), most recent first:"]
-        lines += activities.map {
-            "- \(day($0.date, calendar: calendar)): \(Formatters.kilometers($0.distanceMeters)), \(Formatters.pace($0.avgPaceSecondsPerKm)), avg HR \(Formatters.heartRate($0.avgHeartRate))"
+        for (index, activity) in activities.enumerated() {
+            lines.append("- \(day(activity.date, calendar: calendar)): \(Formatters.kilometers(activity.distanceMeters)), \(Formatters.pace(activity.avgPaceSecondsPerKm)), avg HR \(Formatters.heartRate(activity.avgHeartRate))")
+            guard index < splitDetailRunCount else { continue }
+            if let splitLine = splitLine(for: activity) {
+                lines.append(splitLine)
+            }
         }
         return lines
+    }
+
+    /// One compact line per run: `km pace@HR`, partial final kilometer marked
+    /// so the model does not read a short last split as a slowdown.
+    private static func splitLine(for activity: CompletedActivity) -> String? {
+        guard let splits = activity.splits, !splits.isEmpty else { return nil }
+        let entries = splits.prefix(splitDetailKilometerLimit).map { split -> String in
+            let pace = Formatters.pace(split.paceSecondsPerKm).replacingOccurrences(of: " /km", with: "")
+            let heartRate = split.averageHeartRate.map { "@\(Int($0.rounded()))" } ?? ""
+            let marker = split.isPartial ? " (partial \(Int(split.distanceMeters.rounded()))m)" : ""
+            return "\(split.kilometer) \(pace)\(heartRate)\(marker)"
+        }
+        let suffix = splits.count > splitDetailKilometerLimit ? ", …" : ""
+        return "  splits (min/km@bpm): \(entries.joined(separator: ", "))\(suffix)"
     }
 
     private static func readinessSection(in context: ModelContext, today: Date, calendar: Calendar) throws -> [String] {

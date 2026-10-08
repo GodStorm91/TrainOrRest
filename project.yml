@@ -20,6 +20,10 @@ targets:
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        Debug:
+          ENABLE_TESTING_SEARCH_PATHS: YES
+          SKIP_COPYING_TEST_FRAMEWORKS: NO
     entitlements:
       path: TrainOrRest/TrainOrRest.entitlements
       properties:
@@ -97,6 +101,8 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
+        ENABLE_TESTING_SEARCH_PATHS: YES
+        SKIP_COPYING_TEST_FRAMEWORKS: NO
     dependencies:
       - target: TrainOrRest
 schemes:

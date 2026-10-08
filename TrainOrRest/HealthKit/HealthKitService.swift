@@ -241,6 +241,42 @@ final class HealthKitService {
         }
     }
 
+    /// Reads the raw distance and heart-rate series inside a workout window
+    /// and reconstructs per-kilometer splits. `summary(for:)` keeps only the
+    /// workout totals, so this is the only path to intra-run detail without
+    /// a third-party service. Both sample types are already covered by the
+    /// existing read authorization, so this prompts for nothing new.
+    func runningSplits(start: Date, end: Date) async throws -> SplitReconstruction {
+        let window = HKQuery.predicateForSamples(withStart: start, end: end)
+        async let distance = sampleQuery(type: HKQuantityType(.distanceWalkingRunning), predicate: window)
+        async let heartRate = sampleQuery(type: HKQuantityType(.heartRate), predicate: window)
+
+        let bpm = HKUnit.count().unitDivided(by: .minute())
+        let distanceSamples = try await distance.compactMap { sample -> DistanceSample? in
+            guard let quantity = sample as? HKQuantitySample else { return nil }
+            return DistanceSample(
+                start: quantity.startDate,
+                end: quantity.endDate,
+                meters: quantity.quantity.doubleValue(for: .meter()),
+                sourceName: quantity.sourceRevision.source.name
+            )
+        }
+        let heartRateSamples = try await heartRate.compactMap { sample -> HeartRateSample? in
+            guard let quantity = sample as? HKQuantitySample else { return nil }
+            return HeartRateSample(
+                start: quantity.startDate,
+                end: quantity.endDate,
+                bpm: quantity.quantity.doubleValue(for: bpm),
+                sourceName: quantity.sourceRevision.source.name
+            )
+        }
+
+        return SplitBuilder.reconstruct(
+            distanceSamples: distanceSamples,
+            heartRateSamples: heartRateSamples
+        )
+    }
+
     // MARK: - Wellness samples
 
     func quantitySamples(
