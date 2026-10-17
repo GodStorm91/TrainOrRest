@@ -268,6 +268,61 @@ struct PlanCopy {
     func runningDaysPerWeek(_ days: Int) -> String { text(en: "\(days)/week", ja: "週\(days)日", vi: "\(days) ngày/tuần") }
     func weekOfTotal(_ week: Int, total: Int) -> String { text(en: "Week \(week) of \(total)", ja: "全\(total)週中 \(week)週目", vi: "Tuần \(week) / \(total)") }
 
+    /// User facing wording for a plan validation issue. `Issue.message` is an
+    /// English engineering string with a zero based week index, so no surface
+    /// a person reads may print it directly.
+    func issueText(_ issue: PlanValidator.Issue) -> String {
+        switch issue.kind {
+        case .weeklyVolumeTooHigh:
+            guard let week = humanWeek(issue), let amount = issue.amountKm, let limit = issue.limitKm else { break }
+            return text(
+                en: "Week \(week): the \(km(amount)) km week is above your \(km(limit)) km cap.",
+                ja: "第\(week)週: \(km(amount)) kmは上限の\(km(limit)) kmを超えています。",
+                vi: "Tuần \(week): \(km(amount)) km vượt mức trần \(km(limit)) km."
+            )
+        case .rampExceeded:
+            guard let week = humanWeek(issue), let amount = issue.amountKm, let limit = issue.limitKm else { break }
+            return text(
+                en: "Week \(week): \(km(amount)) km builds faster than the \(km(limit)) km safe step up.",
+                ja: "第\(week)週: \(km(amount)) kmは安全な増量幅\(km(limit)) kmを超えています。",
+                vi: "Tuần \(week): \(km(amount)) km tăng nhanh hơn mức an toàn \(km(limit)) km."
+            )
+        case .taperNotMonotonic:
+            guard let week = humanWeek(issue), let amount = issue.amountKm else { break }
+            return text(
+                en: "Week \(week): \(km(amount)) km does not taper down from the week before.",
+                ja: "第\(week)週: \(km(amount)) kmは前週から減っていません。",
+                vi: "Tuần \(week): \(km(amount)) km chưa giảm so với tuần trước."
+            )
+        case .longRunTooLong:
+            guard let week = humanWeek(issue), let amount = issue.amountKm, let limit = issue.limitKm else { break }
+            return text(
+                en: "Week \(week): the \(km(amount)) km long run is above the \(km(limit)) km cap.",
+                ja: "第\(week)週: ロング走\(km(amount)) kmは上限の\(km(limit)) kmを超えています。",
+                vi: "Tuần \(week): buổi chạy dài \(km(amount)) km vượt mức trần \(km(limit)) km."
+            )
+        case .qualityTooClose:
+            guard let gap = issue.gapDays, let day = issue.day else { break }
+            let date = day.formatted(.dateTime.month().day().locale(language.uiLocale))
+            return text(
+                en: "Two hard sessions sit \(gap) day\(gap == 1 ? "" : "s") apart around \(date).",
+                ja: "\(date)前後で質練習が\(gap)日しか空いていません。",
+                vi: "Hai buổi nặng chỉ cách nhau \(gap) ngày quanh \(date)."
+            )
+        default:
+            break
+        }
+        return issue.message
+    }
+
+    private func humanWeek(_ issue: PlanValidator.Issue) -> Int? {
+        issue.weekIndex.map { $0 + 1 }
+    }
+
+    private func km(_ value: Double) -> String {
+        String(format: value == value.rounded() ? "%.0f" : "%.1f", locale: language.uiLocale, value)
+    }
+
     func activePlanStatus(_ status: ActivePlanStatus) -> String {
         switch (language, status) {
         case (.en, .active): "Active"

@@ -26,10 +26,26 @@ enum PlanValidator {
         }
 
         var kind: Kind
+        /// Zero based. Add one before showing it to a person.
         var weekIndex: Int?
+        /// English. Logs, tests, and the chat rejection mapping read this.
+        /// User facing surfaces read `PlanCopy.issueText` instead, which
+        /// formats the numbers below in the reader's language.
         var message: String
+        var amountKm: Double?
+        var limitKm: Double?
+        var gapDays: Int?
+        var day: Date?
 
         var description: String { message }
+
+        /// Identity is the kind, the week, and the English message. The
+        /// numbers below are display payload. `introducedValidationIssues`
+        /// subtracts the baseline issues from the candidate issues, so a
+        /// payload difference must not make a pre-existing risk look new.
+        static func == (lhs: Issue, rhs: Issue) -> Bool {
+            lhs.kind == rhs.kind && lhs.weekIndex == rhs.weekIndex && lhs.message == rhs.message
+        }
     }
 
     static func validate(
@@ -74,7 +90,7 @@ enum PlanValidator {
                 return Issue(
                     kind: .workoutOutsidePlanWeek,
                     weekIndex: week.index,
-                    message: "Week \(week.index): \(workout.kind.rawValue) on \(dayString(workout.date, calendar: calendar)) is outside that week"
+                    message: "Week \(week.index + 1): \(workout.kind.rawValue) on \(dayString(workout.date, calendar: calendar)) is outside that week"
                 )
             }
         }
@@ -89,7 +105,7 @@ enum PlanValidator {
                     return [Issue(
                         kind: .invalidDistance,
                         weekIndex: week.index,
-                        message: "Week \(week.index): \(workout.kind.rawValue) has invalid distance"
+                        message: "Week \(week.index + 1): \(workout.kind.rawValue) has invalid distance"
                     )]
                 }
                 guard !workout.structure.isEmpty else { return [] }
@@ -98,7 +114,7 @@ enum PlanValidator {
                 return [Issue(
                     kind: .structureDistanceMismatch,
                     weekIndex: week.index,
-                    message: "Week \(week.index): \(workout.kind.rawValue) structure covers \(structured) km but claims \(workout.distanceKm) km"
+                    message: "Week \(week.index + 1): \(workout.kind.rawValue) structure covers \(structured) km but claims \(workout.distanceKm) km"
                 )]
             }
         }
@@ -111,7 +127,9 @@ enum PlanValidator {
             return Issue(
                 kind: .weeklyVolumeTooHigh,
                 weekIndex: week.index,
-                message: "Week \(week.index): volume \(week.targetVolumeKm) km exceeds cap \(peakCapKm) km"
+                message: "Week \(week.index + 1): volume \(week.targetVolumeKm) km exceeds cap \(peakCapKm) km",
+                amountKm: week.targetVolumeKm,
+                limitKm: peakCapKm
             )
         }
     }
@@ -124,7 +142,7 @@ enum PlanValidator {
                 return Issue(
                     kind: .workoutOnUnavailableDay,
                     weekIndex: week.index,
-                    message: "Week \(week.index): \(workout.kind.rawValue) on unavailable \(day.shortName)"
+                    message: "Week \(week.index + 1): \(workout.kind.rawValue) on unavailable \(day.shortName)"
                 )
             }
         }
@@ -141,7 +159,9 @@ enum PlanValidator {
                 return Issue(
                     kind: .longRunTooLong,
                     weekIndex: week.index,
-                    message: "Week \(week.index): long run \(workout.distanceKm) km exceeds cap"
+                    message: "Week \(week.index + 1): long run \(workout.distanceKm) km exceeds cap",
+                    amountKm: workout.distanceKm,
+                    limitKm: min(cap, fractionCap)
                 )
             }
         }
@@ -163,7 +183,9 @@ enum PlanValidator {
                 issues.append(Issue(
                     kind: .rampExceeded,
                     weekIndex: week.index,
-                    message: "Week \(week.index): volume \(week.targetVolumeKm) km exceeds ramp limit \(limit) km"
+                    message: "Week \(week.index + 1): volume \(week.targetVolumeKm) km exceeds ramp limit \(limit) km",
+                    amountKm: week.targetVolumeKm,
+                    limitKm: limit
                 ))
             }
         }
@@ -186,7 +208,8 @@ enum PlanValidator {
                 issues.append(Issue(
                     kind: .taperNotMonotonic,
                     weekIndex: week.index,
-                    message: "Week \(week.index): taper volume \(week.targetVolumeKm) km not decreasing"
+                    message: "Week \(week.index + 1): taper volume \(week.targetVolumeKm) km not decreasing",
+                    amountKm: week.targetVolumeKm
                 ))
             }
             previous = week.targetVolumeKm
@@ -208,7 +231,9 @@ enum PlanValidator {
             return Issue(
                 kind: .qualityTooClose,
                 weekIndex: nil,
-                message: "Hard sessions \(gap) day(s) apart around \(dayString(earlier, calendar: calendar))"
+                message: "Hard sessions \(gap) day(s) apart around \(dayString(earlier, calendar: calendar))",
+                gapDays: gap,
+                day: earlier
             )
         }
     }

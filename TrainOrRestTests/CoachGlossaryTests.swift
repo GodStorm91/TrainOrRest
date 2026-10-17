@@ -118,6 +118,24 @@ final class CoachGlossaryTests: XCTestCase {
         XCTAssertNil(CoachGlossaryTokenURL.termID(from: URL(string: "https://example.com/acwr")!))
     }
 
+    func testVisiblePrefixHidesAMarkerThatIsStillArriving() {
+        XCTAssertEqual(CoachGlossary.visiblePrefix(of: "Chỉ số [[term:acwr|AC"), "Chỉ số ")
+        XCTAssertEqual(CoachGlossary.visiblePrefix(of: "Chỉ số [["), "Chỉ số ")
+        XCTAssertEqual(
+            CoachGlossary.visiblePrefix(of: "[[term:acwr|ACWR]] cao, [[term:hrv|H"),
+            "[[term:acwr|ACWR]] cao, "
+        )
+    }
+
+    func testVisiblePrefixLeavesCompleteTextUnchanged() {
+        XCTAssertEqual(CoachGlossary.visiblePrefix(of: "Hôm nay nghỉ nhé."), "Hôm nay nghỉ nhé.")
+        XCTAssertEqual(
+            CoachGlossary.visiblePrefix(of: "[[term:acwr|ACWR]] và [[term:hrv|HRV]]."),
+            "[[term:acwr|ACWR]] và [[term:hrv|HRV]]."
+        )
+        XCTAssertEqual(CoachGlossary.visiblePrefix(of: ""), "")
+    }
+
     private func textSegments(_ segments: [CoachGlossarySegment]) -> [String] {
         segments.compactMap {
             guard case let .text(text) = $0 else { return nil }

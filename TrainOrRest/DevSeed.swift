@@ -267,6 +267,8 @@ enum DevSeed {
 
     /// `TOR_DEV_ADAPTIVE=queued|preparing|proposal|no-change|failed|stale|applied|reverted|superseded|needs-key|dismissed`
     /// paired with `TOR_DEV_PLAN=1` renders a deterministic next-week review state.
+    /// Add `TOR_DEV_ADAPTIVE_RISK=1` to propose an oversized long run, which
+    /// trips the long run cap and renders the load warning banner.
     @MainActor
     private static func seedAdaptiveReviewIfRequested(_ context: ModelContext) {
         guard ProcessInfo.processInfo.environment["TOR_DEV_PLAN"] == "1",
@@ -371,6 +373,18 @@ enum DevSeed {
                 && $0.date >= start
                 && $0.date < end
         }) else { return nil }
+        if ProcessInfo.processInfo.environment["TOR_DEV_ADAPTIVE_RISK"] == "1" {
+            return PlanAdjustmentProposal(changes: [.init(
+                date: CoachContextBuilder.day(workout.date, calendar: calendar),
+                action: .replace,
+                workout: PlanAdjustmentProposal.CreateWorkout(
+                    kind: "long",
+                    blocks: [.init(repeatCount: 1, steps: [
+                        .init(role: "work", targetType: "distance_km", targetValue: 10, paceZone: "easy")
+                    ])]
+                )
+            )])
+        }
         return PlanAdjustmentProposal(changes: [.init(
             date: CoachContextBuilder.day(workout.date, calendar: calendar),
             action: .rest

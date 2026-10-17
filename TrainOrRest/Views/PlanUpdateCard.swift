@@ -100,7 +100,7 @@ struct CoachTrustLedger: View {
             } else {
                 title = language.planLoadWarningTitle
             }
-            rows.append(.warning(title, value: warning.message))
+            rows.append(.warning(title, value: language.plan.issueText(warning)))
         }
         for (kind, check) in zip(kinds, checks) where !warned.contains(kind) {
             rows.append(.check(check.title, value: check.detail))
@@ -180,7 +180,7 @@ private struct CoachLoadWarningBanner: View {
                         .font(.caption.weight(.bold))
                         .foregroundStyle(Theme.warn)
                     ForEach(Array(warnings.enumerated()), id: \.offset) { _, warning in
-                        Text(warning.message)
+                        Text(language.plan.issueText(warning))
                             .font(.subheadline)
                             .foregroundStyle(Theme.text)
                             .fixedSize(horizontal: false, vertical: true)
@@ -202,6 +202,7 @@ private struct CoachLoadWarningBanner: View {
 /// Facts about the change the runner should know. Nothing here gates Apply.
 private struct CoachPlanNoteRow: View {
     let notes: [PlanValidator.Issue]
+    let language: CoachLanguage
 
     var body: some View {
         if !notes.isEmpty {
@@ -211,7 +212,7 @@ private struct CoachPlanNoteRow: View {
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(Array(notes.enumerated()), id: \.offset) { _, note in
-                        Text(note.message)
+                        Text(language.plan.issueText(note))
                             .font(.subheadline)
                             .foregroundStyle(Theme.text)
                             .fixedSize(horizontal: false, vertical: true)
@@ -273,7 +274,7 @@ struct PlanUpdateCard: View {
                     CoachTrustLedger(language: language, loadRisks: candidate.loadRisks, notes: candidate.notes)
                     CoachPlanChangedBanner(isVisible: candidate.changedSinceProposed, language: language)
                     CoachLoadWarningBanner(warnings: candidate.loadRisks, language: language)
-                    CoachPlanNoteRow(notes: candidate.notes)
+                    CoachPlanNoteRow(notes: candidate.notes, language: language)
                     diffRow
 
                     Rectangle().fill(Theme.line).frame(height: 1)
@@ -439,7 +440,7 @@ struct PlanProposalCard: View {
                     CoachTrustLedger(language: language, loadRisks: candidate.loadRisks, notes: candidate.notes)
                     CoachPlanChangedBanner(isVisible: candidate.changedSinceProposed, language: language)
                     CoachLoadWarningBanner(warnings: candidate.loadRisks, language: language)
-                    CoachPlanNoteRow(notes: candidate.notes)
+                    CoachPlanNoteRow(notes: candidate.notes, language: language)
 
 
                     Text(candidate.summary)

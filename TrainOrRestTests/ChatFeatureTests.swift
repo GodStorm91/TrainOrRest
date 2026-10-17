@@ -3446,10 +3446,10 @@ final class ChatFeatureTests: XCTestCase {
         try assertGoldenRouting(fixture, client: prepared.client, in: prepared.context)
         let request = try XCTUnwrap(prepared.client.requests.first)
         for anchor in fixture.setup.readinessAnchors {
-            XCTAssertTrue(request.system.contains(anchor), "system missing readiness anchor: \(anchor)")
+            XCTAssertTrue(request.systemText.contains(anchor), "system missing readiness anchor: \(anchor)")
         }
         for anchor in fixture.setup.plannedWorkoutAnchors {
-            XCTAssertTrue(request.system.contains(anchor), "system missing plan anchor: \(anchor)")
+            XCTAssertTrue(request.systemText.contains(anchor), "system missing plan anchor: \(anchor)")
         }
         let replayed = request.messages.map { message in
             message.content.compactMap { block -> String? in

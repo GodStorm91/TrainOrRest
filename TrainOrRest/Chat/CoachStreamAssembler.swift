@@ -15,6 +15,7 @@ struct CoachStreamAssembler {
         var id: String
         var name: String
         var inputJSON = ""
+        var reader: PartialToolTextReader?
     }
 
     private enum OpenBlock {
@@ -23,6 +24,11 @@ struct CoachStreamAssembler {
     }
 
     var onText: @MainActor (String) -> Void = { _ in }
+    /// The forced answer tool makes the model write the reply inside tool
+    /// input, so nothing reaches the bubble until the whole call decodes.
+    /// Naming the tool and its text property here lets the reply appear while
+    /// the rest of the card is still generating.
+    var streamedToolText: (tool: String, key: String)? = (CoachToolCatalog.coachResponseName, "content")
 
     func assemble(_ events: AsyncThrowingStream<AnthropicStreamEvent, Error>) async throws -> AssembledResponse {
         var blocks: [Int: ClaudeContentBlock] = [:]
@@ -43,7 +49,8 @@ struct CoachStreamAssembler {
                 case .text:
                     openBlocks[index] = .text(TextBlock())
                 case let .toolUse(id, name):
-                    openBlocks[index] = .tool(ToolBlock(id: id, name: name))
+                    let reader = streamedToolText.flatMap { $0.tool == name ? PartialToolTextReader(key: $0.key) : nil }
+                    openBlocks[index] = .tool(ToolBlock(id: id, name: name, reader: reader))
                 }
             case .textDelta(let index, let text):
                 let block: TextBlock
@@ -69,7 +76,9 @@ struct CoachStreamAssembler {
                     continue
                 }
                 block.inputJSON += fragment
+                let streamed = block.reader != nil ? block.reader!.consume(fragment) : ""
                 openBlocks[index] = .tool(block)
+                if !streamed.isEmpty { await onText(streamed) }
             case .contentBlockStop(let index):
                 guard let block = openBlocks.removeValue(forKey: index) else {
                     // Duplicate or orphaned stop frames are harmless. Treat them

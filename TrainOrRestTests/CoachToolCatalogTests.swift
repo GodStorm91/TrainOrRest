@@ -48,6 +48,63 @@ final class CoachToolCatalogTests: XCTestCase {
         )
     }
 
+    func testClaudeRequestSendsAFlatSystemStringWithoutAPrefix() throws {
+        let request = ClaudeRequest(
+            model: "claude-test",
+            system: "Today is 2026-10-09.",
+            tools: [],
+            messages: [ClaudeMessageParam(role: "user", content: [.text("hi")])]
+        )
+
+        guard case .object(let json) = try encodedJSON(request) else {
+            return XCTFail("ClaudeRequest must encode as an object")
+        }
+
+        XCTAssertEqual(json["system"], .string("Today is 2026-10-09."))
+        XCTAssertEqual(request.systemText, "Today is 2026-10-09.")
+    }
+
+    /// The stable half of the prompt must land in its own cacheable block, and
+    /// it must come first, or the server cannot reuse the prefix across turns.
+    func testClaudeRequestMarksTheSystemPrefixCacheable() throws {
+        let request = ClaudeRequest(
+            model: "claude-test",
+            system: "Today is 2026-10-09.",
+            systemPrefix: "Stable policy text.",
+            tools: [],
+            messages: [ClaudeMessageParam(role: "user", content: [.text("hi")])]
+        )
+
+        guard case .object(let json) = try encodedJSON(request),
+              case .array(let blocks)? = json["system"], blocks.count == 2 else {
+            return XCTFail("ClaudeRequest must encode system as two blocks")
+        }
+
+        XCTAssertEqual(
+            blocks[0],
+            .object([
+                "type": .string("text"),
+                "text": .string("Stable policy text."),
+                "cache_control": .object(["type": .string("ephemeral")])
+            ])
+        )
+        XCTAssertEqual(
+            blocks[1],
+            .object(["type": .string("text"), "text": .string("Today is 2026-10-09.")])
+        )
+        XCTAssertEqual(request.systemText, "Stable policy text.\n\nToday is 2026-10-09.")
+    }
+
+    /// The reply streams out of the answer tool, so `content` must serialize
+    /// before the other properties or the first words arrive late.
+    func testCoachResponseSchemaSerializesContentFirst() throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let body = try XCTUnwrap(String(data: encoder.encode(CoachToolCatalog.coachResponse), encoding: .utf8))
+        let properties = try XCTUnwrap(body.range(of: "\"properties\":{"))
+        XCTAssertTrue(body[properties.upperBound...].hasPrefix("\"content\":"))
+    }
+
     func testExplainOnlySchemaAndPayloadRoundTrip() throws {
         guard case .object(let schema) = CoachToolCatalog.explainOnly.inputSchema,
               case .object(let properties)? = schema["properties"],

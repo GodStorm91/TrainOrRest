@@ -88,6 +88,10 @@ final class ChatMessage {
     var structuredResponseJSON: String? = nil
     var completedAt: Date? = nil
     var generationStartedAt: Date? = nil
+    /// When the first word of this reply reached the bubble. The forced answer
+    /// tool used to hide every word until the whole card decoded, so this is
+    /// the number that tracks what the user actually waits for.
+    var firstReadableAt: Date? = nil
 
     init(
         uuid: UUID = UUID(),
@@ -176,6 +180,14 @@ final class ChatMessage {
     var generationDuration: TimeInterval? {
         guard let completedAt else { return nil }
         let elapsed = completedAt.timeIntervalSince(generationStartedAt ?? date)
+        return elapsed >= 0 ? elapsed : nil
+    }
+
+    /// Seconds until the first word appeared. Nil when the reply arrived in
+    /// one piece instead of streaming.
+    var firstReadableDuration: TimeInterval? {
+        guard let firstReadableAt else { return nil }
+        let elapsed = firstReadableAt.timeIntervalSince(generationStartedAt ?? date)
         return elapsed >= 0 ? elapsed : nil
     }
 

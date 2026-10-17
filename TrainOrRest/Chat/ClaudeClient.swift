@@ -105,15 +105,70 @@ extension CoachCredential {
 struct ClaudeRequest: Encodable {
     var model: String
     var maxTokens: Int = CoachChatConfig.maxOutputTokens
+    /// Volatile system text. Today's date, athlete data, and anything else
+    /// that changes between turns.
     var system: String
+    /// Stable system text that precedes `system`. Anthropic caches the
+    /// longest matching prefix of tools plus system, so this part carries the
+    /// cache breakpoint and skips prefill on later turns. Providers without
+    /// prompt caching read `systemText` instead.
+    var systemPrefix: String = ""
     var tools: [ClaudeTool]
     var toolChoice: CoachToolCatalog.ToolChoice? = nil
     var messages: [ClaudeMessageParam]
 
+    /// The whole system prompt as one string.
+    var systemText: String {
+        systemPrefix.isEmpty ? system : systemPrefix + "\n" + system
+    }
+
     enum CodingKeys: String, CodingKey {
-        case model, system, tools, messages
+        case model, system, tools, messages, stream
         case maxTokens = "max_tokens"
         case toolChoice = "tool_choice"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(model, forKey: .model)
+        try container.encode(maxTokens, forKey: .maxTokens)
+        if systemPrefix.isEmpty {
+            try container.encode(system, forKey: .system)
+        } else {
+            try container.encode(
+                [
+                    ClaudeSystemBlock(text: systemPrefix, cached: true),
+                    ClaudeSystemBlock(text: system, cached: false)
+                ],
+                forKey: .system
+            )
+        }
+        try container.encode(tools, forKey: .tools)
+        try container.encodeIfPresent(toolChoice, forKey: .toolChoice)
+        try container.encode(messages, forKey: .messages)
+    }
+}
+
+private struct ClaudeSystemBlock: Encodable {
+    struct CacheControl: Encodable {
+        let type = "ephemeral"
+    }
+
+    var text: String
+    var cached: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case type, text
+        case cacheControl = "cache_control"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode("text", forKey: .type)
+        try container.encode(text, forKey: .text)
+        if cached {
+            try container.encode(CacheControl(), forKey: .cacheControl)
+        }
     }
 }
 
@@ -157,7 +212,7 @@ final class ClaudeClient: ClaudeServicing {
         urlRequest.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         urlRequest.setValue(CoachChatConfig.anthropicVersion, forHTTPHeaderField: "anthropic-version")
         urlRequest.setValue("application/json", forHTTPHeaderField: "content-type")
-        urlRequest.httpBody = try JSONEncoder().encode(request)
+        urlRequest.httpBody = try Self.bodyEncoder.encode(request)
 
         do {
             let (data, response) = try await session.data(for: urlRequest)
@@ -225,9 +280,20 @@ final class ClaudeClient: ClaudeServicing {
         urlRequest.setValue(CoachChatConfig.anthropicVersion, forHTTPHeaderField: "anthropic-version")
         urlRequest.setValue("application/json", forHTTPHeaderField: "content-type")
         urlRequest.timeoutInterval = 120
-        urlRequest.httpBody = try JSONEncoder().encode(StreamingClaudeRequest(request: request))
+        urlRequest.httpBody = try Self.bodyEncoder.encode(StreamingClaudeRequest(request: request))
         return urlRequest
     }
+
+    /// Sorted keys keep the tool schema's property order stable across
+    /// launches. Swift dictionaries hash with a per-process seed, so without
+    /// this the model saw `coach_response` properties in a random order and
+    /// often wrote `content` last. Sorting puts `content` first, which is
+    /// what `PartialToolTextReader` streams into the chat bubble.
+    private static let bodyEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return encoder
+    }()
 
     private func streamOnce(
         _ urlRequest: URLRequest,
@@ -294,26 +360,11 @@ private extension AnthropicStreamEvent {
 }
 
 private struct StreamingClaudeRequest: Encodable {
-    var model: String
-    var maxTokens: Int
-    var system: String
-    var tools: [ClaudeTool]
-    var toolChoice: CoachToolCatalog.ToolChoice?
-    var messages: [ClaudeMessageParam]
-    var stream = true
+    var request: ClaudeRequest
 
-    enum CodingKeys: String, CodingKey {
-        case model, system, tools, messages, stream
-        case maxTokens = "max_tokens"
-        case toolChoice = "tool_choice"
-    }
-
-    init(request: ClaudeRequest) {
-        model = request.model
-        maxTokens = request.maxTokens
-        system = request.system
-        tools = request.tools
-        toolChoice = request.toolChoice
-        messages = request.messages
+    func encode(to encoder: Encoder) throws {
+        try request.encode(to: encoder)
+        var container = encoder.container(keyedBy: ClaudeRequest.CodingKeys.self)
+        try container.encode(true, forKey: .stream)
     }
 }

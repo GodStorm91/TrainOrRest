@@ -340,7 +340,7 @@ private struct ResponsesRequest: Encodable {
 
     init(from request: ClaudeRequest) {
         model = request.model
-        instructions = request.system
+        instructions = request.systemText
         input = request.messages.flatMap(ResponsesInputItem.items)
 
         guard !request.tools.isEmpty else {

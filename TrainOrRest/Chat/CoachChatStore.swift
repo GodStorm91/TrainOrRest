@@ -330,6 +330,7 @@ final class CoachChatStore: ObservableObject {
             operationID: snapshot.operationID
         )
         context.insert(assistantTurn)
+        assistantTurn.generationStartedAt = messageDate
         generationState = .sending(messageId: assistantTurn.turnID)
         updateThread(threadID, titleFrom: visibleText.isEmpty ? trimmed : visibleText, in: context)
 
@@ -557,6 +558,7 @@ final class CoachChatStore: ObservableObject {
         isRetrying = true
         isSending = true
         assistantTurn.generationStartedAt = Date()
+        assistantTurn.firstReadableAt = nil
         await executeAttempt(
             assistantTurn,
             snapshot: snapshot,
@@ -749,14 +751,15 @@ final class CoachChatStore: ObservableObject {
         let today = snapshot.createdAt
         let language = CoachLanguage(rawValue: snapshot.locale) ?? .current
         generationState = .processing(messageId: assistantTurn.turnID, stage: .preparingContext, round: 1)
-        var system = try CoachSignpost.measureSync(CoachSignpost.Name.contextBuild) {
+        let liveContext = try CoachSignpost.measureSync(CoachSignpost.Name.contextBuild) {
             try CoachContextBuilder.build(in: context, today: today, calendar: calendar)
         }
+        var policy = CoachContextBuilder.policy
         let directive = language.systemPromptDirective
         if !directive.isEmpty {
-            system += "\n\n\(directive)"
+            policy += "\n\n\(directive)"
         }
-        system += """
+        policy += """
 
 When your reply asks the user to choose between next steps, call `\(CoachToolCatalog.coachResponseName)` with `content` and structured `interaction` metadata instead of writing the choices only as prose. Use `single_choice`, 2-4 concise options, and `allowOther: true` when a custom answer is useful. If no decision is needed, a normal text response is fine.
 """
@@ -808,7 +811,8 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
             let request = ClaudeRequest(
                 model: model,
                 maxTokens: maxTokens,
-                system: system,
+                system: liveContext,
+                systemPrefix: policy,
                 tools: tools,
                 toolChoice: toolChoice(for: snapshot.actionType),
                 messages: conversation
@@ -825,6 +829,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
                 try await client.stream(request, credential: access.credential)
             }
             var replacementStarted = false
+            var streamedRaw = ""
             var lastStreamSave = Date.distantPast
             let streamSaveInterval: TimeInterval = 0.15
             let assembler = CoachStreamAssembler(
@@ -838,7 +843,11 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
                         self.generationState = .streaming(messageId: assistantTurn.turnID)
                         replacementStarted = true
                     }
-                    assistantTurn.text += delta
+                    streamedRaw += delta
+                    assistantTurn.text = CoachGlossary.normalizeModelText(CoachGlossary.visiblePrefix(of: streamedRaw))
+                    if assistantTurn.firstReadableAt == nil, !assistantTurn.text.isEmpty {
+                        assistantTurn.firstReadableAt = Date()
+                    }
                     let saveTime = Date()
                     if saveTime.timeIntervalSince(lastStreamSave) >= streamSaveInterval {
                         lastStreamSave = saveTime
