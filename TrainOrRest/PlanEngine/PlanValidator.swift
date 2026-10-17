@@ -17,6 +17,7 @@ enum PlanValidator {
             case taperNotMonotonic
             case qualityTooClose
             case raceMissing
+            case raceOffSeasonDay
             case weeklyVolumeTooHigh
             case duplicateWorkoutDay
             case workoutOutsidePlanWeek
@@ -51,7 +52,8 @@ enum PlanValidator {
     static func validate(
         _ plan: TrainingPlanSpec,
         calendar: Calendar,
-        peakCapKm: Double? = nil
+        peakCapKm: Double? = nil,
+        seasonRaceDates: Set<Date> = []
     ) -> [Issue] {
         var issues: [Issue] = []
         issues += availabilityIssues(plan, calendar: calendar)
@@ -60,7 +62,7 @@ enum PlanValidator {
         issues += rampIssues(plan)
         issues += taperIssues(plan)
         issues += qualitySpacingIssues(plan, calendar: calendar)
-        issues += raceIssues(plan, calendar: calendar)
+        issues += raceIssues(plan, calendar: calendar, seasonRaceDates: seasonRaceDates)
         issues += duplicateDayIssues(plan, calendar: calendar)
         issues += planWeekIssues(plan, calendar: calendar)
         issues += distanceIssues(plan)
@@ -249,16 +251,39 @@ enum PlanValidator {
         return formatter.string(from: date)
     }
 
-    private static func raceIssues(_ plan: TrainingPlanSpec, calendar: Calendar) -> [Issue] {
+    private static func raceIssues(
+        _ plan: TrainingPlanSpec,
+        calendar: Calendar,
+        seasonRaceDates: Set<Date>
+    ) -> [Issue] {
         guard !plan.weeks.isEmpty else { return [] }
-        let raceDay = calendar.startOfDay(for: plan.goal.raceDate)
-        let races = plan.weeks.flatMap(\.workouts).filter { $0.kind == .race }
-        guard races.count != 1 || races.first?.date != raceDay else { return [] }
-        return [Issue(
-            kind: .raceMissing,
-            weekIndex: plan.weeks.last?.index,
-            message: "Plan must contain exactly one race workout on race day"
-        )]
+        let goalRaceDay = calendar.startOfDay(for: plan.goal.raceDate)
+        let seasonDays = Set(seasonRaceDates.map { calendar.startOfDay(for: $0) })
+        let races = plan.weeks.flatMap { week in
+            week.workouts.compactMap { workout -> (weekIndex: Int, workout: PlannedWorkoutSpec)? in
+                guard workout.kind == .race else { return nil }
+                return (week.index, workout)
+            }
+        }
+        var issues: [Issue] = []
+        if races.filter({ calendar.startOfDay(for: $0.workout.date) == goalRaceDay }).count != 1 {
+            issues.append(Issue(
+                kind: .raceMissing,
+                weekIndex: plan.weeks.last?.index,
+                message: "Plan must contain exactly one race workout on race day"
+            ))
+        }
+        issues += races.compactMap { race in
+            let day = calendar.startOfDay(for: race.workout.date)
+            guard day != goalRaceDay, !seasonDays.contains(day) else { return nil }
+            return Issue(
+                kind: .raceOffSeasonDay,
+                weekIndex: race.weekIndex,
+                message: "Race workout on a day with no scheduled race",
+                day: day
+            )
+        }
+        return issues
     }
 }
 
@@ -274,7 +299,7 @@ extension PlanValidator.Issue.Kind {
             .acknowledge
         case .paceUnavailable:
             .inform
-        case .workoutOnUnavailableDay, .raceMissing, .duplicateWorkoutDay, .workoutOutsidePlanWeek, .invalidDistance, .structureDistanceMismatch:
+        case .workoutOnUnavailableDay, .raceMissing, .raceOffSeasonDay, .duplicateWorkoutDay, .workoutOutsidePlanWeek, .invalidDistance, .structureDistanceMismatch:
             .blocking
         }
     }
