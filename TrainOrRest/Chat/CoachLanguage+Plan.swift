@@ -309,6 +309,12 @@ struct PlanCopy {
                 ja: "\(date)前後で質練習が\(gap)日しか空いていません。",
                 vi: "Hai buổi nặng chỉ cách nhau \(gap) ngày quanh \(date)."
             )
+        case .raceOffSeasonDay:
+            return text(
+                en: "Race workout on a day with no scheduled race",
+                ja: "レースのない日にレースワークアウトがあります",
+                vi: "Có buổi race vào ngày không có race nào"
+            )
         default:
             break
         }

@@ -169,9 +169,9 @@ enum CoachToolCatalog {
     @MainActor
     static func tools(allowProposals: Bool) -> [ClaudeTool] {
         if allowProposals {
-            return [coachResponse, explainOnly, planEditDraft, ruleRef]
+            return [coachResponse, explainOnly, planEditDraft, ruleRef] + CoachRaceTools.tools
         }
-        return [coachResponse, explainOnly, ruleRef]
+        return [coachResponse, explainOnly, ruleRef, CoachRaceTools.listRaces]
     }
 
     private static var interactionSchema: JSONValue {

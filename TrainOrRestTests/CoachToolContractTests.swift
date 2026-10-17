@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import TrainOrRest
 
@@ -79,6 +80,75 @@ final class CoachToolContractTests: XCTestCase {
         XCTAssertTrue(actions.contains(.string("create")))
         XCTAssertEqual(kinds, ["easy", "long", "tempo", "threshold", "intervals"].map(JSONValue.string))
         XCTAssertFalse(kinds.contains(.string("race")), "race must never be creatable")
+    }
+
+    func testRaceToolSchemasAreClosedWithExactRequiredFields() throws {
+        let expected: [(ClaudeTool, [JSONValue])] = [
+            (CoachRaceTools.listRaces, []),
+            (CoachRaceTools.proposeAddRace, ["name", "date", "distance_meters"].map(JSONValue.string)),
+            (CoachRaceTools.proposeUpdateRace, ["race_id"].map(JSONValue.string)),
+            (CoachRaceTools.proposeRemoveRace, ["race_id"].map(JSONValue.string)),
+            (CoachRaceTools.proposeRebalanceForRaces, []),
+            (CoachRaceTools.recordRaceResult, ["race_id", "finish_time_seconds"].map(JSONValue.string))
+        ]
+
+        for (tool, required) in expected {
+            guard case .object(let schema) = tool.inputSchema else {
+                return XCTFail("\(tool.name) must have an object schema.")
+            }
+            XCTAssertEqual(schema["additionalProperties"], .bool(false), "\(tool.name) must reject unknown fields.")
+            XCTAssertEqual(schema["required"], .array(required), "\(tool.name) required fields changed.")
+        }
+    }
+
+    func testRacePayloadsDecodeEveryOptionalField() throws {
+        let add = try JSONDecoder().decode(
+            CoachRaceTools.ProposeAddRacePayload.self,
+            from: #"{"name":"Spring 10K","date":"2026-05-10","distance_meters":10000,"target_time_seconds":2700,"priority":"B"}"#.data(using: .utf8)!
+        )
+        XCTAssertEqual(add.name, "Spring 10K")
+        XCTAssertEqual(add.date, "2026-05-10")
+        XCTAssertEqual(add.distanceMeters, 10_000)
+        XCTAssertEqual(add.targetTimeSeconds, 2_700)
+        XCTAssertEqual(add.priority, .b)
+
+        let update = try JSONDecoder().decode(
+            CoachRaceTools.ProposeUpdateRacePayload.self,
+            from: #"{"race_id":"E4A0E648-82D3-4CC4-B6A9-FFD5E82DE698","name":"Autumn Half","date":"2026-10-18","distance_meters":21097.5,"target_time_seconds":6600,"priority":"C"}"#.data(using: .utf8)!
+        )
+        XCTAssertEqual(update.raceID, "E4A0E648-82D3-4CC4-B6A9-FFD5E82DE698")
+        XCTAssertEqual(update.name, "Autumn Half")
+        XCTAssertEqual(update.date, "2026-10-18")
+        XCTAssertEqual(update.distanceMeters, 21_097.5)
+        XCTAssertEqual(update.targetTimeSeconds, 6_600)
+        XCTAssertEqual(update.priority, .c)
+
+        let result = try JSONDecoder().decode(
+            CoachRaceTools.RecordRaceResultPayload.self,
+            from: #"{"race_id":"5394DB81-2BD7-4CCA-8CD5-4AED3DF926AA","finish_time_seconds":13205,"average_heart_rate":158}"#.data(using: .utf8)!
+        )
+        XCTAssertEqual(result.raceID, "5394DB81-2BD7-4CCA-8CD5-4AED3DF926AA")
+        XCTAssertEqual(result.finishTimeSeconds, 13_205)
+        XCTAssertEqual(result.averageHeartRate, 158)
+    }
+
+    func testRacePayloadsRejectMissingRequiredFields() throws {
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            CoachRaceTools.ProposeAddRacePayload.self,
+            from: #"{"name":"Spring 10K","distance_meters":10000}"#.data(using: .utf8)!
+        ))
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            CoachRaceTools.ProposeUpdateRacePayload.self,
+            from: #"{}"#.data(using: .utf8)!
+        ))
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            CoachRaceTools.ProposeRemoveRacePayload.self,
+            from: #"{}"#.data(using: .utf8)!
+        ))
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            CoachRaceTools.RecordRaceResultPayload.self,
+            from: #"{"race_id":"5394DB81-2BD7-4CCA-8CD5-4AED3DF926AA"}"#.data(using: .utf8)!
+        ))
     }
 
     // MARK: - Exact payload decoding

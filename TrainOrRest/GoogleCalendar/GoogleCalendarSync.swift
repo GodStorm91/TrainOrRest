@@ -2063,7 +2063,14 @@ final class GoogleCalendarSyncService: ObservableObject {
                     }
             )
         }
-        return PlanValidator.validate(TrainingPlanSpec(goal: goal, anchorDate: plan.anchorDate, weeks: weeks), calendar: calendar)
+        let seasonRaceDates = Set(
+            (((try? modelContext.fetch(FetchDescriptor<Race>())) ?? [])).map { calendar.startOfDay(for: $0.date) }
+        )
+        return PlanValidator.validate(
+            TrainingPlanSpec(goal: goal, anchorDate: plan.anchorDate, weeks: weeks),
+            calendar: calendar,
+            seasonRaceDates: seasonRaceDates
+        )
     }
 
     private func ensureCalendar(connection: GoogleCalendarConnection, accessToken: String) async throws -> String {
