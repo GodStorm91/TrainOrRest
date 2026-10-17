@@ -586,7 +586,7 @@ enum DevSeed {
     2. 4 x 6 min at threshold, 90s easy float between reps.
     3. Cool down 10 min easy, then a few relaxed strides.
 
-    Keep the middle reps controlled — even effort beats a fast first rep.
+    Keep the middle reps controlled. Even effort beats a fast first rep.
     """
 
     // Unordered lists still render as bullets, and the surrounding prose keeps

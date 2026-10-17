@@ -23,11 +23,23 @@ struct CoachTurnLogSettingsView: View {
                 Button {
                     UIPasteboard.general.string = report
                 } label: {
-                    Label(copy.copyCoachTurnLog, systemImage: "doc.on.doc")
+                    HStack {
+                        Image(systemName: "doc.on.doc")
+                            .foregroundStyle(Theme.accent)
+                            .accessibilityHidden(true)
+                        Text(copy.copyCoachTurnLog)
+                            .foregroundStyle(Theme.accent)
+                    }
                 }
                 if let file {
                     ShareLink(item: file, preview: SharePreview(file.name)) {
-                        Label(copy.shareCoachTurnLog, systemImage: "square.and.arrow.up")
+                        HStack {
+                            Image(systemName: "square.and.arrow.up")
+                                .foregroundStyle(Theme.accent)
+                                .accessibilityHidden(true)
+                            Text(copy.shareCoachTurnLog)
+                                .foregroundStyle(Theme.accent)
+                        }
                     }
                 }
             } header: {
@@ -38,10 +50,12 @@ struct CoachTurnLogSettingsView: View {
 
             if !report.isEmpty {
                 Section {
-                    DebugReportView(text: String(report.prefix(6_000)))
+                    CoachTurnLogPreview(text: String(report.prefix(6_000)))
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.bg)
         .navigationTitle(copy.coachTurnLogTitle)
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -53,6 +67,29 @@ struct CoachTurnLogSettingsView: View {
         report = CoachTurnReport.bundle(in: modelContext)
         turnCount = CoachTurnReport.recordedTurnCount(in: modelContext)
         file = CoachTurnLogFile(contents: report)
+    }
+}
+
+private struct CoachTurnLogPreview: View {
+    let text: String
+
+    var body: some View {
+        Text(wrapped(text))
+            .font(.system(.caption, design: .monospaced))
+            .foregroundStyle(Theme.dim)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel(text)
+    }
+
+    private func wrapped(_ text: String) -> String {
+        text.enumerated().reduce(into: "") { result, pair in
+            if pair.offset > 0, pair.offset.isMultiple(of: 24) {
+                result.append("\u{200B}")
+            }
+            result.append(pair.element)
+        }
     }
 }
 

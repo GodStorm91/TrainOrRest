@@ -315,36 +315,21 @@ struct RunReviewCard: View {
         ActivityDetailAnalysis(activity: activity, plannedWorkout: plannedWorkout, intervalsAnalysis: intervalsAnalysis)
     }
 
-    private var accent: Color {
-        switch model.review.verdict {
-        case .onPlan: Theme.good
-        case .overcooked: Theme.warn
-        case .undercooked: Theme.data
-        case .unmatched: Theme.accent
-        }
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                Rectangle()
-                    .fill(accent)
-                    .frame(width: 4)
-                    .clipShape(Capsule())
+            VStack(alignment: .leading, spacing: 8) {
+                TorEyebrow(language.history.reviewEyebrow(hasPlan: model.hasPlan)).tracking(1.5)
+                Text(language.history.reviewHeadline(model.review.verdict, hasPlan: model.hasPlan))
+                    .font(.torHeading(24, .bold))
+                    .foregroundStyle(Theme.text)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    TorEyebrow(language.history.reviewEyebrow(hasPlan: model.hasPlan)).tracking(1.5)
-                    Text(language.history.reviewHeadline(model.review.verdict, hasPlan: model.hasPlan))
-                        .font(.torHeading(24, .bold))
-                        .foregroundStyle(Theme.text)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text(model.supportingSentence(language))
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Theme.dim)
-                        .lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(model.supportingSentence(language))
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Theme.dim)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -399,17 +384,17 @@ struct RunReviewCard: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
+            Rectangle()
+                .fill(Theme.line)
+                .frame(height: 1)
+
             CoachRecommendationView(
                 text: language.history.recommendation(verdict: model.review.verdict, averageHeartRate: model.averageHeartRate),
-                accent: accent,
                 language: language
             )
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(TrainingVisualStyle.tint(accent, opacity: 0.08))
-        )
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(Theme.border, lineWidth: 1)
@@ -472,19 +457,18 @@ private struct RunDetailSummary: View {
                 Spacer(minLength: 16)
                 Image(systemName: "figure.run")
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(activity.effortColor)
+                    .foregroundStyle(Theme.dim)
                     .frame(width: 46, height: 46)
-                    .background(TrainingVisualStyle.tint(activity.effortColor, opacity: 0.18), in: Circle())
             }
 
             summaryMetrics
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(16)
-        .background(TrainingVisualStyle.tint(activity.effortColor, opacity: 0.16), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(TrainingVisualStyle.tint(activity.effortColor, opacity: 0.22), lineWidth: 1)
+                .stroke(Theme.border, lineWidth: 1)
         }
         .animation(.easeOut(duration: 0.18), value: distanceMeters)
     }
@@ -811,22 +795,19 @@ struct ActivityEvidenceChip: View {
 
 struct CoachRecommendationView: View {
     let text: String
-    let accent: Color
     let language: CoachLanguage
+
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "arrow.triangle.branch")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(accent)
+                .foregroundStyle(Theme.dim)
                 .frame(width: 30, height: 30)
-                .background(Theme.soft(accent, 0.16), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(language.history.nextSession)
-                    .font(.system(size: 11, weight: .bold))
-                    .tracking(0.8)
-                    .foregroundStyle(Theme.faint)
-                    .textCase(.uppercase)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.dim)
                 Text(text)
                     .font(.system(size: 13.5, weight: .semibold))
                     .foregroundStyle(Theme.text)
@@ -834,9 +815,7 @@ struct CoachRecommendationView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(TrainingVisualStyle.tint(accent, opacity: 0.10), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
@@ -902,7 +881,7 @@ struct PlanComparisonChart: View {
                 if model.hasPlan {
                     Text(language.history.target)
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Theme.good)
+                        .foregroundStyle(Theme.dim)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
                         .background(Theme.bg.opacity(0.74), in: Capsule())
@@ -912,7 +891,7 @@ struct PlanComparisonChart: View {
                 if style == .mini, model.hasPlan {
                     Text(language.history.mainDeviation)
                         .font(.system(size: 10.5, weight: .bold))
-                        .foregroundStyle(Theme.warn)
+                        .foregroundStyle(Theme.dim)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 4)
                         .background(Theme.bg.opacity(0.82), in: Capsule())
@@ -930,7 +909,7 @@ struct PlanComparisonChart: View {
                     .stroke(Theme.text.opacity(0.28), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
 
                     Circle()
-                        .fill((point.actual ?? model.plannedAveragePace) < model.plannedFastPace ? Theme.warn : Theme.accent)
+                        .fill(Theme.data)
                         .frame(width: 8, height: 8)
                         .position(x: x, y: y)
 
@@ -967,13 +946,13 @@ struct PlanComparisonChart: View {
             let bandTop = y(for: model.plannedFastPace, in: CGSize(width: size.width, height: chartHeight + 2))
             let bandBottom = y(for: model.plannedSlowPace, in: CGSize(width: size.width, height: chartHeight + 2))
             let bandRect = CGRect(x: 0, y: min(bandTop, bandBottom), width: size.width, height: abs(bandBottom - bandTop))
-            context.fill(Path(roundedRect: bandRect, cornerRadius: 8), with: .color(Theme.good.opacity(0.14)))
+            context.fill(Path(roundedRect: bandRect, cornerRadius: 8), with: .color(Theme.chip.opacity(0.9)))
 
             var target = Path()
             let targetY = y(for: model.plannedAveragePace, in: CGSize(width: size.width, height: chartHeight + 2))
             target.move(to: CGPoint(x: 0, y: targetY))
             target.addLine(to: CGPoint(x: size.width, y: targetY))
-            context.stroke(target, with: .color(Theme.good.opacity(0.75)), style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
+            context.stroke(target, with: .color(Theme.line), style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
         }
 
         let faintLineY = y(for: model.chartSlowReference, in: CGSize(width: size.width, height: chartHeight + 2))
@@ -991,8 +970,7 @@ struct PlanComparisonChart: View {
             var segment = Path()
             segment.move(to: CGPoint(x: x(for: pair.0.time, in: size), y: y(for: lhs, in: CGSize(width: size.width, height: chartHeight + 2))))
             segment.addLine(to: CGPoint(x: x(for: pair.1.time, in: size), y: y(for: rhs, in: CGSize(width: size.width, height: chartHeight + 2))))
-            let tooFast = model.hasPlan && (lhs < model.plannedFastPace || rhs < model.plannedFastPace)
-            context.stroke(segment, with: .color(tooFast ? Theme.warn : Theme.accent.opacity(0.86)), style: StrokeStyle(lineWidth: tooFast ? 3 : 2.25, lineCap: .round, lineJoin: .round))
+            context.stroke(segment, with: .color(Theme.data.opacity(0.86)), style: StrokeStyle(lineWidth: 2.25, lineCap: .round, lineJoin: .round))
         }
 
         if style == .expanded {
@@ -1048,7 +1026,7 @@ private struct HeartRateTrendChart: View {
                     }
                     .stroke(Theme.text.opacity(0.28), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
                     Circle()
-                        .fill(point.bpm >= model.heartRateUpperTarget ? Theme.warn : Theme.data)
+                        .fill(Theme.data)
                         .frame(width: 8, height: 8)
                         .position(x: x, y: y)
                     ChartTooltip(
@@ -1075,15 +1053,14 @@ private struct HeartRateTrendChart: View {
         let bandTop = y(for: model.heartRateUpperTarget, in: size)
         let bandBottom = y(for: model.heartRateLowerTarget, in: size)
         let bandRect = CGRect(x: 0, y: min(bandTop, bandBottom), width: size.width, height: abs(bandBottom - bandTop))
-        context.fill(Path(roundedRect: bandRect, cornerRadius: 8), with: .color(Theme.good.opacity(0.10)))
+        context.fill(Path(roundedRect: bandRect, cornerRadius: 8), with: .color(Theme.chip.opacity(0.9)))
 
         let points = model.heartRatePoints
         for pair in zip(points, points.dropFirst()) {
             var segment = Path()
             segment.move(to: CGPoint(x: x(for: pair.0.time, in: size), y: y(for: pair.0.bpm, in: size)))
             segment.addLine(to: CGPoint(x: x(for: pair.1.time, in: size), y: y(for: pair.1.bpm, in: size)))
-            let elevated = pair.0.bpm >= model.heartRateUpperTarget || pair.1.bpm >= model.heartRateUpperTarget
-            context.stroke(segment, with: .color(elevated ? Theme.warn : Theme.data.opacity(0.88)), style: StrokeStyle(lineWidth: elevated ? 3 : 2.25, lineCap: .round, lineJoin: .round))
+            context.stroke(segment, with: .color(Theme.data.opacity(0.88)), style: StrokeStyle(lineWidth: 2.25, lineCap: .round, lineJoin: .round))
         }
     }
 

@@ -28,10 +28,10 @@ struct CalendarRunSummaryCard: View {
                     .frame(width: 30, height: 30)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(language.history.running)
+                    Text(language.shortDate(activity.date))
                         .font(.torHeading(16, .bold))
                         .foregroundStyle(Theme.text)
-                    Text(sourceLine)
+                    Text("\(language.history.running) · \(sourceLine)")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(Theme.faint)
                 }
@@ -54,10 +54,16 @@ struct CalendarRunSummaryCard: View {
                     band: plannedWorkout?.paceBand,
                     height: compact ? 40 : 54
                 )
-            } else if activity.splits != nil {
+            } else {
                 Text(language.history.splitsUnavailable)
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(Theme.faint)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: compact ? 40 : 54,
+                        maxHeight: compact ? 40 : 54,
+                        alignment: .leading
+                    )
             }
 
             metricSummary
@@ -110,7 +116,7 @@ struct CalendarRunSummaryCard: View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .bottom, spacing: 12) {
                 metric(language.history.duration, Formatters.duration(activity.durationSeconds).replacingOccurrences(of: " ", with: ""), fixedWidth: true)
-                metric(language.history.distance, Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " ", with: ""), fixedWidth: true)
+                metric(language.history.distance, distanceText(activity.distanceMeters), fixedWidth: true)
                 metric(language.history.pace, Formatters.pace(activity.avgPaceSecondsPerKm).replacingOccurrences(of: " /km", with: "/km"), fixedWidth: true)
                 metric(language.history.load, "\(load)", fixedWidth: true)
                 Spacer(minLength: 4)
@@ -118,7 +124,7 @@ struct CalendarRunSummaryCard: View {
             }
             VStack(alignment: .leading, spacing: 10) {
                 metric(language.history.duration, Formatters.duration(activity.durationSeconds).replacingOccurrences(of: " ", with: ""))
-                metric(language.history.distance, Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " ", with: ""))
+                metric(language.history.distance, distanceText(activity.distanceMeters))
                 metric(language.history.pace, Formatters.pace(activity.avgPaceSecondsPerKm).replacingOccurrences(of: " /km", with: "/km"))
                 metric(language.history.load, "\(load)")
                 reviewAction
@@ -165,7 +171,7 @@ struct CalendarRunSummaryCard: View {
     }
 
     private func plannedMetrics(_ workout: PlannedWorkout) -> String {
-        var metrics = [String(format: "%.2f km", workout.distanceKm)]
+        var metrics = [kilometersText(workout.distanceKm)]
         if let paceBand = workout.paceBand {
             metrics.append(
                 Formatters.paceBand(paceBand)
@@ -178,9 +184,19 @@ struct CalendarRunSummaryCard: View {
         return metrics.joined(separator: " · ")
     }
 
+    private func distanceText(_ meters: Double?) -> String {
+        guard let meters else { return Formatters.kilometers(nil) }
+        return kilometersText(meters / 1_000)
+    }
+
+    private func kilometersText(_ kilometers: Double) -> String {
+        String(format: "%.1f\u{00A0}km", locale: language.uiLocale, kilometers)
+    }
+
     private var sourceLine: String {
         let clean = activity.sourceName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return "Apple Health" }
+        if clean.caseInsensitiveCompare("Garmin") == .orderedSame { return clean }
         if clean.localizedCaseInsensitiveContains("garmin") { return language.history.viaGarmin(clean) }
         return clean
     }

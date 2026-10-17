@@ -1,8 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// Neutral provenance mark for the coach, reused in the chat header and beside
-/// assistant bubbles.
+/// Neutral provenance mark for the chat header.
 struct CoachAvatar: View {
     var size: CGFloat = 26
 
@@ -19,22 +18,9 @@ struct CoachAvatar: View {
     }
 }
 
-/// Keeps the coach avatar level with the bubble it belongs to, so metadata rows
-/// added underneath the bubble do not drag the avatar down with them.
-private enum BubbleBottomAlignment: AlignmentID {
-    static func defaultValue(in context: ViewDimensions) -> CGFloat {
-        context[.bottom]
-    }
-}
-
-extension VerticalAlignment {
-    static let bubbleBottom = VerticalAlignment(BubbleBottomAlignment.self)
-}
-
 struct ChatBubble: View {
     let message: ChatMessage
     var hidesSources: Bool = false
-    var showsAvatar: Bool = true
     var showsSource: Bool = true
     var isGroupedWithPrevious: Bool = false
     var language: CoachLanguage = .current
@@ -68,15 +54,9 @@ struct ChatBubble: View {
     }
 
     var body: some View {
-        HStack(alignment: .bubbleBottom, spacing: 9) {
+        HStack(alignment: .bottom, spacing: 9) {
             if isUser {
                 Spacer(minLength: 40)
-            } else if showsAvatar && !showsProcessingState {
-                CoachAvatar(size: 26)
-                    .alignmentGuide(.bubbleBottom) { $0[.bottom] }
-                    .accessibilityHidden(true)
-            } else {
-                Color.clear.frame(width: 26, height: 26)
             }
 
             VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
@@ -104,7 +84,6 @@ struct ChatBubble: View {
                     .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in
                         min(width * 0.8, 560)
                     }
-                    .alignmentGuide(.bubbleBottom) { $0[.bottom] }
                 } else if isUser || hasVisibleAssistantText {
                     messageBody
                         .padding(.horizontal, 14)
@@ -115,7 +94,6 @@ struct ChatBubble: View {
                         .containerRelativeFrame(.horizontal, alignment: isUser ? .trailing : .leading) { width, _ in
                             min(width * 0.8, 560)
                         }
-                        .alignmentGuide(.bubbleBottom) { $0[.bottom] }
                 }
 
                 if isUser, !message.contextItems.isEmpty {

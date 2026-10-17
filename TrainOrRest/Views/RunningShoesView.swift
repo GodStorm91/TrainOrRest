@@ -159,7 +159,7 @@ struct RunningShoesView: View {
                         .foregroundStyle(Theme.text)
                     Spacer(minLength: 8)
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(Formatters.kilometers(totalActiveMileageKm * 1000))
+                        Text(shoeDistance(totalActiveMileageKm, language: language))
                             .font(.subheadline.weight(.bold))
                             .foregroundStyle(Theme.text)
                             .monospacedDigit()
@@ -205,11 +205,9 @@ struct RunningShoesView: View {
             ShoeDetailView(shoe: shoe)
         } label: {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: status == .pastRange ? "exclamationmark.triangle.fill" : "wrench.and.screwdriver.fill")
+                Image(systemName: "exclamationmark.triangle")
                     .font(.headline)
                     .foregroundStyle(Theme.warn)
-                    .frame(width: 32, height: 32)
-                    .background(Theme.soft(Theme.warn), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(status == .pastRange
@@ -278,6 +276,11 @@ struct RunningShoesView: View {
     }
 }
 
+private func shoeDistance(_ kilometers: Double, language: CoachLanguage) -> String {
+    let value = Int(kilometers.rounded()).formatted(.number.locale(language.uiLocale))
+    return "\(value) km"
+}
+
 struct RunningShoeRow: View {
     let shoe: RunningShoe
     let mileageKm: Double
@@ -295,10 +298,9 @@ struct RunningShoeRow: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
                 Image(systemName: "shoeprints.fill")
-                    .font(.headline)
+                    .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(wearColor)
                     .frame(width: 38, height: 38)
-                    .background(Theme.soft(wearColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -316,21 +318,17 @@ struct RunningShoeRow: View {
                     .foregroundStyle(Theme.faint)
             }
 
-            ProgressView(value: mileageProgress)
-                .tint(wearColor)
+            ShoeMileageBar(progress: mileageProgress, accessibilityLabel: mileageAccessibilityLabel)
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(language.integrations.mileageProgress(
-                    current: Formatters.kilometers(mileageKm * 1000),
-                    expected: Formatters.kilometers(shoe.expectedLifespanKm * 1000)
-                ))
+                Text(mileageProgressText)
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(Theme.dim)
                 Spacer(minLength: 4)
                 if let warningText {
                     Text(warningText)
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(wearColor)
+                        .foregroundStyle(Theme.warn)
                         .multilineTextAlignment(.trailing)
                 }
             }
@@ -355,6 +353,22 @@ struct RunningShoeRow: View {
         }
     }
 
+    private var mileageText: String {
+        shoeDistance(mileageKm, language: language)
+    }
+
+    private var expectedMileageText: String {
+        shoeDistance(shoe.expectedLifespanKm, language: language)
+    }
+
+    private var mileageProgressText: String {
+        language.integrations.mileageProgress(current: mileageText, expected: expectedMileageText)
+    }
+
+    private var mileageAccessibilityLabel: String {
+        "\(shoe.displayName). \(mileageProgressText)"
+    }
+
     private var wearColor: Color {
         switch wearStatus {
         case .normal: Theme.dim
@@ -363,7 +377,28 @@ struct RunningShoeRow: View {
     }
 }
 
+private struct ShoeMileageBar: View {
+    let progress: Double
+    let accessibilityLabel: String
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Theme.line)
+                Capsule()
+                    .fill(Theme.data)
+                    .frame(width: geometry.size.width * progress)
+            }
+        }
+        .frame(height: 6)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
 struct ShoeMileageIndicator: View {
+    let shoeName: String
     let mileageKm: Double
     let expectedKm: Double
 
@@ -376,15 +411,30 @@ struct ShoeMileageIndicator: View {
         return min(mileageKm / expectedKm, 1)
     }
 
+    private var mileageText: String {
+        shoeDistance(mileageKm, language: language)
+    }
+
+    private var expectedMileageText: String {
+        shoeDistance(expectedKm, language: language)
+    }
+
+    private var mileageProgressText: String {
+        language.integrations.mileageProgress(current: mileageText, expected: expectedMileageText)
+    }
+
+    private var mileageAccessibilityLabel: String {
+        "\(shoeName). \(mileageProgressText)"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ProgressView(value: progress)
-                .tint(ShoeWearStatusService.wearStatus(currentMileageKm: mileageKm, expectedLifespanKm: expectedKm) == .normal ? Theme.accent : Theme.warn)
-            Text(language.integrations.kilometersLogged(Formatters.kilometers(mileageKm * 1000)))
+            ShoeMileageBar(progress: progress, accessibilityLabel: mileageAccessibilityLabel)
+            Text(language.integrations.kilometersLogged(mileageText))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.text)
             if mileageKm < expectedKm {
-                Text(language.integrations.kilometersUntilRecommendedRange(Formatters.kilometers((expectedKm - mileageKm) * 1000)))
+                Text(language.integrations.kilometersUntilRecommendedRange(shoeDistance(expectedKm - mileageKm, language: language)))
                     .font(.caption)
                     .foregroundStyle(Theme.dim)
             }
@@ -423,7 +473,7 @@ struct ShoeDetailView: View {
                         Text(shoe.model.isEmpty ? shoe.displayName : shoe.model)
                             .font(.largeTitle.weight(.bold))
                             .foregroundStyle(Theme.text)
-                        Text(Formatters.kilometers(mileageKm * 1000))
+                        Text(shoeDistance(mileageKm, language: language))
                             .font(.largeTitle.weight(.bold).monospacedDigit())
                             .foregroundStyle(Theme.text)
                         Text(language.integrations.shoeStatus(shoe.status))
@@ -433,17 +483,17 @@ struct ShoeDetailView: View {
                 }
 
                 detailSection(language.integrations.mileage) {
-                    ShoeMileageIndicator(mileageKm: mileageKm, expectedKm: shoe.expectedLifespanKm)
+                    ShoeMileageIndicator(shoeName: shoe.displayName, mileageKm: mileageKm, expectedKm: shoe.expectedLifespanKm)
                     MileageWarning(shoe: shoe, mileageKm: mileageKm)
                 }
 
                 detailSection(language.integrations.usage) {
                     ShoeMetricRow(label: language.integrations.runs, value: "\(shoeActivities.count)")
-                    ShoeMetricRow(label: language.integrations.distance, value: Formatters.kilometers(mileageKm * 1000))
+                    ShoeMetricRow(label: language.integrations.distance, value: shoeDistance(mileageKm, language: language))
                     if let last = shoeActivities.first {
                         ShoeMetricRow(
                             label: language.integrations.lastRun,
-                            value: "\(last.date.formatted(.dateTime.month(.abbreviated).day().locale(language.uiLocale))) · \(Formatters.kilometers(last.distanceMeters))"
+                            value: "\(last.date.formatted(.dateTime.month(.abbreviated).day().locale(language.uiLocale))) · \(shoeDistance((last.distanceMeters ?? 0) / 1_000, language: language))"
                         )
                     }
                 }
@@ -455,7 +505,7 @@ struct ShoeDetailView: View {
 
                 detailSection(language.integrations.purchase) {
                     ShoeMetricRow(label: language.integrations.purchased, value: shoe.purchaseDate?.formatted(.dateTime.month(.abbreviated).day().locale(language.uiLocale)) ?? language.integrations.notSet)
-                    ShoeMetricRow(label: language.integrations.startingMileage, value: Formatters.kilometers(shoe.initialMileageKm * 1000))
+                    ShoeMetricRow(label: language.integrations.startingMileage, value: shoeDistance(shoe.initialMileageKm, language: language))
                 }
 
                 VStack(spacing: 10) {
@@ -623,7 +673,7 @@ struct ShoeFormView: View {
                     if hasPurchaseDate {
                         DatePicker(language.integrations.purchaseDate, selection: $purchaseDate, displayedComponents: .date)
                     }
-                    Stepper(language.integrations.startingMileageValue(Formatters.kilometers(startingMileage * 1000)), value: $startingMileage, in: 0...5000, step: 5)
+                    Stepper(language.integrations.startingMileageValue(shoeDistance(startingMileage, language: language)), value: $startingMileage, in: 0...5000, step: 5)
                 }
             } else if step == 1 {
                 Section(language.integrations.shoeUsageQuestion) {
@@ -638,7 +688,7 @@ struct ShoeFormView: View {
                 }
             } else {
                 Section(language.integrations.mileage) {
-                    Stepper(language.integrations.expectedLifespanValue(Formatters.kilometers(expectedLifespan * 1000)), value: $expectedLifespan, in: 100...1200, step: 50)
+                    Stepper(language.integrations.expectedLifespanValue(shoeDistance(expectedLifespan, language: language)), value: $expectedLifespan, in: 100...1200, step: 50)
                     Text(language.integrations.adjustAnytime)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -974,7 +1024,7 @@ struct ShoePickerSheet: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(shoe.displayName)
                         .font(.headline)
-                    Text("\(language.integrations.shoeTypes(shoe.preferredWorkoutTypes)) · \(Formatters.kilometers(ShoeMileageService.currentMileageKm(for: shoe, ledger: mileageEntries) * 1000))")
+                    Text("\(language.integrations.shoeTypes(shoe.preferredWorkoutTypes)) · \(shoeDistance(ShoeMileageService.currentMileageKm(for: shoe, ledger: mileageEntries), language: language))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

@@ -728,7 +728,6 @@ struct ChatView: View {
                         ChatBubble(
                             message: message,
                             hidesSources: isSoftwareKeyboardVisible,
-                            showsAvatar: shouldShowAssistantAvatar(at: index),
                             showsSource: shouldShowAssistantSource(at: index),
                             isGroupedWithPrevious: isGroupedWithPreviousMessage(at: index),
                             language: language,
@@ -781,6 +780,17 @@ struct ChatView: View {
                 .padding(.bottom, 18)
             }
             .coordinateSpace(name: "chatFeed")
+            .mask(alignment: .top) {
+                VStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [.clear, .black],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 24)
+                    Color.black
+                }
+            }
             .background(
                 GeometryReader { geometry in
                     Color.clear.preference(key: ChatViewportHeightPreferenceKey.self, value: geometry.size.height)
@@ -885,10 +895,6 @@ struct ChatView: View {
         return messages[index - 1].role == .assistant
     }
 
-    private func shouldShowAssistantAvatar(at index: Int) -> Bool {
-        guard messages[index].role == .assistant else { return true }
-        return !isGroupedWithPreviousMessage(at: index)
-    }
 
     private func shouldShowAssistantSource(at index: Int) -> Bool {
         guard messages[index].role == .assistant else { return false }
@@ -1349,15 +1355,25 @@ struct ChatView: View {
             }
 
 
-            TextField(composerPlaceholder, text: $draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.body)
-                .foregroundStyle(Theme.text)
-                .tint(Theme.accent)
-                .lineLimit(1...5)
-                .padding(.vertical, 12)
-                .focused($composerFocused)
-                .disabled(chatStore.hasPendingPlanDecision || chatStore.isConfirmingPlanCandidate)
+            ZStack(alignment: .leading) {
+                if draft.isEmpty {
+                    Text(composerPlaceholder)
+                        .font(.body)
+                        .foregroundStyle(Theme.dim)
+                        .allowsHitTesting(false)
+                }
+
+                TextField("", text: $draft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.body)
+                    .foregroundStyle(Theme.text)
+                    .tint(Theme.accent)
+                    .lineLimit(1...5)
+                    .padding(.vertical, 12)
+                    .focused($composerFocused)
+                    .disabled(chatStore.hasPendingPlanDecision || chatStore.isConfirmingPlanCandidate)
+                    .accessibilityLabel(composerPlaceholder)
+            }
 
             if isSoftwareKeyboardVisible {
                 Button {
@@ -1378,17 +1394,16 @@ struct ChatView: View {
             } label: {
                 Group {
                     if chatStore.isSending {
-                        ProgressView().tint(.white)
+                        ProgressView().tint(Theme.bg)
                     } else {
                         Image(systemName: "paperplane.fill")
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Theme.bg)
                     }
                 }
                 .frame(width: 40, height: 40)
-                .background(Theme.accent, in: Circle())
-                .shadow(color: Theme.accentSoft, radius: 8, y: 3)
-                .opacity(isSendDisabled ? 0.45 : 1)
+                .background(isSendDisabled ? Theme.dim : Theme.accent, in: Circle())
+                .shadow(color: isSendDisabled ? .clear : Theme.accentSoft, radius: 8, y: 3)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(language.sendMessageLabel)
