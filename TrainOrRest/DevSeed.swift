@@ -36,6 +36,7 @@ enum DevSeed {
         case chatGPTSpike
         case calendar
         case activity
+        case turnLog
     }
 
     /// The requested launch screen, or `nil` for the normal tab shell.
