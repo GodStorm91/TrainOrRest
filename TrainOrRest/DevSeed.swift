@@ -70,6 +70,13 @@ enum DevSeed {
         isLiveRequested && ProcessInfo.processInfo.environment["TOR_DEV_LIVE_EDIT"] == "1"
     }
 
+    /// `TOR_DEV_RACE_CARD=1` with `TOR_DEV_PLAN=1` runs the real
+    /// `propose_add_race` tool once on the coach screen, so the season confirm
+    /// card renders without a provider key.
+    static var isRaceCardRequested: Bool {
+        isRequested && ProcessInfo.processInfo.environment["TOR_DEV_RACE_CARD"] == "1"
+    }
+
     /// The workout the live edit turn attaches: the first planned, unlocked
     /// easy run on or after today.
     @MainActor

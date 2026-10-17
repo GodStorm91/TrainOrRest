@@ -489,12 +489,16 @@ enum CoachRaceTools {
 
     private static func summary(for intent: CoachRaceCandidate.Intent, language: CoachLanguage) -> String {
         switch intent {
-        case .add(let race), .remove(let race), .result(let race, _):
-            return "\(language.season.raceDetailTitle): \(race.name)"
+        case .add(let race):
+            return language.season.addRaceHeadline(race.name)
         case .update(_, let after):
-            return "\(language.season.raceDetailTitle): \(after.name)"
+            return language.season.updateRaceHeadline(after.name)
+        case .remove(let race):
+            return language.season.removeRaceHeadline(race.name)
+        case .result(let race, _):
+            return language.season.resultRaceHeadline(race.name)
         case .rebalance:
-            return language.season.seasonTitle
+            return language.season.rebalanceHeadline
         }
     }
 }

@@ -391,8 +391,10 @@ private struct DevCoachLiveView: View {
         let workoutID = DevSeed.liveEditWorkoutID(modelContext)
         ChatView(contextualWorkoutID: workoutID)
             .task {
-                guard DevSeed.isLiveRequested, !fired else { return }
+                guard !fired else { return }
                 fired = true
+                if DevSeed.isRaceCardRequested { stageRaceCandidate() }
+                guard DevSeed.isLiveRequested else { return }
                 guard let threadID = chatSession.activeThreadID else { return }
                 let model = CoachCredentialResolver.current().model
                 var request = CoachTurnRequest(text: DevSeed.livePrompt, model: model, threadID: threadID)
@@ -402,6 +404,26 @@ private struct DevCoachLiveView: View {
                 }
                 _ = await chatStore.submit(request, in: modelContext)
             }
+    }
+
+    private func stageRaceCandidate() {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        guard let raceDay = calendar.date(byAdding: .day, value: 70, to: today) else { return }
+        let input = JSONValue.object([
+            "name": .string("Katsuta Marathon"),
+            "date": .string(raceDay.formatted(.iso8601.year().month().day().dateSeparator(.dash))),
+            "distance_meters": .number(RaceDistance.marathon.meters)
+        ])
+        guard let outcome = try? CoachRaceTools.handle(
+            name: "propose_add_race",
+            input: input,
+            in: modelContext,
+            today: today,
+            calendar: calendar,
+            language: CoachLanguage.current
+        ), case .candidate(let candidate) = outcome else { return }
+        chatStore.stageRaceCandidate(candidate)
     }
 }
 #endif
