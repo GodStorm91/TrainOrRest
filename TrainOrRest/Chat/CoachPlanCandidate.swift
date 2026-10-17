@@ -789,8 +789,8 @@ enum CoachPlanCandidateEngine {
     }
 
     private static func validateFields(_ change: PlanAdjustmentProposal.Change) throws {
-        // detail is normalized away for every action except move and swap, so
-        // only the payload that changes the plan is validated here.
+        // detail and workout are normalized away for every action that cannot
+        // read them, so only the payload that changes the plan is validated here.
         switch change.action {
         case .create, .replace:
             guard change.workout != nil else {
@@ -800,13 +800,8 @@ enum CoachPlanCandidateEngine {
             guard change.detail != nil else {
                 throw CoachTools.ValidationError("\(change.action.rawValue) requires a target date.")
             }
-            guard change.workout == nil else {
-                throw CoachTools.ValidationError("\(change.action.rawValue) does not take a workout.")
-            }
         case .rest, .downgrade:
-            guard change.workout == nil else {
-                throw CoachTools.ValidationError("\(change.action.rawValue) does not take a workout.")
-            }
+            break
         }
     }
 

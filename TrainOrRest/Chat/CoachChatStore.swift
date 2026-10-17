@@ -1448,7 +1448,6 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         }
         if lower.contains("no workout on")
             || lower.contains("requires a workout")
-            || lower.contains("does not take a workout")
             || lower.contains("missing workout")
             || lower.contains("missing field")
             || lower.contains("type mismatch")
