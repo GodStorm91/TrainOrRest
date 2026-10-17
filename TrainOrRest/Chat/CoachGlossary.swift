@@ -79,6 +79,17 @@ enum CoachGlossary {
         return result
     }
 
+    /// Drops a glossary marker that is still arriving, so a half written
+    /// `[[term:acwr|AC` never reaches the chat bubble as raw markup. Call it
+    /// on each streamed prefix; the complete text passes through unchanged.
+    static func visiblePrefix(of text: String) -> String {
+        guard let open = text.range(of: "[[", options: .backwards) else { return text }
+        if let close = text.range(of: "]]", options: .backwards), close.upperBound > open.lowerBound {
+            return text
+        }
+        return String(text[text.startIndex..<open.lowerBound])
+    }
+
     // MARK: - Internals
 
     private static let typoCorrections: [(wrong: String, right: String)] = [

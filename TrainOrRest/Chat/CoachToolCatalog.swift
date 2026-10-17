@@ -17,11 +17,12 @@ enum CoachToolCatalog {
         ClaudeTool(
             name: coachResponseName,
             description: """
-            Return the user-facing Coach reply as a structured answer card. Always provide title, \
-            summary, and content: title is the one-line conclusion, summary is the short reason, and \
-            content is the natural-language message shown in the chat bubble. Use recommendations and \
-            details for depth. Include a single-choice interaction only when the user must choose \
-            between next steps; never encode choices in the prose alone.
+            Return the user-facing Coach reply as a structured answer card. Write content first, \
+            then title and summary: title is the one-line conclusion, summary is the short reason, \
+            and content is the natural-language message shown in the chat bubble. Keep content under \
+            about 120 words. Use recommendations and details only when they add something the \
+            content does not already say. Include a single-choice interaction only when the user \
+            must choose between next steps; never encode choices in the prose alone.
             """,
             inputSchema: .object([
                 "type": .string("object"),
@@ -29,14 +30,17 @@ enum CoachToolCatalog {
                 "properties": .object([
                     "content": .object([
                         "type": .string("string"),
-                        "description": .string("Natural-language assistant message shown in the chat bubble.")
+                        "maxLength": .number(900),
+                        "description": .string("Natural-language assistant message shown in the chat bubble. Write this field first.")
                     ]),
                     "title": .object([
                         "type": .string("string"),
+                        "maxLength": .number(90),
                         "description": .string("One concise conclusion for the answer card, at most two lines. Always provide it.")
                     ]),
                     "summary": .object([
                         "type": .string("string"),
+                        "maxLength": .number(240),
                         "description": .string("Two or three short sentences of reasoning for the answer card. Always provide it; do not put all analysis here.")
                     ]),
                     "safetyNote": .object([
@@ -45,14 +49,14 @@ enum CoachToolCatalog {
                     ]),
                     "recommendations": .object([
                         "type": .string("array"),
-                        "maxItems": .number(6),
+                        "maxItems": .number(3),
                         "items": .object([
                             "type": .string("object"),
                             "additionalProperties": .bool(false),
                             "properties": .object([
                                 "id": .object(["type": .string("string")]),
                                 "title": .object(["type": .string("string")]),
-                                "description": .object(["type": .string("string")]),
+                                "description": .object(["type": .string("string"), "maxLength": .number(180)]),
                                 "priority": .object([
                                     "type": .string("integer"),
                                     "minimum": .number(1)
@@ -68,13 +72,14 @@ enum CoachToolCatalog {
                             "title": .object(["type": .string("string")]),
                             "sections": .object([
                                 "type": .string("array"),
+                                "maxItems": .number(2),
                                 "items": .object([
                                     "type": .string("object"),
                                     "additionalProperties": .bool(false),
                                     "properties": .object([
                                         "id": .object(["type": .string("string")]),
                                         "title": .object(["type": .string("string")]),
-                                        "markdown": .object(["type": .string("string")])
+                                        "markdown": .object(["type": .string("string"), "maxLength": .number(400)])
                                     ]),
                                     "required": .array(["id", "title", "markdown"].map(JSONValue.string))
                                 ])
@@ -84,7 +89,7 @@ enum CoachToolCatalog {
                     ]),
                     "followUps": .object([
                         "type": .string("array"),
-                        "maxItems": .number(3),
+                        "maxItems": .number(2),
                         "items": .object([
                             "type": .string("object"),
                             "additionalProperties": .bool(false),

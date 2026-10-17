@@ -77,7 +77,7 @@ private struct OpenAIChatRequest: Encodable {
         model = request.model
         maxCompletionTokens = request.maxTokens
         reasoningEffort = request.model.hasPrefix("gpt-5") ? "minimal" : nil
-        messages = [.init(role: "system", content: .text(request.system))]
+        messages = [.init(role: "system", content: .text(request.systemText))]
         messages += request.messages.flatMap(OpenAIMessage.messages(from:))
         if request.tools.isEmpty {
             tools = nil

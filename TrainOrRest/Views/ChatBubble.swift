@@ -276,13 +276,16 @@ struct ChatBubble: View {
         let accessibilityLabel: String
     }
 
-    /// Clock time the reply landed plus how long the user waited for it.
+    /// Clock time the reply landed plus how long the user waited to read it.
+    /// Streaming turns report the moment the first words reached the bubble,
+    /// because that is when the wait ends; the card fills in behind them.
+    /// Turns that never streamed, such as plan changes, report total time.
     /// Assistant turns only, and only once the turn has actually finished.
     static func responseTimingText(for message: ChatMessage, language: CoachLanguage) -> ResponseTiming? {
         guard message.role == .assistant,
               message.assistantStatus == .completed,
               let completedAt = message.completedAt,
-              let duration = message.generationDuration else { return nil }
+              let duration = message.firstReadableDuration ?? message.generationDuration else { return nil }
         let time = completedAt.formatted(.dateTime.hour().minute().locale(language.uiLocale))
         let elapsed = language.coachResponseDurationLabel(seconds: duration)
         return ResponseTiming(
