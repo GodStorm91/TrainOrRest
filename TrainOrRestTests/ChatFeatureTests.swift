@@ -36,6 +36,218 @@ final class ChatFeatureTests: XCTestCase {
         XCTAssertTrue(text.contains("Data freshness:"))
     }
 
+    func testCoachContextRendersExactSeasonBlock() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let seasonToday = PlanEngineTestSupport.date(2026, 10, 17)
+        try seedGoal(in: context, raceDate: PlanEngineTestSupport.date(2026, 10, 25), today: seasonToday)
+        try RaceSeasonStore.insert(
+            RaceSpec(
+                name: "Marathon Tokyo",
+                date: PlanEngineTestSupport.date(2026, 10, 25),
+                distanceMeters: 42_195,
+                targetTimeSeconds: 14_340,
+                priority: .a
+            ),
+            in: context,
+            now: seasonToday
+        )
+        try RaceSeasonStore.insert(
+            RaceSpec(
+                name: "Half Saitama",
+                date: PlanEngineTestSupport.date(2026, 11, 23),
+                distanceMeters: 21_097.5,
+                targetTimeSeconds: 6_600,
+                priority: .b
+            ),
+            in: context,
+            now: seasonToday
+        )
+        try RaceSeasonStore.insert(
+            RaceSpec(
+                name: "10K Toda",
+                date: PlanEngineTestSupport.date(2026, 12, 6),
+                distanceMeters: 10_000,
+                priority: .c
+            ),
+            in: context,
+            now: seasonToday
+        )
+
+        let text = try CoachContextBuilder.build(in: context, today: seasonToday, calendar: calendar)
+
+        XCTAssertEqual(
+            seasonBlock(from: text),
+            """
+            SEASON (today=2026-10-17, tz=Asia/Tokyo)
+            A | Marathon Tokyo | 2026-10-25 (in 8d) | 42.2km | target 3:59:00 | phase: Taper
+            B | Half Saitama | 2026-11-23 (in 37d) | 21.1km | target 1:50:00 | mini-taper 11-20..11-22
+            C | 10K Toda | 2026-12-06 (in 50d) | 10km | no target
+            LAST RACE RESULT: none
+            """
+        )
+    }
+
+    func testCoachContextRendersNoRacesSeasonBlock() throws {
+        let container = try makeContainer()
+
+        let text = try CoachContextBuilder.build(in: container.mainContext, today: today, calendar: calendar)
+
+        XCTAssertEqual(
+            seasonBlock(from: text),
+            "SEASON (today=2026-01-05, tz=Asia/Tokyo): no races registered."
+        )
+    }
+
+    func testCoachContextRendersLastCompletedRaceResult() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let completed = RaceSpec(
+            name: "Nagoya Women",
+            date: PlanEngineTestSupport.date(2026, 3, 8),
+            distanceMeters: 42_195,
+            targetTimeSeconds: nil,
+            priority: .a,
+            status: .completed,
+            result: RaceResultSpec(finishTimeSeconds: 13_205)
+        )
+        context.insert(Race(spec: completed, createdAt: today, updatedAt: today))
+        try context.save()
+
+        let text = try CoachContextBuilder.build(
+            in: context,
+            today: PlanEngineTestSupport.date(2026, 3, 9),
+            calendar: calendar
+        )
+
+        XCTAssertEqual(
+            seasonBlock(from: text),
+            """
+            SEASON (today=2026-03-09, tz=Asia/Tokyo)
+            LAST RACE RESULT: Nagoya Women 2026-03-08 3:40:05
+            """
+        )
+    }
+
+    func testCoachContextRendersRaceWarnings() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try RaceSeasonStore.insert(
+            RaceSpec(
+                name: "Tokyo Marathon",
+                date: PlanEngineTestSupport.date(2026, 11, 25),
+                distanceMeters: 42_195,
+                targetTimeSeconds: 14_400,
+                priority: .a
+            ),
+            in: context,
+            now: PlanEngineTestSupport.date(2026, 10, 17)
+        )
+        try RaceSeasonStore.insert(
+            RaceSpec(
+                name: "Tune Up",
+                date: PlanEngineTestSupport.date(2026, 11, 23),
+                distanceMeters: 10_000,
+                targetTimeSeconds: nil,
+                priority: .b
+            ),
+            in: context,
+            now: PlanEngineTestSupport.date(2026, 10, 17)
+        )
+
+        let text = try CoachContextBuilder.build(
+            in: context,
+            today: PlanEngineTestSupport.date(2026, 10, 17),
+            calendar: calendar
+        )
+
+        let warning = seasonBlock(from: text)
+            .split(separator: "\n")
+            .first(where: { $0.hasPrefix("WARNINGS:") })
+            .map(String.init)
+        XCTAssertEqual(
+            warning,
+            "WARNINGS: This race falls inside the Race A taper.; Two races 2 days apart."
+        )
+    }
+
+    func testProposeAddRaceDoesNotWriteRace() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedGoalOnly(in: context)
+        let before = try context.fetch(FetchDescriptor<Race>()).count
+
+        let outcome = try CoachRaceTools.handle(
+            name: CoachRaceTools.proposeAddRaceName,
+            input: .object([
+                "name": .string("City 10K"),
+                "date": .string("2026-01-10"),
+                "distance_meters": .number(10_000)
+            ]),
+            in: context,
+            today: today,
+            calendar: calendar,
+            language: .en
+        )
+
+        guard case .candidate(let candidate) = outcome,
+              case .add(let race) = candidate.intent
+        else {
+            return XCTFail("The add proposal must create an add candidate.")
+        }
+        XCTAssertEqual(race.name, "City 10K")
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Race>()).count, before)
+    }
+
+    func testConfirmRaceAddCreatesRaceAndRevertsPlanDays() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedGoalOnly(in: context)
+        let before = try planDaySnapshots(in: context)
+        let candidate = try addRaceCandidate(
+            name: "City 10K",
+            date: "2026-01-10",
+            distanceMeters: 10_000,
+            priority: nil,
+            in: context
+        )
+
+        let editID = try XCTUnwrap(
+            CoachRaceTools.confirm(candidate, in: context, today: today, calendar: calendar, now: today)
+        )
+
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Race>()).count, 1)
+        try PlanEditStore.revert(editID, in: context, today: today, calendar: calendar)
+        XCTAssertEqual(try planDaySnapshots(in: context), before)
+    }
+
+    func testConfirmSecondARaceDemotesFirstRaceToB() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        try seedGoalOnly(in: context)
+        let first = try addRaceCandidate(
+            name: "First A",
+            date: "2026-01-10",
+            distanceMeters: 10_000,
+            priority: .a,
+            in: context
+        )
+        _ = try CoachRaceTools.confirm(first, in: context, today: today, calendar: calendar, now: today)
+        let second = try addRaceCandidate(
+            name: "Second A",
+            date: "2026-01-17",
+            distanceMeters: 21_097.5,
+            priority: .a,
+            in: context
+        )
+
+        _ = try CoachRaceTools.confirm(second, in: context, today: today, calendar: calendar, now: today)
+
+        let races = try RaceSeasonStore.season(in: context).races
+        XCTAssertEqual(races.first(where: { $0.name == "First A" })?.priority, .b)
+        XCTAssertEqual(races.first(where: { $0.name == "Second A" })?.priority, .a)
+    }
+
     func testCoachContextHighlightsTomorrowWorkoutForRelativeEditRequests() throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -3610,7 +3822,7 @@ final class ChatFeatureTests: XCTestCase {
     private func makeContainer() throws -> ModelContainer {
         let schema = Schema([
             CompletedActivity.self, DailyWellness.self, SyncState.self,
-            Goal.self, TrainingPlan.self, PlannedWorkout.self,
+            Goal.self, TrainingPlan.self, PlannedWorkout.self, Race.self, PlanEdit.self,
             DailyReadiness.self, DailyCheckIn.self, PlanSnapshot.self, ChatThread.self, ChatMessage.self,
             CoachRequestSnapshot.self, CoachMemoryItem.self, CoachPromptSuggestionRecord.self
         ])
@@ -3750,6 +3962,84 @@ final class ChatFeatureTests: XCTestCase {
         )
         let fitness = FitnessProfile(vdot: 48, weeklyVolumeKm: 40, volumeTrend: 0, longestRecentRunKm: 16)
         try PlanStore.replaceGoal(spec: goal, fitness: fitness, today: today, calendar: calendar, in: context)
+    }
+
+    private func seedGoal(in context: ModelContext, raceDate: Date, today: Date) throws {
+        let goal = GoalSpec(
+            distance: .marathon,
+            targetTimeSeconds: 14_340,
+            raceDate: raceDate,
+            availableDays: [.monday, .wednesday, .friday, .sunday],
+            longRunDay: .sunday
+        )
+        let fitness = FitnessProfile(vdot: 48, weeklyVolumeKm: 40, volumeTrend: 0, longestRecentRunKm: 16)
+        try PlanStore.replaceGoal(spec: goal, fitness: fitness, today: today, calendar: calendar, in: context)
+    }
+
+    private func seasonBlock(from context: String) -> String {
+        let lines = context.split(separator: "\n", omittingEmptySubsequences: false)
+        guard let start = lines.firstIndex(where: { $0.hasPrefix("SEASON (") }) else {
+            return ""
+        }
+        return lines[start...]
+            .prefix { !$0.hasPrefix("Training load") }
+            .joined(separator: "\n")
+    }
+
+    private func addRaceCandidate(
+        name: String,
+        date: String,
+        distanceMeters: Double,
+        priority: RacePriority?,
+        in context: ModelContext
+    ) throws -> CoachRaceCandidate {
+        var input: [String: JSONValue] = [
+            "name": .string(name),
+            "date": .string(date),
+            "distance_meters": .number(distanceMeters)
+        ]
+        if let priority {
+            input["priority"] = .string(priority.rawValue)
+        }
+        let outcome = try CoachRaceTools.handle(
+            name: CoachRaceTools.proposeAddRaceName,
+            input: .object(input),
+            in: context,
+            today: today,
+            calendar: calendar,
+            language: .en
+        )
+        guard case .candidate(let candidate) = outcome else {
+            throw CoachTools.ValidationError("The race add did not create a candidate.")
+        }
+        return candidate
+    }
+
+    private func planDaySnapshots(in context: ModelContext) throws -> [PlanDaySnapshot] {
+        try context.fetch(FetchDescriptor<PlannedWorkout>())
+            .map(PlanDaySnapshot.init)
+            .sorted {
+                if $0.date != $1.date { return $0.date < $1.date }
+                return $0.details < $1.details
+            }
+    }
+
+    private struct PlanDaySnapshot: Equatable {
+        var date: Date
+        var kindRaw: String
+        var distanceKm: Double
+        var details: String
+        var statusRaw: String
+        var manuallyOverridden: Bool
+
+        init(_ workout: PlannedWorkout) {
+            date = workout.date
+            kindRaw = workout.kindRaw
+            distanceKm = workout.distanceKm
+            details = workout.details
+            statusRaw = workout.statusRaw
+            manuallyOverridden = workout.manuallyOverridden
+        }
     }
 
     private func plannedWorkouts(on date: Date, in context: ModelContext) throws -> [PlannedWorkout] {

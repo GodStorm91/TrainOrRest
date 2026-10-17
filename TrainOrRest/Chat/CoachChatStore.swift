@@ -77,6 +77,7 @@ final class CoachChatStore: ObservableObject {
     @Published private(set) var isConfirmingPlanCandidate = false
     @Published private(set) var generationState: CoachGenerationState = .idle
     @Published private(set) var pendingPlanCandidate: CoachPlanCandidate?
+    @Published private(set) var pendingRaceCandidate: CoachRaceCandidate?
     @Published var lastError: String?
 
     private let anthropicClient: ClaudeServicing
@@ -104,7 +105,7 @@ final class CoachChatStore: ObservableObject {
     }
 
     var hasPendingPlanDecision: Bool {
-        pendingPlanCandidate != nil
+        pendingPlanCandidate != nil || pendingRaceCandidate != nil
     }
 
     func stagePlanCandidate(_ candidate: CoachPlanCandidate) {
@@ -116,6 +117,32 @@ final class CoachChatStore: ObservableObject {
     func cancelPlanCandidate() {
         guard !isConfirmingPlanCandidate else { return }
         pendingPlanCandidate = nil
+        lastError = nil
+    }
+
+    func stageRaceCandidate(_ candidate: CoachRaceCandidate) {
+        guard pendingRaceCandidate == nil else { return }
+        pendingRaceCandidate = candidate
+        lastError = nil
+    }
+
+    @discardableResult
+    func confirmRaceCandidate(_ candidate: CoachRaceCandidate, in context: ModelContext) throws -> UUID? {
+        guard pendingRaceCandidate?.id == candidate.id else { return nil }
+        let confirmedAt = now()
+        let editID = try CoachRaceTools.confirm(
+            candidate,
+            in: context,
+            today: confirmedAt,
+            calendar: calendar,
+            now: confirmedAt
+        )
+        pendingRaceCandidate = nil
+        return editID
+    }
+
+    func dismissRaceCandidate() {
+        pendingRaceCandidate = nil
         lastError = nil
     }
 
@@ -968,6 +995,41 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
                 return
             }
 
+            if toolUses.count == 1, CoachRaceTools.contains(toolUses[0].1) {
+                let toolUse = toolUses[0]
+                assistantTurn.text = ""
+                conversation.append(ClaudeMessageParam(role: "assistant", content: response.content))
+                do {
+                    switch try CoachRaceTools.handle(
+                        name: toolUse.1,
+                        input: toolUse.2,
+                        in: context,
+                        today: today,
+                        calendar: calendar,
+                        language: language
+                    ) {
+                    case .text(let text):
+                        conversation.append(ClaudeMessageParam(role: "user", content: [
+                            .toolResult(toolUseID: toolUse.0, content: text, isError: false)
+                        ]))
+                        continue
+                    case .candidate(let candidate):
+                        assistantTurn.text = language.preparedCalendarUpdateMessage(summary: candidate.summary)
+                        try context.save()
+                        stageRaceCandidate(candidate)
+                        return
+                    }
+                } catch {
+                    let message = technicalErrorMessage(error)
+                    lastToolRejection = message
+                    underlyingRejection = message
+                    conversation.append(ClaudeMessageParam(role: "user", content: [
+                        .toolResult(toolUseID: toolUse.0, content: "Rejected: \(message)", isError: true)
+                    ]))
+                    continue
+                }
+            }
+
             assistantTurn.text = ""
             conversation.append(ClaudeMessageParam(role: "assistant", content: response.content))
             guard toolUses.count == 1 else {
@@ -1130,7 +1192,7 @@ When your reply asks the user to choose between next steps, call `\(CoachToolCat
         case .planMutation:
             return [CoachToolCatalog.planEditDraft]
         case .unspecified:
-            return [CoachToolCatalog.coachResponse, CoachToolCatalog.planEditDraft]
+            return [CoachToolCatalog.coachResponse, CoachToolCatalog.planEditDraft] + CoachRaceTools.tools
         }
     }
 

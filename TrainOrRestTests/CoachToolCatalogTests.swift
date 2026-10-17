@@ -12,11 +12,22 @@ final class CoachToolCatalogTests: XCTestCase {
     func testToolsOmitPlanEditDraftWhenProposalsAreDisallowed() {
         XCTAssertEqual(
             CoachToolCatalog.tools(allowProposals: false).map(\.name),
-            ["coach_response", "explain_only", "cite_rule"]
+            ["coach_response", "explain_only", "cite_rule", "list_races"]
         )
         XCTAssertEqual(
             CoachToolCatalog.tools(allowProposals: true).map(\.name),
-            ["coach_response", "explain_only", "propose_plan_adjustment", "cite_rule"]
+            [
+                "coach_response",
+                "explain_only",
+                "propose_plan_adjustment",
+                "cite_rule",
+                "list_races",
+                "propose_add_race",
+                "propose_update_race",
+                "propose_remove_race",
+                "propose_rebalance_for_races",
+                "record_race_result"
+            ]
         )
     }
 
