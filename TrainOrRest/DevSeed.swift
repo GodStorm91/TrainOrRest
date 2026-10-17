@@ -37,6 +37,8 @@ enum DevSeed {
         case calendar
         case activity
         case turnLog
+        case addRace
+        case month
     }
 
     /// The requested launch screen, or `nil` for the normal tab shell.
@@ -133,6 +135,7 @@ enum DevSeed {
         applyRequestedChatGPTState()
         applyRequestedLanguage()
         seedPlanIfRequested(context)
+        seedRacesIfRequested(context)
         seedAdaptiveReviewIfRequested(context)
         seedTodayRunIfRequested(context)
         seedHistoryIfRequested(context)
@@ -264,6 +267,35 @@ enum DevSeed {
         )
         let fitness = FitnessProfile(vdot: 48, weeklyVolumeKm: 40, volumeTrend: 0, longestRecentRunKm: 16)
         try? PlanStore.replaceGoal(spec: spec, fitness: fitness, today: today, calendar: calendar, in: context)
+    }
+
+    /// `TOR_DEV_RACES=1` paired with `TOR_DEV_PLAN=1` adds a B race three weeks
+    /// out and a C race six weeks out, so the season card, the month badges and
+    /// the taper tags all render without tapping through the add sheet.
+    @MainActor
+    private static func seedRacesIfRequested(_ context: ModelContext) {
+        guard ProcessInfo.processInfo.environment["TOR_DEV_RACES"] == "1" else { return }
+        let existing = (try? context.fetch(FetchDescriptor<Race>())) ?? []
+        guard existing.filter({ $0.priorityRaw != RacePriority.a.rawValue }).isEmpty else { return }
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let seeds: [(String, Int, RaceDistance, RacePriority, Double?)] = [
+            ("Half Saitama", 21, .halfMarathon, .b, 110 * 60),
+            ("10K Toda", 42, .tenK, .c, nil)
+        ]
+        for (name, dayOffset, distance, priority, target) in seeds {
+            guard let date = calendar.date(byAdding: .day, value: dayOffset, to: today) else { continue }
+            let spec = RaceSpec(
+                id: UUID(),
+                name: name,
+                date: date,
+                distanceMeters: distance.meters,
+                targetTimeSeconds: target,
+                priority: priority
+            )
+            context.insert(Race(spec: spec, createdAt: today, updatedAt: today))
+        }
+        try? context.save()
     }
 
     /// `TOR_DEV_ADAPTIVE=queued|preparing|proposal|no-change|failed|stale|applied|reverted|superseded|needs-key|dismissed`

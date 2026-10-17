@@ -8,6 +8,7 @@ struct ProfileView: View {
     @Query private var plans: [TrainingPlan]
     @Query(sort: \CompletedActivity.date, order: .reverse) private var activities: [CompletedActivity]
     @Query(sort: \DailyReadiness.date, order: .reverse) private var readiness: [DailyReadiness]
+    @Query private var races: [Race]
 
     @AppStorage(CoachLanguage.storageKey) private var languageRaw = CoachLanguage.en.rawValue
     @AppStorage(PersonalCoachSettings.weightKgKey) private var weightKg = ""
@@ -16,10 +17,13 @@ struct ProfileView: View {
 
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.modelContext) private var modelContext
 
 
     @State private var showGoalEntry = false
     @State private var showAthleteProfile = false
+    @State private var showAddRace = false
+    @State private var selectedRace: RaceSpec?
 
     private let calendar = Calendar.current
     private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
@@ -41,6 +45,16 @@ struct ProfileView: View {
         .scrollIndicators(.hidden)
         .sheet(isPresented: $showGoalEntry) { GoalEntryView() }
         .sheet(isPresented: $showAthleteProfile) { NavigationStack { AthleteProfileEditView() } }
+        .sheet(isPresented: $showAddRace) {
+            AddRaceSheet(
+                language: language,
+                onCancel: { showAddRace = false },
+                onConfirm: addRace
+            )
+        }
+        .sheet(item: $selectedRace) { race in
+            RaceDetailView(race: race, language: language)
+        }
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(false)
     }
@@ -114,7 +128,17 @@ struct ProfileView: View {
 
     @ViewBuilder
     private var goalAndPlanCard: some View {
-        if let summary = activePlanSummary {
+        if !races.isEmpty {
+            SeasonCard(
+                season: season,
+                summary: activePlanSummary,
+                warnings: seasonWarnings,
+                language: language,
+                onSelectRace: { selectedRace = $0 },
+                onAddRace: { showAddRace = true },
+                onOpenWarning: openCoach(for:)
+            )
+        } else if let summary = activePlanSummary {
             NavigationLink {
                 TrainingPlanDetailView()
             } label: {
@@ -390,6 +414,53 @@ struct ProfileView: View {
 
     private var activePlanSummary: ActivePlanSummary? {
         ActivePlanSummaryBuilder.build(goal: goals.first, plan: activePlan, activities: activities, calendar: calendar)
+    }
+
+    private var season: RaceSeason {
+        RaceSeason(races: races.compactMap(\.spec))
+    }
+
+    private var seasonWarnings: [RaceWarning] {
+        RaceScheduler.warnings(races: season.races, today: .now, calendar: calendar)
+    }
+
+    private func addRace(_ spec: RaceSpec) {
+        do {
+            _ = try RaceSeasonStore.insert(spec, in: modelContext, now: .now)
+            try RaceSeasonStore.syncGoalToARace(in: modelContext, calendar: calendar)
+            try applySeasonSchedule(summary: spec.name)
+        } catch {
+            return
+        }
+    }
+
+    private func applySeasonSchedule(summary: String) throws {
+        let updatedSeason = try RaceSeasonStore.season(in: modelContext)
+        let change = try RacePlanApplier.preview(
+            in: modelContext,
+            races: updatedSeason.races,
+            today: .now,
+            calendar: calendar
+        )
+        _ = try RacePlanApplier.apply(
+            change,
+            in: modelContext,
+            today: .now,
+            calendar: calendar,
+            summary: summary
+        )
+    }
+
+    private func openCoach(for warning: RaceWarning) {
+        let prompt = CoachLanguage.en.season.warningText(warning)
+        NotificationCenter.default.post(
+            name: .torOpenCoachChat,
+            object: CalendarReviewChatRequest(
+                displayText: prompt,
+                prompt: prompt,
+                threadTitle: language.season.seasonTitle
+            )
+        )
     }
 
     private func planTitle(_ summary: ActivePlanSummary) -> String {

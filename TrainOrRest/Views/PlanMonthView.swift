@@ -26,6 +26,10 @@ struct PlanMonthView: View {
     @Query(sort: \DailyReadiness.date, order: .reverse) private var readinessDays: [DailyReadiness]
     @Query(sort: \AdaptivePlanReview.updatedAt, order: .reverse) private var adaptiveReviews: [AdaptivePlanReview]
     @Query private var syncStates: [SyncState]
+    @Query private var races: [Race]
+    private var season: RaceSeason {
+        RaceSeason(races: races.compactMap(\.spec))
+    }
     @State private var plannedOverrideSaveFailed = false
     private let calendar = Calendar.current
     @ScaledMetric(relativeTo: .caption2) private var railWidth: CGFloat = 52
@@ -101,6 +105,7 @@ struct PlanMonthView: View {
                             calendarPlanReviewSlot
                         }
                         monthNav
+                        raceChipStrip
                         if let phaseRibbon {
                             CalendarPlanPhaseRibbon(
                                 model: phaseRibbon,
@@ -222,6 +227,79 @@ struct PlanMonthView: View {
         }
     }
 
+    @ViewBuilder
+    private var raceChipStrip: some View {
+        let upcomingRaces = season.upcoming
+        if !upcomingRaces.isEmpty {
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(upcomingRaces) { race in
+                        Button {
+                            selectRace(race)
+                        } label: {
+                            HStack(spacing: 7) {
+                                priorityBadge(race.priority, size: 22)
+                                Text(race.name)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(Theme.text)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                    .layoutPriority(0)
+                                Text(language.shortDate(race.date))
+                                    .font(.caption2.weight(.medium).monospacedDigit())
+                                    .foregroundStyle(Theme.dim)
+                                    .fixedSize(horizontal: true, vertical: false)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: 160)
+                            .background(Theme.chip, in: Capsule())
+                            .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
+                            .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    private func selectRace(_ race: RaceSpec) {
+        let raceDay = calendar.startOfDay(for: race.date)
+        if reduceMotion {
+            selectedDate = raceDay
+            monthAnchor = raceDay
+        } else {
+            withAnimation(.easeOut(duration: 0.2)) {
+                selectedDate = raceDay
+                monthAnchor = raceDay
+            }
+        }
+    }
+
+    private func priorityBadge(_ priority: RacePriority, size: CGFloat) -> some View {
+        let isPrimary = priority == .a
+        let accent = priority == .b
+        let cornerRadius = size * 7 / 22
+
+        return Text(priority.rawValue)
+            .font(.system(size: size * 0.55, weight: .bold, design: .rounded))
+            .foregroundStyle(isPrimary ? Color.white : (accent ? Theme.accent : Theme.dim))
+            .frame(width: size, height: size)
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(isPrimary ? Theme.accent : Color.clear)
+            )
+            .overlay {
+                if !isPrimary {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(accent ? Theme.accent : Theme.border, lineWidth: 1)
+                }
+            }
+            .accessibilityHidden(true)
+    }
+
     private var activeAdaptiveReview: AdaptivePlanReview? {
         adaptiveReviews.first { $0.phase != .dismissed }
     }
@@ -301,7 +379,7 @@ struct PlanMonthView: View {
                         }
                     }
                     summarySeparator
-                    weekLoadRail(index.weekVolumes[row])
+                    weekLoadRail(index.weekVolumes[row], dates: week.compactMap { $0 })
                 }
             }
         }
@@ -311,6 +389,8 @@ struct PlanMonthView: View {
         let isToday = calendar.isDateInToday(date)
         let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
         let isPast = date < calendar.startOfDay(for: .now)
+        let race = race(on: date)
+        let accessibilityKind = race == nil ? kind : .race
 
         return Button {
             withAnimation(.easeOut(duration: 0.15)) {
@@ -336,21 +416,29 @@ struct PlanMonthView: View {
                 VStack(spacing: 5) {
                     Text("\(calendar.component(.day, from: date))")
                         .font(.subheadline.weight(.bold))
-                        .foregroundStyle(numberColor(isToday: isToday, isSelected: isSelected, isPast: isPast, hasWorkout: kind != nil))
-                    dayMark(kind: kind, isPast: isPast)
+                        .foregroundStyle(numberColor(
+                            isToday: isToday,
+                            isSelected: isSelected,
+                            isPast: isPast,
+                            hasWorkout: kind != nil || race != nil
+                        ))
+                    dayMark(race: race, kind: kind, isPast: isPast)
                 }
             }
             .aspectRatio(1, contentMode: .fit)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityLabel(date, kind: kind, isToday: isToday))
+        .accessibilityLabel(accessibilityLabel(date, kind: accessibilityKind, isToday: isToday))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private func dayMark(kind: WorkoutKind?, isPast: Bool) -> some View {
+    private func dayMark(race: RaceSpec?, kind: WorkoutKind?, isPast: Bool) -> some View {
         Group {
-            if let kind {
+            if let race {
+                priorityBadge(race.priority, size: 12)
+                    .opacity(isPast ? 0.4 : 1)
+            } else if let kind {
                 Image(systemName: kind.symbolName)
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(isPast ? kind.styleColor.opacity(0.4) : kind.styleColor)
@@ -459,6 +547,11 @@ struct PlanMonthView: View {
                         detailCard(workout)
                     }
                 }
+                if let race = race(on: selectedDate) {
+                    Text(recoveryLine(for: race))
+                        .font(.footnote)
+                        .foregroundStyle(Theme.dim)
+                }
             }
         }
     }
@@ -536,14 +629,21 @@ struct PlanMonthView: View {
     /// Week summary: completed over planned, with a cyan fill toward this
     /// week's plan. Not scaled to other weeks — that bar had no unit.
     @ViewBuilder
-    private func weekLoadRail(_ volume: MonthGrid.WeekVolume) -> some View {
-        if volume.hasWork {
+    private func weekLoadRail(_ volume: MonthGrid.WeekVolume, dates: [Date]) -> some View {
+        let tag = weekRaceTag(for: dates)
+        if volume.hasWork || tag != nil {
             VStack(alignment: .leading, spacing: 3) {
                 Text(volume.displayLabel)
                     .font(.caption.weight(.semibold).monospacedDigit())
                     .foregroundStyle(volume.plannedKm > 0 && volume.completedKm > 0 ? Theme.text : Theme.dim)
                     .minimumScaleFactor(0.7)
                     .lineLimit(1)
+                if let tag {
+                    Text(tag.text)
+                        .font(.caption2)
+                        .foregroundStyle(tag.color)
+                        .lineLimit(1)
+                }
                 if volume.plannedKm > 0 {
                     ZStack(alignment: .leading) {
                         Capsule()
@@ -558,10 +658,97 @@ struct PlanMonthView: View {
             .frame(width: railWidth, alignment: .leading)
             .frame(maxHeight: .infinity, alignment: .center)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(volumeAccessibility(volume))
+            .accessibilityLabel(volumeAccessibility(volume, tag: tag?.text))
         } else {
             Color.clear.frame(width: railWidth)
         }
+    }
+
+    private func weekRaceTag(for dates: [Date]) -> (text: String, color: Color)? {
+        let raceSpecs = season.races
+        if dates.contains(where: { day in
+            raceSpecs.contains { race in
+                race.status != .skipped && isTaperDay(day, for: race)
+            }
+        }) {
+            return (language.season.taperTag, Theme.warn)
+        }
+        if dates.contains(where: { day in
+            raceSpecs.contains { race in
+                race.status != .skipped && isRecoveryDay(day, for: race)
+            }
+        }) {
+            return (language.season.recoveryTag, Theme.good)
+        }
+        return nil
+    }
+
+    private func isTaperDay(_ date: Date, for race: RaceSpec) -> Bool {
+        let taperDays: Int
+        switch race.priority {
+        case .a:
+            taperDays = RaceTaperTable.taperDays(meters: race.distanceMeters)
+        case .b:
+            taperDays = RaceTaperTable.miniTaperDays
+        case .c:
+            return false
+        }
+
+        let raceDay = calendar.startOfDay(for: race.date)
+        let day = calendar.startOfDay(for: date)
+        guard let taperStart = calendar.date(byAdding: .day, value: -taperDays, to: raceDay) else {
+            return false
+        }
+        return day >= taperStart && day < raceDay
+    }
+
+    private func isRecoveryDay(_ date: Date, for race: RaceSpec) -> Bool {
+        let raceDay = calendar.startOfDay(for: race.date)
+        let day = calendar.startOfDay(for: date)
+        let recoveryDays = RaceTaperTable.recoveryDays(
+            meters: race.distanceMeters,
+            priority: race.priority
+        )
+        guard let recoveryEnd = calendar.date(byAdding: .day, value: recoveryDays, to: raceDay) else {
+            return false
+        }
+        return day > raceDay && day <= recoveryEnd
+    }
+
+    private func race(on date: Date) -> RaceSpec? {
+        let day = calendar.startOfDay(for: date)
+        var match: RaceSpec?
+
+        for candidate in season.races where calendar.startOfDay(for: candidate.date) == day {
+            guard let current = match else {
+                match = candidate
+                continue
+            }
+            if candidate.priority < current.priority
+                || (candidate.priority == current.priority && candidate.id.uuidString < current.id.uuidString) {
+                match = candidate
+            }
+        }
+        return match
+    }
+
+    private func recoveryLine(for race: RaceSpec) -> String {
+        let recoveryDays = RaceTaperTable.recoveryDays(
+            meters: race.distanceMeters,
+            priority: race.priority
+        )
+        let recovery = "\(language.season.recoveryTag) \(recoveryDays)"
+        let raceDay = calendar.startOfDay(for: race.date)
+        guard let nextRace = season.upcoming.first(where: {
+            calendar.startOfDay(for: $0.date) > raceDay
+        }) else {
+            return recovery
+        }
+
+        let maximumNameLength = max(0, 70 - recovery.count - 3)
+        let nextRaceName = String(nextRace.name.prefix(maximumNameLength))
+        guard !nextRaceName.isEmpty else { return recovery }
+        return "\(recovery) → \(nextRaceName)"
     }
 
 
@@ -571,15 +758,18 @@ struct PlanMonthView: View {
         return max(4, maxBar * CGFloat(volume.progress))
     }
 
-    private func volumeAccessibility(_ volume: MonthGrid.WeekVolume) -> String {
+    private func volumeAccessibility(_ volume: MonthGrid.WeekVolume, tag: String?) -> String {
+        let label: String
         if volume.completedKm > 0 {
-            language.plan.weekVolumeAccessibility(
+            label = language.plan.weekVolumeAccessibility(
                 completed: volume.completedDisplay,
                 planned: volume.plannedDisplay
             )
         } else {
-            language.plan.weekVolumePlannedAccessibility(volume.plannedDisplay)
+            label = language.plan.weekVolumePlannedAccessibility(volume.plannedDisplay)
         }
+        guard let tag else { return label }
+        return "\(label), \(tag)"
     }
 
     // MARK: - Selected day detail

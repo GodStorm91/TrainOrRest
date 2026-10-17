@@ -24,7 +24,7 @@ struct TrainOrRestApp: App {
         do {
             container = try ModelContainer(
                 for: CompletedActivity.self, DailyWellness.self, SyncState.self,
-                Goal.self, TrainingPlan.self, PlannedWorkout.self,
+                Goal.self, Race.self, TrainingPlan.self, PlannedWorkout.self,
                 DailyReadiness.self, DailyCheckIn.self, RuleOverride.self,
                 PlanSnapshot.self, ChatThread.self, ChatMessage.self, PlanEdit.self,
                 AdaptivePlanReview.self,
@@ -185,7 +185,14 @@ struct RootView: View {
             }
         }
         .preferredColorScheme(appearance.colorScheme)
-        .task { await determineStage() }
+        .task {
+            try? RaceSeasonStore.migrateGoalIfNeeded(
+                in: modelContext,
+                now: .now,
+                calendar: .current
+            )
+            await determineStage()
+        }
         #if DEBUG
         .onAppear { DevSeed.applyRequestedGeometry() }
         #endif
@@ -261,6 +268,14 @@ struct RootView: View {
             }
         case .turnLog:
             CoachTurnLogSettingsView()
+        case .addRace:
+            AddRaceSheet(
+                language: language,
+                onCancel: {},
+                onConfirm: { _ in }
+            )
+        case .month:
+            DevMonthPreview(language: language)
         }
     }
 
@@ -335,6 +350,34 @@ struct RootView: View {
 }
 
 #if DEBUG
+/// DEBUG-only month-grid host. Renders `PlanMonthView` alone so the race
+/// badges, the chip strip and the week tags sit in the top viewport, which is
+/// the only region a simulator screenshot can reach. Compiled out of release.
+struct DevMonthPreview: View {
+    let language: CoachLanguage
+    @Query(sort: \PlannedWorkout.date) private var workouts: [PlannedWorkout]
+    @Query(sort: \CompletedActivity.date, order: .reverse) private var activities: [CompletedActivity]
+    @Query(sort: \Race.date) private var races: [Race]
+    @State private var monthAnchor: Date?
+    @State private var selectedDate: Date?
+
+    var body: some View {
+        PlanMonthView(
+            workouts: workouts,
+            language: language,
+            completedActivities: activities,
+            monthAnchor: Binding(get: { monthAnchor ?? firstRaceDate }, set: { monthAnchor = $0 }),
+            selectedDate: Binding(get: { selectedDate ?? firstRaceDate }, set: { selectedDate = $0 }),
+            showsTodaysCall: false
+        )
+        .background(Theme.bg)
+    }
+
+    private var firstRaceDate: Date {
+        races.first { $0.date >= Calendar.current.startOfDay(for: .now) }?.date ?? .now
+    }
+}
+
 /// DEBUG-only coach verification host. Renders the live coach thread and, when
 /// `TOR_DEV_LIVE=1`, fires exactly one read-only turn so the real provider
 /// answer card can be screenshotted. Compiled out of release builds.
