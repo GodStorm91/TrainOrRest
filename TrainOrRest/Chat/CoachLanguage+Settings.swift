@@ -206,6 +206,54 @@ struct SettingsCopy {
         }
     }
 
+    var coachTurnLogTitle: String {
+        switch language {
+        case .en: "Coach turn log"
+        case .ja: "コーチ応答ログ"
+        case .vi: "Nhật ký lượt Coach"
+        }
+    }
+
+    var coachTurnLogValue: String {
+        switch language {
+        case .en: "For bug reports"
+        case .ja: "不具合報告用"
+        case .vi: "Để báo lỗi"
+        }
+    }
+
+    var coachTurnLogFooter: String {
+        switch language {
+        case .en: "Records the last 20 Coach turns: what you tapped, the text the app sent, timings, errors, and any plan change it applied. It leaves out the Coach replies, your health data, and your API keys. Nothing leaves this device until you share it."
+        case .ja: "直近 20 件のコーチ応答を記録します。タップした内容、アプリが送信したテキスト、処理時間、エラー、適用されたプラン変更が含まれます。コーチの返答、ヘルスケアデータ、API キーは含みません。共有するまでこの端末から出ません。"
+        case .vi: "Ghi lại 20 lượt Coach gần nhất: bạn đã chạm gì, văn bản ứng dụng đã gửi, thời gian xử lý, lỗi, và thay đổi kế hoạch đã áp dụng. Không gồm câu trả lời của Coach, dữ liệu sức khỏe, hay khóa API. Dữ liệu chỉ rời thiết bị khi bạn chia sẻ."
+        }
+    }
+
+    var copyCoachTurnLog: String {
+        switch language {
+        case .en: "Copy turn log"
+        case .ja: "応答ログをコピー"
+        case .vi: "Sao chép nhật ký"
+        }
+    }
+
+    var shareCoachTurnLog: String {
+        switch language {
+        case .en: "Share as a file"
+        case .ja: "ファイルとして共有"
+        case .vi: "Chia sẻ dạng tệp"
+        }
+    }
+
+    func coachTurnLogCount(_ count: Int) -> String {
+        switch language {
+        case .en: "\(count) turns recorded"
+        case .ja: "\(count) 件の応答を記録"
+        case .vi: "Đã ghi \(count) lượt"
+        }
+    }
+
     var supportSection: String {
         switch language {
         case .en: "Support"

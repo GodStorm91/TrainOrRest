@@ -17,6 +17,7 @@ struct SettingsView: View {
 
     private var appearance: AppAppearance { AppAppearance(rawValue: appearanceRaw) ?? .system }
     private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
+    private var diagnostics: CoachDiagnosticsAvailability { .shared }
 
     var body: some View {
         Form {
@@ -86,6 +87,13 @@ struct SettingsView: View {
                     settingsRow(language.settings.healthDataPermissions, systemImage: "lock.shield", value: language.settings.iOSSettings)
                 }
                 settingsRow(language.settings.dataStorage, systemImage: "externaldrive", value: language.settings.onThisDevice)
+                if diagnostics.isEnabled {
+                    NavigationLink {
+                        CoachTurnLogSettingsView()
+                    } label: {
+                        settingsRow(language.settings.coachTurnLogTitle, systemImage: "ladybug", value: language.settings.coachTurnLogValue)
+                    }
+                }
             }
 
             Section(language.settings.supportSection) {
@@ -100,6 +108,7 @@ struct SettingsView: View {
         .task {
             try? PersonalCoachSettings.migrateLegacyCoachMemoryIfNeeded(in: modelContext)
             intervalsConnection.reload()
+            await diagnostics.resolve()
         }
     }
 

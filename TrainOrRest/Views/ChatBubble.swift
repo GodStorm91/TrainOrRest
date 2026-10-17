@@ -52,6 +52,8 @@ struct ChatBubble: View {
     var onSelectInteractionOther: (ChatMessage, CoachResponseInteraction) -> Void = { _, _ in }
     var onSelectFollowUp: (ChatMessage, CoachChoiceOption) -> Void = { _, _ in }
 
+    @Environment(\.modelContext) private var modelContext
+    private var diagnostics: CoachDiagnosticsAvailability { .shared }
     @State private var showsGroundingSummary = false
 
     private var isUser: Bool { message.role == .user }
@@ -200,6 +202,15 @@ struct ChatBubble: View {
             }
             .accessibilityLabel(language.copyLabel)
 
+            if diagnostics.isEnabled {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    UIPasteboard.general.string = CoachTurnReport.report(for: message, in: modelContext)
+                } label: {
+                    Label(language.copyDebugReportLabel, systemImage: "ladybug")
+                }
+                .accessibilityLabel(language.copyDebugReportLabel)
+            }
         }
         .sheet(isPresented: $showsGroundingSummary) {
             ReceiptSheet(
@@ -210,6 +221,9 @@ struct ChatBubble: View {
         }
         .onAppear {
             announceInlineFailureIfNeeded()
+        }
+        .task {
+            await diagnostics.resolve()
         }
     }
 

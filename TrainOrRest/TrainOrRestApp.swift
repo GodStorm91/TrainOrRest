@@ -259,6 +259,8 @@ struct RootView: View {
             } else {
                 ContentUnavailableView("No activity to preview", systemImage: "figure.run")
             }
+        case .turnLog:
+            CoachTurnLogSettingsView()
         }
     }
     private var todayWorkout: PlannedWorkout? {

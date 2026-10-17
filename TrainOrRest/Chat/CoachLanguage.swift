@@ -160,6 +160,15 @@ enum CoachLanguage: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Context-menu action that copies a JSON record of this turn for a bug report.
+    var copyDebugReportLabel: String {
+        switch self {
+        case .en: "Copy debug report"
+        case .ja: "デバッグ情報をコピー"
+        case .vi: "Sao chép báo cáo lỗi"
+        }
+    }
+
     /// Appended to the coach system prompt so replies match the chosen language.
     /// Empty for English (no behavior change).
     var systemPromptDirective: String {
