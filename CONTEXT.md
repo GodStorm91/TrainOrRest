@@ -34,6 +34,12 @@ Legacy single-workout `PlanEdit` rows remain readable and revertible through the
 
 A replacement candidate constructed from the original proposal after its base revision no longer matches the current plan. It must be shown with the “plan changed” state and explicitly confirmed again. A stale candidate never writes.
 
+### Race season
+
+The ordered set of races a runner has entered, each carrying a priority of A, B or C. `RaceScheduler` maps that season onto plan days as taper, mini taper, race day and recovery changes. `RacePlanApplier` commits those changes as one plan receipt.
+
+Chat never applies a season change on its own. It stages a `CoachRaceCandidate`, renders `RaceUpdateCard`, and waits for the runner to save or dismiss.
+
 ## Invariants
 
 - Provider output proposes; deterministic local code constructs, validates, and commits.
@@ -45,6 +51,10 @@ A replacement candidate constructed from the original proposal after its base re
 - Revert applies a receipt’s inverse only when the current state still matches its recorded applied state.
 - Multi-operation commits and reverts are all-or-nothing from the runner’s perspective.
 - `TrainingPlan` and `PlannedWorkout` remain the source of current plan truth; no event-sourced rewrite is introduced.
+- A race proposal never rewrites a day that falls before today.
+- A taper or recovery day never overwrites a day that already holds a race.
+- A race receipt records a day only when its kind, distance or details change.
+- A week target counts one workout per day, never a duplicate row.
 
 ## Example dialogue
 
