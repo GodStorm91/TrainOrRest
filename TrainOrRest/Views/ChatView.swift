@@ -1148,6 +1148,14 @@ struct ChatView: View {
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else if let candidate = chatStore.pendingRaceCandidate {
+                RaceUpdateCard(
+                    candidate: candidate,
+                    language: language,
+                    onSave: { applyRaceCandidate(candidate) },
+                    onDismiss: { chatStore.dismissRaceCandidate() }
+                )
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
             } else if shouldShowContextualSuggestions {
                 CoachAskNextStrip(
                     prompts: Array(visibleContextualPromptSuggestions.prefix(2).map(\.prompt)),
@@ -1176,6 +1184,7 @@ struct ChatView: View {
         .padding(.bottom, isSoftwareKeyboardVisible ? 6 : (reservesBottomDock ? TorTabDockMetrics.reservedBottomSpace : 8))
         .background(.clear)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: chatStore.pendingPlanCandidate?.id)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: chatStore.pendingRaceCandidate?.id)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: isSoftwareKeyboardVisible)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: scrollState.hasUnseenContent)
     }
@@ -1722,6 +1731,25 @@ struct ChatView: View {
         }
     }
 
+    private func applyRaceCandidate(_ candidate: CoachRaceCandidate) {
+        guard chatStore.pendingRaceCandidate?.id == candidate.id else { return }
+        do {
+            let editID = try chatStore.confirmRaceCandidate(candidate, in: modelContext)
+            planTransaction = .success(
+                summary: candidate.summary,
+                date: candidate.change.dayChanges.first?.date,
+                editID: editID
+            )
+        } catch {
+            let detail = error.coachTechnicalDescription
+            planTransaction = .failure(
+                userMessage: userFacingPlanError(detail),
+                technicalDetails: detail,
+                retry: .raceCandidate(candidate)
+            )
+        }
+    }
+
     private func revertPlanEdit(_ editID: UUID) {
         do {
             try PlanEditStore.revert(editID, in: modelContext, today: Date(), calendar: calendar)
@@ -1742,6 +1770,9 @@ struct ChatView: View {
         case .candidate(let candidate):
             planTransaction = nil
             chatStore.stagePlanCandidate(candidate)
+        case .raceCandidate(let candidate):
+            planTransaction = nil
+            chatStore.stageRaceCandidate(candidate)
         case .revert(let editID):
             revertPlanEdit(editID)
         }
@@ -2688,12 +2719,13 @@ private struct PendingOtherCoachResponse: Equatable {
 
 private enum ChatPlanRetry {
     case candidate(CoachPlanCandidate)
+    case raceCandidate(CoachRaceCandidate)
     case revert(UUID)
 }
 
 private enum ChatPlanTransaction {
     case applying(title: String)
-    case success(summary: String, date: Date?, editID: UUID)
+    case success(summary: String, date: Date?, editID: UUID?)
     case failure(userMessage: String, technicalDetails: String, retry: ChatPlanRetry)
 
     var calendarDate: Date? {
@@ -2787,12 +2819,14 @@ private struct PlanTransactionCard: View {
                     }
                     HStack(spacing: 8) {
                         transactionButton(language.viewInCalendarLabel, systemImage: "calendar", prominent: true, action: onViewCalendar)
-                        transactionButton(
-                            language.undoLabel,
-                            systemImage: "arrow.uturn.backward",
-                            prominent: false,
-                            action: { onUndo(editID) }
-                        )
+                        if let editID {
+                            transactionButton(
+                                language.undoLabel,
+                                systemImage: "arrow.uturn.backward",
+                                prominent: false,
+                                action: { onUndo(editID) }
+                            )
+                        }
                     }
                 case .failure(let userMessage, let technicalDetails, _):
                     Label(failureTitle(for: technicalDetails), systemImage: "exclamationmark.triangle.fill")

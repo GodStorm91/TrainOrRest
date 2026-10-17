@@ -38,6 +38,18 @@ struct SeasonCopy {
     var demoteExistingATitle: String { text(en: "Replace your main goal?", ja: "メイン目標を置き換えますか？", vi: "Thay mục tiêu chính?") }
     var noRacesYet: String { text(en: "No races yet", ja: "レースがありません", vi: "Chưa có race nào") }
     var noRacesDescription: String { text(en: "Add the race you entered and Coach plans around it.", ja: "参加するレースを追加すると、コーチがそれに合わせて計画します。", vi: "Thêm race bạn đã đăng ký để Coach lên kế hoạch quanh nó.") }
+    var confirmEyebrow: String { text(en: "SEASON UPDATE", ja: "シーズン更新", vi: "CẬP NHẬT MÙA GIẢI") }
+    var confirmSave: String { text(en: "Save to calendar", ja: "カレンダーに保存", vi: "Lưu vào lịch") }
+    var confirmLater: String { text(en: "Not now", ja: "あとで", vi: "Để sau") }
+    var noDayChanges: String { text(en: "No training day changes.", ja: "トレーニング日の変更はありません。", vi: "Không có ngày tập nào thay đổi.") }
+    var raceDayTag: String { text(en: "Race day", ja: "レース当日", vi: "Ngày race") }
+    var rebalanceHeadline: String { text(en: "Rebalance the season", ja: "シーズンを再調整", vi: "Cân đối lại mùa giải") }
+
+    func moreDays(_ count: Int) -> String { text(en: "+\(count) more days", ja: "ほか\(count)日", vi: "thêm \(count) ngày") }
+    func addRaceHeadline(_ name: String) -> String { text(en: "Add \(name)", ja: "\(name)を追加", vi: "Thêm \(name)") }
+    func updateRaceHeadline(_ name: String) -> String { text(en: "Update \(name)", ja: "\(name)を更新", vi: "Cập nhật \(name)") }
+    func removeRaceHeadline(_ name: String) -> String { text(en: "Remove \(name)", ja: "\(name)を削除", vi: "Xóa \(name)") }
+    func resultRaceHeadline(_ name: String) -> String { text(en: "Record \(name)", ja: "\(name)の結果を記録", vi: "Ghi kết quả \(name)") }
 
     func demoteExistingA(_ name: String) -> String {
         text(en: "\(name) becomes a B race.", ja: "\(name)はBレースになります。", vi: "\(name) sẽ thành race B.")
@@ -63,12 +75,16 @@ struct SeasonCopy {
         case .insideARaceTaper:
             text(en: "This race falls inside the Race A taper.", ja: "このレースはRace Aのテーパー期間内です。", vi: "Race này nằm trong giai đoạn giảm tải của Race A.")
         case .tooSoonAfterMarathon:
-            text(en: "Half or longer \(warning.dayGap ?? 0) days after a marathon.", ja: "マラソンの\(warning.dayGap ?? 0)日後にハーフ以上です。", vi: "Half cách marathon \(warning.dayGap ?? 0) ngày.")
+            text(en: "Half or longer \(englishDays(warning.dayGap ?? 0)) after a marathon.", ja: "マラソンの\(warning.dayGap ?? 0)日後にハーフ以上です。", vi: "Half cách marathon \(warning.dayGap ?? 0) ngày.")
         case .racesTooClose:
-            text(en: "Two races \(warning.dayGap ?? 0) days apart.", ja: "2レースが\(warning.dayGap ?? 0)日間隔です。", vi: "Hai race cách nhau \(warning.dayGap ?? 0) ngày.")
+            text(en: "Two races \(englishDays(warning.dayGap ?? 0)) apart.", ja: "2レースが\(warning.dayGap ?? 0)日間隔です。", vi: "Hai race cách nhau \(warning.dayGap ?? 0) ngày.")
         case .insideRecoveryWindow:
             text(en: "This race falls inside a recovery window.", ja: "このレースは回復期間内です。", vi: "Race này nằm trong giai đoạn hồi phục.")
         }
+    }
+
+    private func englishDays(_ count: Int) -> String {
+        count == 1 ? "1 day" : "\(count) days"
     }
 
     func schedulePreview(miniTaperDays: Int, miniTaperRange: String, recoveryDays: Int) -> String {

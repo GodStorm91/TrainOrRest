@@ -179,8 +179,10 @@ enum RaceScheduler {
             }
         }
 
+        let todayDay = calendar.startOfDay(for: today)
         var selectedByDay: [Date: CandidateChange] = [:]
-        for candidate in candidates.sorted(by: candidatePrecedes) {
+        for candidate in candidates.sorted(by: candidatePrecedes) where candidate.change.date >= todayDay {
+            if planByDay[candidate.change.date]?.kind == .race, intentRank(candidate.change.intent) != 0 { continue }
             selectedByDay[candidate.change.date] = selectedByDay[candidate.change.date] ?? candidate
         }
         let dayChanges = selectedByDay.values

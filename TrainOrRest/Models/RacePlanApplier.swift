@@ -71,8 +71,11 @@ enum RacePlanApplier {
                 }
 
                 if let current {
-                    let before = PlanWorkoutReceiptSnapshot(workout: current)
                     let kindChanged = current.kindRaw != kind.rawValue
+                    let distanceChanged = abs(current.distanceKm - dayChange.afterKilometers) > 0.05
+                    let detailsChanged = current.details != dayChange.afterSummary
+                    guard kindChanged || distanceChanged || detailsChanged else { continue }
+                    let before = PlanWorkoutReceiptSnapshot(workout: current)
                     current.kindRaw = kind.rawValue
                     current.distanceKm = dayChange.afterKilometers
                     current.details = dayChange.afterSummary
@@ -116,11 +119,14 @@ enum RacePlanApplier {
 
             guard !operations.isEmpty else { return nil }
 
+            let weekRows = Dictionary(grouping: workouts, by: { calendar.startOfDay(for: $0.date) })
+                .compactMap { PlannedWorkout.preferredAmongDuplicates($0.value) }
             let weekTargets = touchedWeeks.sorted().compactMap { weekIndex -> PlanEditWeekTarget? in
                 guard targetVolumesBefore.indices.contains(weekIndex) else { return nil }
-                let after = workouts
+                let after = weekRows
                     .filter { $0.weekIndex == weekIndex }
                     .reduce(0) { $0 + $1.distanceKm }
+                guard abs(after - targetVolumesBefore[weekIndex]) > 0.05 else { return nil }
                 return PlanEditWeekTarget(
                     weekIndex: weekIndex,
                     before: targetVolumesBefore[weekIndex],
