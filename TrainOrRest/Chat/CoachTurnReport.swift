@@ -50,13 +50,13 @@ enum CoachTurnReport {
             end: anchor.addingTimeInterval(planEditWindow)
         )
         let messages = fetchMessages(in: context, limit: defaultTurnLimit * 2)
-        let related = messages.filter { related($0, to: message) }
+        let pair = messages.filter { related($0, to: message) }
         return encode(
             Payload(
                 generatedAt: .now,
                 scope: "single turn",
                 environment: Environment.current,
-                turns: related.map { turn(for: $0, in: context) },
+                turns: pair.map { turn(for: $0, in: context) },
                 planEditsNearby: planEdits(in: context, within: window)
             )
         )
