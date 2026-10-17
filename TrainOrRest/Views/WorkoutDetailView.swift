@@ -31,17 +31,27 @@ struct WorkoutDetailView: View {
 
     private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
 
+    private var distanceText: String {
+        String(format: "%.1f km", locale: language.uiLocale, workout.distanceKm)
+    }
+
     var body: some View {
         List {
             Section {
                 LabeledContent(language.plan.date, value: workout.date.formatted(.dateTime.year().month(.wide).day().weekday(.wide).locale(language.uiLocale)))
                 LabeledContent(language.plan.workout, value: workout.kind.map(language.name) ?? language.genericRunLabel)
-                LabeledContent(language.plan.distance, value: Formatters.kilometers(workout.distanceKm * 1000))
+                LabeledContent(language.plan.distance, value: distanceText)
                 if let band = workout.paceBand {
-                    LabeledContent(language.plan.pace, value: Formatters.paceBand(band))
+                    LabeledContent(language.plan.pace) {
+                        Text(Formatters.paceBand(band).replacingOccurrences(of: "\u{2013}", with: " to "))
+                            .font(.system(.body, design: .monospaced))
+                    }
                 }
                 if let seconds = workout.expectedDurationSeconds {
-                    LabeledContent(language.durationLabel, value: Formatters.duration(seconds))
+                    LabeledContent(language.durationLabel) {
+                        Text(Formatters.duration(seconds))
+                            .font(.system(.body, design: .monospaced))
+                    }
                 }
                 Text(workout.details)
                     .font(.callout)
@@ -147,6 +157,7 @@ struct WorkoutDetailView: View {
                     onSetup: { isShowingRunScheduleSetup = true },
                     onRetry: { Task { await runSchedule.refreshWeather(force: true) } }
                 )
+                .tint(Theme.accent)
                 if smartSchedulingEnabled {
                     if isTimed(workout.date) {
                         scheduledSmartSchedulingSummary
@@ -541,17 +552,16 @@ struct WorkoutDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             ViewThatFits(in: .horizontal) {
                 HStack {
-                    statusButton(status: .done, tint: Theme.good)
-                    statusButton(status: .skipped, tint: Theme.warn)
-                    statusButton(status: .planned, tint: Theme.accent)
+                    statusButton(status: .done)
+                    statusButton(status: .skipped)
+                    statusButton(status: .planned)
                 }
                 VStack(alignment: .leading, spacing: 8) {
-                    statusButton(status: .done, tint: Theme.good)
-                    statusButton(status: .skipped, tint: Theme.warn)
-                    statusButton(status: .planned, tint: Theme.accent)
+                    statusButton(status: .done)
+                    statusButton(status: .skipped)
+                    statusButton(status: .planned)
                 }
             }
-            .buttonStyle(.bordered)
 
             Text(statusHelpText)
                 .font(.caption)
@@ -559,8 +569,9 @@ struct WorkoutDetailView: View {
         }
     }
 
-    private func statusButton(status: WorkoutStatus, tint: Color) -> some View {
-        Button(language.name(status)) {
+    private func statusButton(status: WorkoutStatus) -> some View {
+        let isSelected = workout.status == status
+        return Button {
             if workout.status == .done, workout.matchedActivityUUID != nil, status != .done {
                 do {
                     try PlanStore.unlink(workout, in: modelContext)
@@ -576,9 +587,15 @@ struct WorkoutDetailView: View {
                 workout.matchedActivityUUID = nil
             }
             NotificationCenter.default.post(name: .planDidChange, object: nil)
+        } label: {
+            Text(language.name(status))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(isSelected ? Theme.text : Theme.dim)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(isSelected ? Theme.accent : Theme.chip, in: Capsule())
         }
-        .tint(tint)
-        .disabled(workout.status == status || isChoosingSmartTime)
+        .buttonStyle(.plain)
+        .disabled(isSelected || isChoosingSmartTime)
         .frame(maxWidth: .infinity)
     }
 

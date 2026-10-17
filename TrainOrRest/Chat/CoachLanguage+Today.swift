@@ -317,6 +317,14 @@ struct TodayCopy {
         }
     }
 
+    var plannedSessionOverrideFailed: String {
+        switch language {
+        case .en: "Could not keep the planned session."
+        case .ja: "予定どおりのセッションを維持できませんでした。"
+        case .vi: "Không thể giữ buổi tập theo kế hoạch."
+        }
+    }
+
     func likely(_ verdict: ReadinessVerdict) -> String {
         let word = language.verdictWord(verdict)
         return switch language {

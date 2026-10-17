@@ -263,11 +263,17 @@ struct RootView: View {
             CoachTurnLogSettingsView()
         }
     }
+
+    /// Today's planned workout, or the next upcoming one, so the dev route
+    /// still renders on a rest day.
     private var todayWorkout: PlannedWorkout? {
         let workouts = (try? modelContext.fetch(
             FetchDescriptor<PlannedWorkout>(sortBy: [SortDescriptor(\.date)])
         )) ?? []
-        return workouts.first { Calendar.current.isDateInToday($0.date) }
+        if let today = workouts.first(where: { Calendar.current.isDateInToday($0.date) }) {
+            return today
+        }
+        return workouts.first { $0.date >= Calendar.current.startOfDay(for: .now) }
     }
 
     /// The newest seeded run that carries measured splits, so the splits

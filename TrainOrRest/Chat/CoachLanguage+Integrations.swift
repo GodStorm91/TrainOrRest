@@ -868,7 +868,7 @@ struct IntegrationsCopy {
 
     var runningShoes: String {
         switch language {
-        case .en: "Running Shoes"
+        case .en: "Running shoes"
         case .ja: "ランニングシューズ"
         case .vi: "Giày chạy"
         }

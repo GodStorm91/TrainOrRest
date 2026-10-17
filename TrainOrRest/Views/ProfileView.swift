@@ -34,13 +34,10 @@ struct ProfileView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, verticalSizeClass == .compact ? 4 : 12)
-            .padding(.bottom, 24)
             .torReadableColumn()
         }
+        .contentMargins(.bottom, TorTabDockMetrics.reservedBottomSpace, for: .scrollContent)
         .background(Theme.bg)
-        .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: 82)
-        }
         .scrollIndicators(.hidden)
         .sheet(isPresented: $showGoalEntry) { GoalEntryView() }
         .sheet(isPresented: $showAthleteProfile) { NavigationStack { AthleteProfileEditView() } }
@@ -75,7 +72,9 @@ struct ProfileView: View {
         TorCard {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 3) {
-                    TorEyebrow(language.settings.athleteEyebrow)
+                    Text(sentenceCase(language.settings.athleteEyebrow))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.dim)
                     Text(athleteDetailSummary)
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Theme.dim)
@@ -84,9 +83,13 @@ struct ProfileView: View {
 
                 let metrics = athleteMetrics
                 if !metrics.isEmpty {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 128), spacing: 10)], alignment: .leading, spacing: 10) {
-                        ForEach(metrics) { metric in
-                            MetricChip(metric: metric)
+                    VStack(spacing: 10) {
+                        ForEach(metrics.indices, id: \.self) { index in
+                            athleteMetricRow(metrics[index])
+                            if index < metrics.count - 1 {
+                                Divider()
+                                    .overlay(Theme.line)
+                            }
                         }
                     }
                 }
@@ -133,8 +136,9 @@ struct ProfileView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        TorEyebrow(language.settings.planStatusEyebrow(summary.health.status))
-                            .foregroundStyle(statusColor(summary.health.status))
+                        Text(sentenceCase(language.settings.planStatusEyebrow(summary.health.status)))
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Theme.dim)
                         Text(planTitle(summary))
                             .font(.title3.weight(.bold))
                             .foregroundStyle(Theme.text)
@@ -148,7 +152,7 @@ struct ProfileView: View {
                         if let detail = planStatusDetail(summary) {
                             Text(detail)
                                 .font(.subheadline.weight(.medium))
-                                .foregroundStyle(statusColor(summary.health.status))
+                                .foregroundStyle(summary.health.status == .active ? Theme.dim : statusColor(summary.health.status))
                                 .fixedSize(horizontal: false, vertical: true)
                                 .padding(.top, 2)
                         }
@@ -206,7 +210,9 @@ struct ProfileView: View {
                 .frame(width: 42, height: 42)
                 .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
             VStack(alignment: .leading, spacing: 4) {
-                TorEyebrow(language.settings.planEyebrow)
+                Text(sentenceCase(language.settings.planEyebrow))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.dim)
                 Text(language.settings.emptyPlanDescription)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Theme.dim)
@@ -291,6 +297,26 @@ struct ProfileView: View {
         }
     }
 
+    private func athleteMetricRow(_ metric: ProfileMetric) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(metric.label)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.dim)
+            Spacer(minLength: 16)
+            Text(metric.value)
+                .font(metric.isPace ? .system(.body, design: .monospaced).weight(.semibold) : .body.weight(.semibold))
+                .foregroundStyle(Theme.text)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func sentenceCase(_ text: String) -> String {
+        let lowercased = text.lowercased(with: language.uiLocale)
+        guard !lowercased.isEmpty else { return lowercased }
+        let firstCharacter = String(lowercased.prefix(1)).uppercased(with: language.uiLocale)
+        return firstCharacter + String(lowercased.dropFirst())
+    }
+
     private var athleteName: String {
         language.settings.athleteName
     }
@@ -318,7 +344,7 @@ struct ProfileView: View {
     private var athleteMetrics: [ProfileMetric] {
         var metrics: [ProfileMetric] = []
         if let pace = thresholdPaceText {
-            metrics.append(ProfileMetric(label: language.settings.thresholdPace, value: pace))
+            metrics.append(ProfileMetric(label: language.settings.thresholdPace, value: pace, isPace: true))
         }
         if let rhr = readiness.first(where: { $0.rhrMean7 != nil || $0.rhrMean28 != nil })?.rhrMean7
             ?? readiness.first(where: { $0.rhrMean28 != nil })?.rhrMean28 {
@@ -479,26 +505,7 @@ private struct ProfileMetric: Identifiable {
     let id = UUID()
     let label: String
     let value: String
-}
-
-private struct MetricChip: View {
-    let metric: ProfileMetric
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(metric.label)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(Theme.faint)
-            Text(metric.value)
-                .font(.headline.weight(.bold))
-                .foregroundStyle(Theme.text)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
-    }
+    var isPace: Bool = false
 }
 
 struct AthleteProfileEditView: View {

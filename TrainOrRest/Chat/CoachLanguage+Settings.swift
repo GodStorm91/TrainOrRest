@@ -59,7 +59,7 @@ struct SettingsCopy {
 
     var connectedServicesSection: String {
         switch language {
-        case .en: "Connected Services"
+        case .en: "Connected services"
         case .ja: "連携サービス"
         case .vi: "Dịch vụ đã kết nối"
         }
@@ -120,7 +120,7 @@ struct SettingsCopy {
 
     var watchDeliverySection: String {
         switch language {
-        case .en: "Watch Delivery"
+        case .en: "Watch delivery"
         case .ja: "ウォッチへの配信"
         case .vi: "Gửi đến đồng hồ"
         }
@@ -128,7 +128,7 @@ struct SettingsCopy {
 
     var watchPush: String {
         switch language {
-        case .en: "Watch Push"
+        case .en: "Watch push"
         case .ja: "ウォッチ送信"
         case .vi: "Gửi đến đồng hồ"
         }
@@ -136,7 +136,7 @@ struct SettingsCopy {
 
     var coachPersonalizationSection: String {
         switch language {
-        case .en: "Coach & Personalization"
+        case .en: "Coach & personalization"
         case .ja: "Coach とパーソナライズ"
         case .vi: "Coach & cá nhân hóa"
         }
@@ -144,7 +144,7 @@ struct SettingsCopy {
 
     var coachMemoryTitle: String {
         switch language {
-        case .en: "Coach Memory"
+        case .en: "Coach memory"
         case .ja: "Coach メモリー"
         case .vi: "Bộ nhớ Coach"
         }
@@ -168,7 +168,7 @@ struct SettingsCopy {
 
     var dataPrivacySection: String {
         switch language {
-        case .en: "Data & Privacy"
+        case .en: "Data & privacy"
         case .ja: "データとプライバシー"
         case .vi: "Dữ liệu & quyền riêng tư"
         }
@@ -442,7 +442,7 @@ struct SettingsCopy {
 
     var watchPushManagedFooter: String {
         switch language {
-        case .en: "Watch Push delivery is managed in Watch Delivery."
+        case .en: "Watch push delivery is managed in Watch delivery."
         case .ja: "ウォッチ送信は「ウォッチへの配信」で管理します。"
         case .vi: "Việc gửi đến đồng hồ được quản lý trong mục Gửi đến đồng hồ."
         }
@@ -651,7 +651,7 @@ struct SettingsCopy {
 
     var enableWatchPushPrompt: String {
         switch language {
-        case .en: "Turn on Watch Push in Watch Delivery to send workouts."
+        case .en: "Turn on Watch push in Watch delivery to send workouts."
         case .ja: "ワークアウトを送信するには「ウォッチへの配信」でウォッチ送信をオンにしてください。"
         case .vi: "Bật Gửi đến đồng hồ trong mục Gửi đến đồng hồ để gửi buổi tập."
         }
@@ -723,7 +723,7 @@ struct SettingsCopy {
 
     var watchDeliveryFooter: String {
         switch language {
-        case .en: "Watch Push sends planned workouts to your watch through intervals.icu, then Garmin Connect. Manage the intervals.icu connection under Connected Services."
+        case .en: "Watch push sends planned workouts to your watch through intervals.icu, then Garmin Connect. Manage the intervals.icu connection under Connected services."
         case .ja: "ウォッチ送信は、予定ワークアウトを intervals.icu 経由で Garmin Connect に送信し、ウォッチへ配信します。intervals.icu の接続は「連携サービス」で管理できます。"
         case .vi: "Gửi đến đồng hồ chuyển các buổi tập đã lên kế hoạch qua intervals.icu, rồi đến Garmin Connect. Quản lý kết nối intervals.icu trong Dịch vụ đã kết nối."
         }
@@ -763,7 +763,7 @@ struct SettingsCopy {
 
     var watchPushIsOff: String {
         switch language {
-        case .en: "Watch Push is off"
+        case .en: "Watch push is off"
         case .ja: "ウォッチ送信はオフです"
         case .vi: "Gửi đến đồng hồ đang tắt"
         }
@@ -771,7 +771,7 @@ struct SettingsCopy {
 
     var turnOnWatchPush: String {
         switch language {
-        case .en: "Turn on Watch Push to send planned workouts to your watch."
+        case .en: "Turn on Watch push to send planned workouts to your watch."
         case .ja: "予定ワークアウトをウォッチに送信するにはウォッチ送信をオンにしてください。"
         case .vi: "Bật Gửi đến đồng hồ để gửi buổi tập đã lên kế hoạch đến đồng hồ."
         }
@@ -848,6 +848,14 @@ struct SettingsCopy {
         case .en: "Coach connected"
         case .ja: "Coach に接続済み"
         case .vi: "Đã kết nối Coach"
+        }
+    }
+
+    var coachConnectionUnverified: String {
+        switch language {
+        case .en: "Coach connection unverified"
+        case .ja: "Coach の接続は未確認です"
+        case .vi: "Kết nối Coach chưa được xác minh"
         }
     }
 

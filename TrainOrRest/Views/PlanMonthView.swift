@@ -15,11 +15,18 @@ struct PlanMonthView: View {
     var showsTodaysCall = true
     var displaysOnlyTodaysCall = false
     var phaseRibbon: PlanPhaseRibbonModel? = nil
-    @Query(sort: \RunningShoe.createdAt, order: .reverse) private var shoes: [RunningShoe]
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @EnvironmentObject private var reviewCoordinator: AdaptivePlanReviewCoordinator
     @EnvironmentObject private var runSchedule: RunScheduleController
-
+    @Query(sort: \RunningShoe.createdAt, order: .reverse) private var shoes: [RunningShoe]
+    @Query(sort: \DailyReadiness.date, order: .reverse) private var readinessDays: [DailyReadiness]
+    @Query(sort: \AdaptivePlanReview.updatedAt, order: .reverse) private var adaptiveReviews: [AdaptivePlanReview]
+    @Query private var syncStates: [SyncState]
+    @State private var plannedOverrideSaveFailed = false
     private let calendar = Calendar.current
     @ScaledMetric(relativeTo: .caption2) private var railWidth: CGFloat = 52
     private let summaryGutterWidth: CGFloat = 13
@@ -54,6 +61,16 @@ struct PlanMonthView: View {
         calendar.isDateInToday(selectedDate) ? .today : .otherDay
     }
 
+    private var bottomScrollContentMargin: CGFloat {
+        TorTabDockMetrics.reservedBottomSpace + (pinsGoogleCalendarStatus ? 44 : 0)
+    }
+
+    private var pinsGoogleCalendarStatus: Bool {
+        horizontalSizeClass != .regular
+            && verticalSizeClass != .compact
+            && !dynamicTypeSize.isAccessibilitySize
+    }
+
     private var regularMonthContentMaxWidth: CGFloat {
         7 * 96 + summaryGutterWidth + railWidth
     }
@@ -62,10 +79,10 @@ struct PlanMonthView: View {
     var body: some View {
         if displaysOnlyTodaysCall {
             VStack(alignment: .leading, spacing: 12) {
-                AdaptivePlanReviewSlot()
                 if selectedDateFocus == .today {
                     todaysCall
                 }
+                calendarPlanReviewSlot
             }
         } else {
             let index = MonthIndex(
@@ -77,15 +94,15 @@ struct PlanMonthView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        if showsTodaysCall {
-                            AdaptivePlanReviewSlot()
-                        }
                         if showsTodaysCall && selectedDateFocus == .today {
                             todaysCall
                         }
+                        if showsTodaysCall {
+                            calendarPlanReviewSlot
+                        }
                         monthNav
                         if let phaseRibbon {
-                            PlanPhaseRibbonView(
+                            CalendarPlanPhaseRibbon(
                                 model: phaseRibbon,
                                 language: language,
                                 onSelectWeek: selectPlanWeek
@@ -117,8 +134,8 @@ struct PlanMonthView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 6)
-                    .padding(.bottom, 24)
                 }
+                .contentMargins(.bottom, bottomScrollContentMargin, for: .scrollContent)
                 .scrollIndicators(.hidden)
                 .onChange(of: selectedDate) { _, newValue in
                     scrollToSelectedDay(proxy, selectedDate: newValue)
@@ -194,9 +211,45 @@ struct PlanMonthView: View {
 
     private func selectPlanWeek(_ weekIndex: Int) {
         guard let weekStart = phaseRibbon?.weekStart(for: weekIndex) else { return }
-        withAnimation(.easeOut(duration: 0.2)) {
+        if reduceMotion {
             selectedDate = weekStart
             monthAnchor = weekStart
+        } else {
+            withAnimation(.easeOut(duration: 0.2)) {
+                selectedDate = weekStart
+                monthAnchor = weekStart
+            }
+        }
+    }
+
+    private var activeAdaptiveReview: AdaptivePlanReview? {
+        adaptiveReviews.first { $0.phase != .dismissed }
+    }
+
+    private var canStartManualReview: Bool {
+        guard let review = activeAdaptiveReview else { return true }
+        switch review.phase {
+        case .needsKey:
+            return reviewCoordinator.selectedCoachIsConnected()
+        case .noChange, .applied, .reverted, .superseded:
+            return true
+        default:
+            return false
+        }
+    }
+
+    @ViewBuilder
+    private var calendarPlanReviewSlot: some View {
+        if canStartManualReview {
+            Button(language.plan.reviewNextSevenDays) {
+                Task { await reviewCoordinator.beginManualReview(activityID: nil, in: modelContext) }
+            }
+            .buttonStyle(.bordered)
+            .tint(Theme.accent)
+            .font(.subheadline.weight(.semibold))
+            .accessibilityLabel(language.plan.reviewNextSevenDays)
+        } else {
+            AdaptivePlanReviewSlot()
         }
     }
 
@@ -615,101 +668,24 @@ struct PlanMonthView: View {
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
     }
 
-    /// The bold hero for today's prescription: a graphite-glass card whose peak
-    /// is the workout word, not color. Kind reads from the glyph shape and the
-    /// word; violet appears only on the interactive Coach action.
-    @ViewBuilder
     private func todaysCallHero(workout: PlannedWorkout?) -> some View {
-        if let workout {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .top, spacing: 14) {
-                    Image(systemName: workout.kind?.symbolName ?? "figure.run")
-                        .font(.system(size: 26, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Theme.text)
-                        .frame(width: 52, height: 52)
-                        .background(Theme.chip, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(workout.kind.map(language.name) ?? language.genericRunLabel)
-                            .font(.torHeading(30, .bold))
-                            .foregroundStyle(Theme.text)
-                            .fixedSize(horizontal: false, vertical: true)
-                        workoutMetricLine(workout)
-                        if let why = purpose(workout) {
-                            Text(why)
-                                .font(.footnote.weight(.medium))
-                                .foregroundStyle(Theme.dim)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        receiptLine(workout)
-                        if let shoe = assignedShoe(for: workout) {
-                            HStack(spacing: 5) {
-                                Image(systemName: "shoeprints.fill")
-                                Text(workout.shoeAssignmentSource == .auto ? "\(shoe.displayName) · \(language.plan.autoLabel)" : shoe.displayName)
-                            }
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Theme.dim)
-                        }
-                    }
-                    Spacer(minLength: 8)
-                    statusBadge(workout, isToday: true)
-                }
-                actionRow(workout)
+        VStack(alignment: .leading, spacing: 8) {
+            VerdictBannerView(
+                readiness: todayReadiness,
+                workout: workout,
+                lastSyncAt: latestSyncAt,
+                language: language,
+                onKeepPlanned: keepPlannedSession
+            )
+
+            if plannedOverrideSaveFailed {
+                Text(language.today.plannedSessionOverrideFailed)
+                    .font(.caption)
+                    .foregroundStyle(Theme.bad)
             }
-            .padding(18)
-            .torGlass(cornerRadius: 26, tint: .graphite)
-        } else {
-            HStack(spacing: 14) {
-                Image(systemName: "moon.zzz.fill")
-                    .font(.system(size: 24, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Theme.dim)
-                    .frame(width: 52, height: 52)
-                    .background(Theme.chip, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(language.restDayLabel)
-                        .font(.torHeading(30, .bold))
-                        .foregroundStyle(Theme.text)
-                    Text(language.plan.recoveryAndAdaptation)
-                        .foregroundStyle(Theme.dim)
-                }
-                Spacer(minLength: 8)
-            }
-            .padding(18)
-            .torGlass(cornerRadius: 26, tint: .graphite)
         }
     }
 
-    private func planReceipt(_ workout: PlannedWorkout) -> (symbol: String, tint: Color, text: String) {
-        let phase = TrainingPhase(rawValue: workout.phaseRaw).map(language.name) ?? language.plan.trainingPlanTitle
-        switch workout.scheduleUpdatedFrom {
-        case "googleCalendar"?:
-            return ("calendar.badge.clock", Theme.dim, language.plan.planReceipt(phase: phase, source: .calendar))
-        case .some(let source) where source != "smartSchedulingUndo":
-            return ("arrow.turn.up.right", Theme.dim, language.plan.planReceipt(phase: phase, source: .moved))
-        default:
-            return ("checkmark.seal.fill", Theme.good, language.plan.planReceipt(phase: phase, source: .onPlan))
-        }
-    }
-
-    @ViewBuilder
-    private func receiptLine(_ workout: PlannedWorkout) -> some View {
-        let receipt = planReceipt(workout)
-        HStack(spacing: 5) {
-            Image(systemName: receipt.symbol)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(receipt.tint)
-            Text(receipt.text)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(Theme.dim)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.top, 2)
-    }
-
-    /// The plain-language reason this session sits on today's plan - the "why"
-    /// behind the prescription, from the workout's role in the training block.
-    private func purpose(_ workout: PlannedWorkout) -> String? {
-        workout.kind.map(language.plan.workoutPurpose)
-    }
 
 
     private var selectedDayEyebrow: String {
@@ -919,21 +895,6 @@ struct PlanMonthView: View {
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
     }
 
-    private func workoutMetricLine(_ workout: PlannedWorkout) -> some View {
-        let parts = subtitleParts(workout)
-        return ViewThatFits(in: .horizontal) {
-            Text(parts.joined(separator: " · "))
-                .fixedSize(horizontal: true, vertical: false)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(parts[0])
-                if parts.count > 1 {
-                    Text(parts.dropFirst().joined(separator: " · "))
-                }
-            }
-        }
-        .font(.system(.footnote, design: .monospaced).weight(.medium))
-        .foregroundStyle(Theme.dim)
-    }
 
     private func subtitle(_ workout: PlannedWorkout) -> String {
         subtitleParts(workout).joined(separator: " · ")
@@ -967,6 +928,25 @@ struct PlanMonthView: View {
         Formatters.kilometers(activity.distanceMeters).replacingOccurrences(of: " ", with: "")
     }
 
+    private var todayReadiness: DailyReadiness? {
+        readinessDays.first { calendar.isDateInToday($0.date) }
+    }
+
+    private var latestSyncAt: Date? {
+        syncStates.compactMap(\.lastSyncAt).max()
+    }
+
+    private func keepPlannedSession(for rule: ReadinessRule) {
+        modelContext.insert(RuleOverride(date: calendar.startOfDay(for: .now), rule: rule))
+        do {
+            try modelContext.save()
+            _ = try ReadinessStore.runDailyPipeline(in: modelContext, today: .now, calendar: calendar)
+            plannedOverrideSaveFailed = false
+        } catch {
+            plannedOverrideSaveFailed = true
+        }
+    }
+
     // MARK: - Helpers
 
     private func dayTrainingGroup(on date: Date) -> DayTrainingGroup {
@@ -987,5 +967,131 @@ struct PlanMonthView: View {
     private func assignedShoe(for workout: PlannedWorkout) -> RunningShoe? {
         guard let shoeID = workout.shoeID else { return nil }
         return shoes.first { $0.id == shoeID }
+    }
+}
+
+private struct CalendarPlanPhaseRibbon: View {
+    let model: PlanPhaseRibbonModel
+    let language: CoachLanguage
+    let onSelectWeek: (Int) -> Void
+
+    private let minimumSegmentWidth: CGFloat = 160
+    private let weekWidth: CGFloat = 56
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(model.segments) { segment in
+                    segmentView(segment)
+                }
+            }
+            .padding(.horizontal, 1)
+            .padding(.trailing, 16)
+        }
+        .scrollIndicators(.hidden)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func segmentView(_ segment: PlanPhaseRibbonModel.Segment) -> some View {
+        let isActive = segment.id == model.activeSegmentID
+        let segmentWidth = max(minimumSegmentWidth, weekWidth * CGFloat(segment.weekCount) + 20)
+        let contentWeekWidth = max(38, (segmentWidth - 20) / CGFloat(max(segment.weekCount, 1)))
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Button {
+                onSelectWeek(segment.ticks.first(where: \.isCurrent)?.weekIndex ?? segment.startWeekIndex)
+            } label: {
+                Text(segmentLabel(segment, isActive: isActive))
+                    .font(.caption.weight(isActive ? .semibold : .medium))
+                    .foregroundStyle(isActive ? Theme.text : Theme.dim)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.86)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(segmentAccessibilityLabel(segment, isActive: isActive))
+
+            HStack(spacing: 0) {
+                ForEach(segment.ticks) { tick in
+                    tickButton(tick)
+                        .frame(width: contentWeekWidth)
+                }
+            }
+        }
+        .padding(10)
+        .frame(width: segmentWidth, alignment: .leading)
+        .background(isActive ? Theme.accentSoft : Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(isActive ? Theme.accent : Theme.border, lineWidth: 1)
+        )
+    }
+
+    private func tickButton(_ tick: PlanPhaseRibbonModel.Tick) -> some View {
+        Button {
+            onSelectWeek(tick.weekIndex)
+        } label: {
+            VStack(spacing: 4) {
+                ZStack(alignment: .topTrailing) {
+                    Circle()
+                        .fill(tick.isCurrent ? Theme.accent : Theme.card)
+                        .overlay(Circle().strokeBorder(tick.isCurrent ? Theme.accent : Theme.border, lineWidth: 1))
+                        .frame(width: 20, height: 20)
+
+                    if tick.isDown {
+                        Image(systemName: "arrow.down")
+                            .font(.system(size: 7, weight: .bold))
+                            .foregroundStyle(Theme.dim)
+                            .padding(2)
+                            .background(Theme.card, in: Circle())
+                            .offset(x: 5, y: -5)
+                    }
+                }
+                .frame(width: 24, height: 24)
+
+                if let target = tick.targetVolumeKm {
+                    Text("\(Int(target.rounded()))")
+                        .font(.caption2.weight(.medium).monospacedDigit())
+                        .foregroundStyle(Theme.faint)
+                        .lineLimit(1)
+                }
+            }
+            .frame(minHeight: 38)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(tickAccessibilityLabel(tick))
+        .accessibilityAddTraits(tick.isCurrent ? .isSelected : [])
+    }
+
+    private func segmentLabel(_ segment: PlanPhaseRibbonModel.Segment, isActive: Bool) -> String {
+        let name = language.name(segment.phase)
+        guard isActive, let currentWeek = segment.currentWeekInSegment else { return name }
+        return "\(name) · \(currentWeek)/\(segment.weekCount)"
+    }
+
+    private func segmentAccessibilityLabel(_ segment: PlanPhaseRibbonModel.Segment, isActive: Bool) -> String {
+        let name = language.name(segment.phase)
+        guard isActive, let currentWeek = segment.currentWeekInSegment else { return name }
+        return "\(name), \(language.plan.phaseProgress(week: currentWeek, total: segment.weekCount))"
+    }
+
+    private func tickAccessibilityLabel(_ tick: PlanPhaseRibbonModel.Tick) -> String {
+        var parts = [language.plan.weekOfTotal(tick.weekIndex + 1, total: totalWeeks)]
+        if let target = tick.targetVolumeKm {
+            parts.append("\(Int(target.rounded())) km")
+        }
+        if tick.isCurrent {
+            parts.append(language.plan.thisWeek)
+        }
+        if tick.isDown {
+            parts.append(language.recoveryLabel)
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    private var totalWeeks: Int {
+        model.segments.reduce(0) { $0 + $1.weekCount }
     }
 }

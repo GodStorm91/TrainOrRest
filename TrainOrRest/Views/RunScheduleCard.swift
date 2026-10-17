@@ -43,7 +43,11 @@ struct TodayWeatherEvidenceRow: View {
         Group {
             if needsSetup {
                 Button(action: onSetup) {
-                    Label(language.plan.addWeatherForRun, systemImage: "cloud.sun")
+                    HStack(spacing: 8) {
+                        Image(systemName: "cloud.sun")
+                        Text(language.plan.addWeatherForRun)
+                    }
+                    .foregroundStyle(Theme.accent)
                 }
                 .accessibilityLabel(language.plan.addWeatherForRun)
             } else if isLoading {

@@ -63,7 +63,7 @@ enum CoachTurnReport {
     }
 
     static func bundle(limit: Int = defaultTurnLimit, in context: ModelContext) -> String {
-        let messages = fetchMessages(in: context, limit: limit * 2)
+        let messages = bundleMessages(limit: limit, in: context)
         let now = Date.now
         let window = messages.first.map {
             DateInterval(start: min($0.date, now), end: now.addingTimeInterval(planEditWindow))
@@ -96,7 +96,11 @@ enum CoachTurnReport {
     }
 
     static func recordedTurnCount(in context: ModelContext) -> Int {
-        (try? context.fetchCount(FetchDescriptor<CoachRequestSnapshot>())) ?? 0
+        min(bundleMessages(limit: defaultTurnLimit, in: context).count, defaultTurnLimit)
+    }
+
+    private static func bundleMessages(limit: Int, in context: ModelContext) -> [ChatMessage] {
+        fetchMessages(in: context, limit: limit)
     }
 
     private static func planEdits(in context: ModelContext, within window: DateInterval) -> [PlanEditEntry] {

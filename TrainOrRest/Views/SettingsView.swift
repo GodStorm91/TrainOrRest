@@ -20,6 +20,9 @@ struct SettingsView: View {
     private var diagnostics: CoachDiagnosticsAvailability { .shared }
 
     var body: some View {
+        let calendarStatus = calendarConnectionStatus
+        let intervalsStatus = intervalsConnectionStatus
+
         Form {
             Section(language.settings.accountSection) {
                 NavigationLink {
@@ -44,18 +47,28 @@ struct SettingsView: View {
             }
 
             Section(language.settings.connectedServicesSection) {
-                settingsRow(language.settings.appleHealth, systemImage: "heart", value: language.settings.connected)
-                settingsRow(language.settings.garmin, systemImage: "figure.run", value: language.settings.viaAppleHealth)
+                settingsRow(language.settings.appleHealth, systemImage: "heart", value: language.settings.connected, valueColor: Theme.good)
+                settingsRow(language.settings.garmin, systemImage: "figure.run", value: language.settings.viaAppleHealth, valueColor: Theme.good)
                 NavigationLink {
                     CalendarsSettingsView()
                 } label: {
-                    settingsRow(language.settings.calendarsTitle, systemImage: "calendar.badge.clock", value: googleCalendarSummary)
+                    settingsRow(
+                        language.settings.calendarsTitle,
+                        systemImage: "calendar.badge.clock",
+                        value: calendarStatus.summary,
+                        valueColor: calendarStatus.color
+                    )
                 }
                 .accessibilityLabel(language.settings.manageCalendarConnectionsAccessibilityLabel)
                 NavigationLink {
                     IntervalsConnectionSettingsView()
                 } label: {
-                    settingsRow(language.settings.intervalsICU, systemImage: "point.3.connected.trianglepath.dotted", value: intervalsStatusSummary)
+                    settingsRow(
+                        language.settings.intervalsICU,
+                        systemImage: "point.3.connected.trianglepath.dotted",
+                        value: intervalsStatus.summary,
+                        valueColor: intervalsStatus.color
+                    )
                 }
                 .accessibilityLabel(language.settings.manageIntervalsConnectionAccessibilityLabel)
             }
@@ -81,10 +94,14 @@ struct SettingsView: View {
                 }
             }
 
-
             Section(language.settings.dataPrivacySection) {
                 Link(destination: URL(string: UIApplication.openSettingsURLString)!) {
-                    settingsRow(language.settings.healthDataPermissions, systemImage: "lock.shield", value: language.settings.iOSSettings)
+                    settingsRow(
+                        language.settings.healthDataPermissions,
+                        systemImage: "lock.shield",
+                        value: language.settings.iOSSettings,
+                        showsDisclosure: true
+                    )
                 }
                 settingsRow(language.settings.dataStorage, systemImage: "externaldrive", value: language.settings.onThisDevice)
                 if diagnostics.isEnabled {
@@ -100,6 +117,8 @@ struct SettingsView: View {
                 settingsRow(language.settings.aboutTrainOrRest, systemImage: "info.circle", value: Bundle.main.appVersionSummary)
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.bg)
         .navigationTitle(language.settings.settingsTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -112,19 +131,30 @@ struct SettingsView: View {
         }
     }
 
-    private func settingsRow(_ title: String, systemImage: String, value: String? = nil) -> some View {
+    private func settingsRow(
+        _ title: String,
+        systemImage: String,
+        value: String? = nil,
+        valueColor: Color = Theme.dim,
+        showsDisclosure: Bool = false
+    ) -> some View {
         HStack(spacing: 12) {
             Image(systemName: systemImage)
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(Theme.dim)
                 .frame(width: 24)
             Text(title)
             Spacer()
             if let value, !value.isEmpty {
                 Text(value)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(valueColor)
                     .multilineTextAlignment(.trailing)
+            }
+            if showsDisclosure {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.dim)
             }
         }
         .frame(minHeight: 44)
@@ -135,16 +165,19 @@ struct SettingsView: View {
         return language.settings.notComplete
     }
 
-    private var intervalsStatusSummary: String {
+    private var intervalsConnectionStatus: (summary: String, color: Color) {
         switch intervalsConnection.state {
         case .connected(let connection):
-            return connection.method == .oauth
-                ? language.settings.oauthConnected
-                : language.settings.apiKeyConnected
+            return (
+                connection.method == .oauth
+                    ? language.settings.oauthConnected
+                    : language.settings.apiKeyConnected,
+                Theme.good
+            )
         case .needsReconnect:
-            return language.settings.needsAttention
+            return (language.settings.needsAttention, Theme.dim)
         case .disconnected:
-            return language.settings.notConnected
+            return (language.settings.notConnected, Theme.dim)
         }
     }
 
@@ -154,14 +187,19 @@ struct SettingsView: View {
         return language.settings.on
     }
 
-    private var googleCalendarSummary: String {
+    private var calendarConnectionStatus: (summary: String, color: Color) {
         let connection = googleCalendar.connection()
         switch connection.connectionStatus {
-        case .connected: return language.settings.googleConnected
-        case .syncing, .initialSync: return language.settings.syncing
-        case .needsReconnect, .calendarMissing, .partialFailure: return language.settings.needsAttention
-        case .offlineQueued: return language.settings.queued
-        default: return language.settings.notConnected
+        case .connected:
+            return (language.settings.googleConnected, Theme.good)
+        case .syncing, .initialSync:
+            return (language.settings.syncing, Theme.dim)
+        case .needsReconnect, .calendarMissing, .partialFailure:
+            return (language.settings.needsAttention, Theme.dim)
+        case .offlineQueued:
+            return (language.settings.queued, Theme.dim)
+        default:
+            return (language.settings.notConnected, Theme.dim)
         }
     }
 
@@ -574,7 +612,7 @@ struct WatchDeliverySettingsView: View {
 
     private var language: CoachLanguage { CoachLanguage(rawValue: languageRaw) ?? .en }
     private var isConnected: Bool { connection.state.isConnected }
-
+    private var canSyncNow: Bool { isConnected && watchPushEnabled && !isSyncing }
     var body: some View {
         Form {
             Section {
@@ -592,22 +630,42 @@ struct WatchDeliverySettingsView: View {
                     NavigationLink {
                         IntervalsConnectionSettingsView()
                     } label: {
-                        Label(language.settings.connectIntervals, systemImage: "link.badge.plus")
+                        HStack(spacing: 12) {
+                            Image(systemName: "link.badge.plus")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Theme.accent)
+                                .frame(width: 24)
+                            Text(language.settings.connectIntervals)
+                        }
+                        .frame(minHeight: 44)
                     }
                 }
                 Toggle(language.settings.watchPush, isOn: $watchPushEnabled)
+                    .tint(Theme.accent)
                     .frame(minHeight: 44)
                     .disabled(!isConnected)
+                    .opacity(isConnected ? 1 : 0.55)
                 Button {
                     syncNow()
                 } label: {
-                    if isSyncing {
-                        ProgressView()
-                    } else {
-                        Label(language.settings.syncNow, systemImage: "arrow.triangle.2.circlepath")
+                    HStack(spacing: 12) {
+                        if isSyncing {
+                            ProgressView()
+                                .tint(Theme.accent)
+                                .frame(width: 24)
+                        } else {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(canSyncNow ? Theme.accent : Theme.faint)
+                                .frame(width: 24)
+                        }
+                        Text(language.settings.syncNow)
+                            .foregroundStyle(canSyncNow ? Theme.text : Theme.faint)
                     }
+                    .frame(minHeight: 44)
                 }
-                .disabled(isSyncing || !watchPushEnabled || !isConnected)
+                .disabled(!canSyncNow)
+                .opacity(canSyncNow ? 1 : 0.55)
             } footer: {
                 Text(language.settings.watchDeliveryFooter)
             }
@@ -622,6 +680,8 @@ struct WatchDeliverySettingsView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.bg)
         .navigationTitle(language.settings.watchDeliverySection)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { connection.reload() }
@@ -629,7 +689,7 @@ struct WatchDeliverySettingsView: View {
 
     private var receipt: (symbol: String, tint: Color, title: String, message: String?, footnote: String?) {
         if !isConnected {
-            return ("link.badge.plus", Theme.warn, language.settings.intervalsNotConnected,
+            return ("link.badge.plus", Theme.dim, language.settings.intervalsNotConnected,
                     language.settings.connectIntervalsToDeliver, nil)
         }
         if !watchPushEnabled {
@@ -978,6 +1038,14 @@ struct CoachProviderSettingsView: View {
                                   title: copy.chatGPTSignInFailed, message: signInError)
         }
         let status = status
+        if case .keyConnected = status.kind {
+            return SettingsStatus(
+                symbol: "questionmark.circle",
+                tint: Theme.warn,
+                title: copy.coachConnectionUnverified,
+                message: status.message(copy, model: statusModelName)
+            )
+        }
         let tint: Color = status.isConnected ? Theme.good : (status.kind == .notConnected ? Theme.warn : Theme.bad)
         return SettingsStatus(symbol: status.symbol, tint: tint, title: status.title(copy),
                               message: status.message(copy, model: statusModelName))
@@ -1051,6 +1119,8 @@ struct CoachProviderSettingsView: View {
                 Text(copy.advancedOpenAIFooter)
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.bg)
         .navigationTitle(copy.coachProviderNavigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .chatGPTPlanNotice(isPresented: $showsPlanNotice, copy: copy)
@@ -1115,12 +1185,21 @@ struct CoachProviderSettingsView: View {
                 Button {
                     startGrokSignIn()
                 } label: {
-                    if isSigningInWithGrok {
-                        ProgressView()
-                    } else {
+                    HStack(spacing: 8) {
+                        if isSigningInWithGrok {
+                            ProgressView()
+                                .tint(Theme.accent)
+                        }
                         Label(copy.signInWithGrok, systemImage: "person.crop.circle.badge.plus")
+                            .font(.body.weight(.semibold))
                     }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
                 }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .tint(Theme.accent)
+                .foregroundStyle(Theme.accent)
                 .disabled(isSigningInWithGrok)
             case .authorizing(let userCode, let url):
                 Text(copy.grokEnterCode)
