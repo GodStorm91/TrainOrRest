@@ -22,7 +22,7 @@ struct PlanAdjustmentProposal: Codable, Equatable {
             self.date = date
             self.action = action
             self.detail = (action == .move || action == .swap) ? detail : nil
-            self.workout = workout
+            self.workout = (action == .create || action == .replace) ? workout : nil
         }
 
         init(from decoder: Decoder) throws {
@@ -62,6 +62,12 @@ struct PlanAdjustmentProposal: Codable, Equatable {
                action == .create || action == .replace {
                 throw workoutDecodeError
             }
+
+            // Only create and replace consume a workout. Models routinely echo
+            // the source session into a move, swap, rest or downgrade, where it
+            // has nowhere to go. Ignore it instead of failing an otherwise well
+            // formed edit.
+            if action != .create, action != .replace { workout = nil }
         }
 
         func encode(to encoder: Encoder) throws {
